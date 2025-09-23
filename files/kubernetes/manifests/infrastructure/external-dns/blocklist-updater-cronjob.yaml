@@ -7,7 +7,7 @@ metadata:
     app: external-unbound
     component: updater
 spec:
-  schedule: "0 2 * * *"  # 毎日 AM 2:00 UTC (日本時間 11:00)
+  schedule: "0 17 * * *"  # 毎日 17:00 UTC (日本時間 2:00)
   timeZone: "UTC"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
@@ -40,23 +40,31 @@ spec:
             - -c
             - |
               set -e
-              echo "=== External-Unbound Blocklist Auto-Updater ==="
+              echo "=== External-Unbound Hagezi RPZ Auto-Updater ==="
               echo "🕒 Update started at: $(date)"
               echo "🎯 Target: external-unbound deployment in external-dns namespace"
+              echo "🛡️  Protection: Hagezi Complete Protection (6-layer RPZ)"
               echo ""
               
               # 現在のPod情報取得
               echo "📋 Current pod status:"
               kubectl get pods -n external-dns -l app=external-unbound -o wide
               
-              # 現在のブロック数確認（ログから取得）
+              # 現在のHagezi RPZ状況確認（ログから取得）
               echo ""
-              echo "📊 Current blocklist status:"
+              echo "📊 Current Hagezi RPZ status:"
               CURRENT_POD=$(kubectl get pods -n external-dns -l app=external-unbound -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "none")
               if [ "$CURRENT_POD" != "none" ]; then
                 echo "   Pod: $CURRENT_POD"
-                BLOCKED_DOMAINS=$(kubectl logs -n external-dns "$CURRENT_POD" -c unbound | grep "📊 Blocked domains:" | tail -1 | awk '{print $4}' 2>/dev/null || echo "unknown")
-                echo "   Blocked domains: $BLOCKED_DOMAINS"
+
+                # Init Containerから総エントリー数取得
+                TOTAL_ENTRIES=$(kubectl logs -n external-dns "$CURRENT_POD" -c blocklist-downloader 2>/dev/null | grep "📊 Total Protected Entries:" | tail -1 | awk '{print $5}' 2>/dev/null || echo "unknown")
+                echo "   Total Protected Entries: $TOTAL_ENTRIES"
+
+                # RPZファイル数確認
+                RPZ_FILES=$(kubectl logs -n external-dns "$CURRENT_POD" -c blocklist-downloader 2>/dev/null | grep "📊 RPZ Files Downloaded:" | tail -1 | awk '{print $5}' 2>/dev/null || echo "unknown")
+                echo "   RPZ Files Loaded: $RPZ_FILES of 6"
+
                 POD_AGE=$(kubectl get pod -n external-dns "$CURRENT_POD" -o jsonpath='{.status.startTime}' 2>/dev/null || echo "unknown")
                 echo "   Pod started: $POD_AGE"
               else
@@ -107,21 +115,25 @@ spec:
               echo "🎉 Update completed! New pod status:"
               kubectl get pods -n external-dns -l app=external-unbound -o wide
               
-              # 新しいブロック数確認
+              # 新しいHagezi RPZ状況確認
               echo ""
-              echo "📊 Updated blocklist status:"
+              echo "📊 Updated Hagezi RPZ status:"
               NEW_POD=$(kubectl get pods -n external-dns -l app=external-unbound -o jsonpath='{.items[0].metadata.name}')
               echo "   New Pod: $NEW_POD"
-              
-              # Init Containerログからブロック数取得（数秒待つ）
+
+              # Init Containerログから統計取得（数秒待つ）
               echo "   Waiting for init container completion..."
               sleep 30
-              
+
               # 新PodのInit Containerが完了するまで待機
               kubectl wait --for=condition=Initialized pod "$NEW_POD" -n external-dns --timeout=300s >/dev/null 2>&1 || true
-              
-              NEW_BLOCKED_DOMAINS=$(kubectl logs -n external-dns "$NEW_POD" -c blocklist-downloader 2>/dev/null | grep "📊 Total blocked domains:" | tail -1 | awk '{print $5}' 2>/dev/null || echo "pending")
-              echo "   New blocked domains: $NEW_BLOCKED_DOMAINS"
+
+              # Hagezi RPZ統計取得
+              NEW_TOTAL_ENTRIES=$(kubectl logs -n external-dns "$NEW_POD" -c blocklist-downloader 2>/dev/null | grep "📊 Total Protected Entries:" | tail -1 | awk '{print $5}' 2>/dev/null || echo "pending")
+              NEW_RPZ_FILES=$(kubectl logs -n external-dns "$NEW_POD" -c blocklist-downloader 2>/dev/null | grep "📊 RPZ Files Downloaded:" | tail -1 | awk '{print $5}' 2>/dev/null || echo "pending")
+
+              echo "   New Total Protected Entries: $NEW_TOTAL_ENTRIES"
+              echo "   New RPZ Files Loaded: $NEW_RPZ_FILES of 6"
               
               # DNS動作確認
               echo ""
@@ -141,12 +153,15 @@ spec:
               fi
               
               echo ""
-              echo "=== Auto-update Summary ==="
+              echo "=== Hagezi RPZ Auto-update Summary ==="
               echo "🕒 Completed at: $(date)"
-              echo "📊 Previous domains: $BLOCKED_DOMAINS"
-              echo "📊 Updated domains: $NEW_BLOCKED_DOMAINS"
+              echo "📊 Previous Total Entries: $TOTAL_ENTRIES"
+              echo "📊 Updated Total Entries: $NEW_TOTAL_ENTRIES"
+              echo "📊 Previous RPZ Files: $RPZ_FILES of 6"
+              echo "📊 Updated RPZ Files: $NEW_RPZ_FILES of 6"
               echo "🎯 Pod: $CURRENT_POD → $NEW_POD"
-              echo "✅ Blocklist auto-update completed successfully"
+              echo "🛡️  Protection: Hagezi Complete (6-layer RPZ)"
+              echo "✅ Hagezi RPZ auto-update completed successfully"
               
             resources:
               requests:
