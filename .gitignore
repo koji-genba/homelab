@@ -1,0 +1,77 @@
+# ==========================================
+# OS固有ファイル
+# ==========================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+
+# ==========================================
+# エディタ・IDE
+# ==========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.iml
+.project
+.settings/
+
+# ==========================================
+# ログファイル
+# ==========================================
+*.log
+logs/
+crash.log
+crash.*.log
+
+# ==========================================
+# 環境変数・認証情報
+# ==========================================
+.env
+.env.local
+*.pem
+*.key
+
+# ==========================================
+# Kubernetes関連
+# ==========================================
+# secretファイル（テンプレートは除外しない）
+**/secret.yaml
+**/cloudflare-secret.yaml
+**/cloudflare-token.txt
+!**/secret.yaml.template
+!**/cloudflare-secret.yaml.template
+
+# ==========================================
+# Terraform関連
+# ==========================================
+# ステートファイル
+*.tfstate
+*.tfstate.*
+
+# 変数ファイル
+terraform.tfvars
+*.auto.tfvars
+!terraform.tfvars.example
+
+# キャッシュディレクトリ
+.terraform/
+.terraform.d/
+
+# 実行計画ファイル
+*.tfplan
+
+# オーバーライドファイル
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+!example_override.tf
+
+# デバッグログ
+terraform-debug.log

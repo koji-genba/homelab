@@ -1,0 +1,58 @@
+# Kubernetes configuration
+kube_version: 1.31.1 
+kube_network_plugin: flannel
+kube_network_plugin_multus: false
+
+# Service subnet configuration  
+kube_service_addresses: 10.1.0.0/16
+kube_pods_subnet: 10.0.0.0/16
+
+# Internal network configuration
+kube_apiserver_port: 6443
+
+# DNS configuration
+dns_domain: cluster.local
+enable_nodelocaldns: true
+nodelocaldns_ip: 169.254.25.10
+resolvconf_mode: host_resolvconf
+
+# Container runtime
+container_manager: containerd
+containerd_version: 1.7.22
+
+# Network configuration
+kube_proxy_mode: ipvs
+kube_proxy_strict_arp: true  # MetalLB用
+
+# Feature gates
+kube_feature_gates:
+  - "RotateKubeletServerCertificate=true"
+
+# Cluster name
+cluster_name: k8s.kojigenba-srv.com
+
+# Enable metrics server
+metrics_server_enabled: true
+
+# Configure kubectl on master
+kubeconfig_localhost: true
+kubectl_localhost: true
+
+# Helm installation
+helm_enabled: true
+
+# Ingress controller
+ingress_nginx_enabled: false
+
+# Dashboard
+dashboard_enabled: false
+
+# Enable audit log
+kubernetes_audit: true
+
+# Disable swap
+disable_swap: true
+
+# Additional features for v2.28
+etcd_deployment_type: host
+etcd_version: 3.5.16

@@ -1,0 +1,205 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: blocklist-updater
+  namespace: external-dns
+  labels:
+    app: external-unbound
+    component: updater
+spec:
+  schedule: "0 2 * * *"  # 毎日 AM 2:00 UTC (日本時間 11:00)
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    metadata:
+      labels:
+        app: blocklist-updater
+        component: updater-job
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 900  # 15分でタイムアウト
+      template:
+        metadata:
+          labels:
+            app: blocklist-updater
+            component: updater-pod
+        spec:
+          restartPolicy: Never
+          
+          # ServiceAccount設定（Pod削除権限）
+          serviceAccountName: blocklist-updater
+          
+          containers:
+          - name: updater
+            image: bitnami/kubectl:latest
+            command: ["/bin/bash"]
+            args:
+            - -c
+            - |
+              set -e
+              echo "=== External-Unbound Blocklist Auto-Updater ==="
+              echo "🕒 Update started at: $(date)"
+              echo "🎯 Target: external-unbound deployment in external-dns namespace"
+              echo ""
+              
+              # 現在のPod情報取得
+              echo "📋 Current pod status:"
+              kubectl get pods -n external-dns -l app=external-unbound -o wide
+              
+              # 現在のブロック数確認（ログから取得）
+              echo ""
+              echo "📊 Current blocklist status:"
+              CURRENT_POD=$(kubectl get pods -n external-dns -l app=external-unbound -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "none")
+              if [ "$CURRENT_POD" != "none" ]; then
+                echo "   Pod: $CURRENT_POD"
+                BLOCKED_DOMAINS=$(kubectl logs -n external-dns "$CURRENT_POD" -c unbound | grep "📊 Blocked domains:" | tail -1 | awk '{print $4}' 2>/dev/null || echo "unknown")
+                echo "   Blocked domains: $BLOCKED_DOMAINS"
+                POD_AGE=$(kubectl get pod -n external-dns "$CURRENT_POD" -o jsonpath='{.status.startTime}' 2>/dev/null || echo "unknown")
+                echo "   Pod started: $POD_AGE"
+              else
+                echo "   No pods found!"
+                exit 1
+              fi
+              
+              echo ""
+              echo "🔄 Triggering pod restart for blocklist update..."
+              echo "   Method: Delete existing pods (Deployment will recreate automatically)"
+              
+              # Pod削除（Deploymentが自動的に再作成）- CronJob自身は除外
+              kubectl delete pods -n external-dns -l app=external-unbound,version=v2.0 --wait=false
+              
+              echo "✅ Pod deletion initiated"
+              echo ""
+              echo "⏳ Waiting for DNS service to be ready..."
+              echo "   Method: Simple pod status check"
+              
+              # UnboundのPod状態確認
+              WAIT_COUNT=0
+              MAX_WAIT=60  # 最大10分（10秒×60回）
+              
+              while [ $WAIT_COUNT -lt $MAX_WAIT ]; do
+                WAIT_COUNT=$((WAIT_COUNT + 1))
+                echo "   Checking pod status... (attempt $WAIT_COUNT/$MAX_WAIT)"
+                
+                # Ready状態のUnboundポッドが存在するか確認
+                if kubectl get pods -n external-dns -l app=external-unbound | grep -q "1/1.*Running"; then
+                  echo "   ✅ DNS service pods are ready"
+                  break
+                fi
+                
+                sleep 10
+              done
+              
+              if [ $WAIT_COUNT -ge $MAX_WAIT ]; then
+                echo "   ❌ DNS service failed to be ready after $((MAX_WAIT * 10)) seconds"
+                exit 1
+              fi
+              
+              # 新Pod情報取得（統計表示用）
+              sleep 5
+              NEW_POD=$(kubectl get pods -n external-dns -l app=external-unbound -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "unknown")
+              
+              # 更新結果確認
+              echo ""
+              echo "🎉 Update completed! New pod status:"
+              kubectl get pods -n external-dns -l app=external-unbound -o wide
+              
+              # 新しいブロック数確認
+              echo ""
+              echo "📊 Updated blocklist status:"
+              NEW_POD=$(kubectl get pods -n external-dns -l app=external-unbound -o jsonpath='{.items[0].metadata.name}')
+              echo "   New Pod: $NEW_POD"
+              
+              # Init Containerログからブロック数取得（数秒待つ）
+              echo "   Waiting for init container completion..."
+              sleep 30
+              
+              # 新PodのInit Containerが完了するまで待機
+              kubectl wait --for=condition=Initialized pod "$NEW_POD" -n external-dns --timeout=300s >/dev/null 2>&1 || true
+              
+              NEW_BLOCKED_DOMAINS=$(kubectl logs -n external-dns "$NEW_POD" -c blocklist-downloader 2>/dev/null | grep "📊 Total blocked domains:" | tail -1 | awk '{print $5}' 2>/dev/null || echo "pending")
+              echo "   New blocked domains: $NEW_BLOCKED_DOMAINS"
+              
+              # DNS動作確認
+              echo ""
+              echo "🔍 Verifying DNS functionality:"
+              if kubectl exec -n external-dns "$NEW_POD" -- dig @127.0.0.1 -p 5353 google.com +short +time=5 | grep -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" >/dev/null 2>&1; then
+                echo "   ✅ DNS resolution: Working"
+              else
+                echo "   ❌ DNS resolution: Failed"
+                exit 1
+              fi
+              
+              # ブロック機能確認
+              if kubectl exec -n external-dns "$NEW_POD" -- dig @127.0.0.1 -p 5353 doubleclick.net +short +time=5 2>/dev/null | grep -E "(^$|NXDOMAIN|0\.0\.0\.0)" >/dev/null; then
+                echo "   ✅ Ad blocking: Working"
+              else
+                echo "   ⚠️  Ad blocking: Different response (may be normal)"
+              fi
+              
+              echo ""
+              echo "=== Auto-update Summary ==="
+              echo "🕒 Completed at: $(date)"
+              echo "📊 Previous domains: $BLOCKED_DOMAINS"
+              echo "📊 Updated domains: $NEW_BLOCKED_DOMAINS"
+              echo "🎯 Pod: $CURRENT_POD → $NEW_POD"
+              echo "✅ Blocklist auto-update completed successfully"
+              
+            resources:
+              requests:
+                memory: "64Mi"
+                cpu: "100m"
+              limits:
+                memory: "128Mi"
+                cpu: "200m"
+---
+# ServiceAccount for CronJob
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: blocklist-updater
+  namespace: external-dns
+  labels:
+    app: external-unbound
+    component: updater-sa
+---
+# ClusterRole with necessary permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: external-dns
+  name: blocklist-updater
+  labels:
+    app: external-unbound
+    component: updater-role
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "delete"]
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get"]
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["create"]
+---
+# RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: blocklist-updater
+  namespace: external-dns
+  labels:
+    app: external-unbound
+    component: updater-rb
+subjects:
+- kind: ServiceAccount
+  name: blocklist-updater
+  namespace: external-dns
+roleRef:
+  kind: Role
+  name: blocklist-updater
+  apiGroup: rbac.authorization.k8s.io

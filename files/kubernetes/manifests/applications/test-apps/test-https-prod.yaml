@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: test-hello-https-prod
+  namespace: default
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod  # Production
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - test.kojigenba-srv.com
+    secretName: test-hello-tls-prod  # Production用Secret
+  rules:
+  - host: test.kojigenba-srv.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: test-hello-service
+            port:
+              number: 80

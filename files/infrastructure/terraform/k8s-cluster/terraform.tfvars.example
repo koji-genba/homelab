@@ -1,0 +1,19 @@
+# Proxmox API credentials
+proxmox_password = "your-proxmox-password"
+
+# SSH public key for VM access
+# Generate with: ssh-keygen -t ed25519 -f ~/.ssh/k8s_ed25519 -C "k8s-cluster"
+# Then copy the public key: cat ~/.ssh/k8s_ed25519.pub
+ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... user@host"
+
+# Optional: Override default values if needed
+# proxmox_endpoint = "https://192.168.10.11:8006/"
+# proxmox_username = "root@pam"
+# node_name = "pve"
+# datastore_id = "vmpool"
+# template_vm_id = 9000
+# network_bridge = "vmbr0"
+# network_vlan = 10
+# gateway = "192.168.10.1"
+# dns_servers = ["192.168.10.1", "8.8.8.8"]
+# domain = "kojigenba-srv.com"

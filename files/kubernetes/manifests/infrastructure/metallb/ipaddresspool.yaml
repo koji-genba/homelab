@@ -1,0 +1,10 @@
+# ipaddresspool.yaml
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: homelab-pool
+  namespace: metallb-system
+spec:
+  addresses:
+  - 192.168.11.100-192.168.11.200
+  avoidBuggyIPs: true

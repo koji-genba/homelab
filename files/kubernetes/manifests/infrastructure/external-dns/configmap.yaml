@@ -1,0 +1,166 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: external-unbound-config
+  namespace: external-dns
+  labels:
+    app: external-unbound
+    component: config
+    version: v1.3
+data:
+  unbound.conf: |
+    #
+    # External-Unbound Configuration v1.3
+    # Purpose: DNS server with ad-blocking via local-zones
+    # Container: DNS-only (monitoring separated)
+    # Date: $(date -Iseconds)
+    #
+    
+    server:
+        # === 基本設定 ===
+        # ポート・インターフェース
+        port: 5353
+        interface: 0.0.0.0
+        interface: ::0
+        
+        # IPv6サポート（必要に応じて調整）
+        do-ip4: yes
+        do-ip6: yes
+        do-udp: yes
+        do-tcp: yes
+
+        # PIDファイル
+        pidfile: ""
+
+        # username指定(warning対処)
+        username: ""
+        
+        # === パフォーマンス設定 ===
+        # スレッド数（コンテナ環境：2CPU想定）
+        num-threads: 2
+        
+        # キャッシュサイズ
+        msg-cache-size: 25m
+        rrset-cache-size: 50m
+        key-cache-size: 4m
+        neg-cache-size: 1m
+        
+        # キャッシュ時間
+        cache-min-ttl: 300      # 最小5分
+        cache-max-ttl: 86400    # 最大1日
+        cache-max-negative-ttl: 3600  # ネガティブ1時間
+        
+        # === セキュリティ設定 ===
+        # DNSSEC検証（無効化 - trust anchor問題回避）
+        # auto-trust-anchor-file: "/opt/unbound/var/lib/unbound/root.key"
+        # val-clean-additional: yes
+        # val-permissive-mode: no
+        
+        # キャッシュポイズニングとかリバインディングを一応対策
+        use-caps-for-id: yes
+        private-address: 10.0.0.0/8
+        private-address: 172.16.0.0/12
+        private-address: 192.168.0.0/16
+        private-address: 169.254.0.0/16
+        private-address: fd00::/8
+        private-address: fe80::/10
+        
+        # プライバシー保護
+        qname-minimisation: yes
+        aggressive-nsec: yes
+        
+        # === アクセス制御 ===
+        # 内部ネットワークのみ許可
+        access-control: 127.0.0.0/8 allow
+        access-control: 10.0.0.0/8 allow
+        access-control: 172.16.0.0/12 allow
+        access-control: 192.168.0.0/16 allow
+        access-control: 0.0.0.0/0 refuse
+        access-control: ::0/0 refuse
+        access-control: ::1 allow
+        
+        # === ログ設定 ===
+        # ログレベル（1=operational, 2=detailed, 3=query）
+        verbosity: 1
+        log-queries: no
+        log-replies: no
+        logfile: ""  # stdout/stderr使用（コンテナ最適化）
+        
+        # === パフォーマンス最適化 ===
+        # ネットワーク設定
+        outgoing-range: 4096
+        num-queries-per-thread: 4096
+        jostle-timeout: 200
+        delay-close: 10000
+        
+        # メモリ使用量制御
+        so-rcvbuf: 416k
+        so-sndbuf: 416k
+        
+        # === 詳細設定 ===
+        # プリフェッチ
+        prefetch: no
+        prefetch-key: no
+        
+        # ランダム化
+        rrset-roundrobin: yes
+        minimal-responses: yes
+        
+        # === local-zone設定（広告ブロック）===
+        # Init Containerで生成されたlocal-zoneファイルを読み込み
+        include: "/shared/local-zones/*.conf"
+        
+        # === 基本local-zone（必要最小限）===
+        # ローカルホスト
+        local-zone: "localhost." static
+        local-data: "localhost. 10800 IN A 127.0.0.1"
+        local-data: "localhost. 10800 IN AAAA ::1"
+        
+        # 逆引きローカル
+        local-zone: "127.in-addr.arpa." static
+        local-data: "1.0.0.127.in-addr.arpa. 10800 IN PTR localhost."
+        
+        # RFC6761準拠のローカルドメイン
+        local-zone: "local." static
+        local-zone: "invalid." static
+        local-zone: "test." static
+        
+        # === プライベートアドレス逆引き（オプション）===
+        local-zone: "10.in-addr.arpa." nodefault
+        local-zone: "16.172.in-addr.arpa." nodefault
+        local-zone: "17.172.in-addr.arpa." nodefault
+        local-zone: "18.172.in-addr.arpa." nodefault
+        local-zone: "19.172.in-addr.arpa." nodefault
+        local-zone: "20.172.in-addr.arpa." nodefault
+        local-zone: "21.172.in-addr.arpa." nodefault
+        local-zone: "22.172.in-addr.arpa." nodefault
+        local-zone: "23.172.in-addr.arpa." nodefault
+        local-zone: "24.172.in-addr.arpa." nodefault
+        local-zone: "25.172.in-addr.arpa." nodefault
+        local-zone: "26.172.in-addr.arpa." nodefault
+        local-zone: "27.172.in-addr.arpa." nodefault
+        local-zone: "28.172.in-addr.arpa." nodefault
+        local-zone: "29.172.in-addr.arpa." nodefault
+        local-zone: "30.172.in-addr.arpa." nodefault
+        local-zone: "31.172.in-addr.arpa." nodefault
+        local-zone: "168.192.in-addr.arpa." nodefault
+        
+    # === Remote Control設定（監視機能分離のため無効化）===
+    # 将来の監視機能追加時に有効化予定
+    # remote-control:
+    #     control-enable: yes
+    #     control-interface: 127.0.0.1
+    #     control-port: 8953
+    #     control-use-cert: no  # localhost通信のためTLS無効
+        
+    # === 上流DNS設定 ===
+    forward-zone:
+        name: "."
+        # Cloudflare DNS（プライマリ）
+        forward-addr: 1.1.1.1@53
+        forward-addr: 1.0.0.1@53
+        # Google DNS（セカンダリ）
+        forward-addr: 8.8.8.8@53
+        forward-addr: 8.8.4.4@53
+        # フォールバック設定
+        forward-first: no

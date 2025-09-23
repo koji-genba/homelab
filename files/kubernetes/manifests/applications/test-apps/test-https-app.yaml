@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-hello-app
+  namespace: default
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: test-hello-app
+  template:
+    metadata:
+      labels:
+        app: test-hello-app
+    spec:
+      containers:
+      - name: hello-app
+        image: gcr.io/google-samples/hello-app:1.0
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-hello-service
+  namespace: default
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+  selector:
+    app: test-hello-app
+---
+# HTTP Ingress（証明書なし）
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: test-hello-http
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      - path: /hello
+        pathType: Prefix
+        backend:
+          service:
+            name: test-hello-service
+            port:
+              number: 80
+---
+# HTTPS Ingress（証明書テスト用）- ドメイン設定後に使用
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: test-hello-https
+  namespace: default
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-staging
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - test.kojigenba-srv.com
+    secretName: test-hello-tls
+  rules:
+  - host: test.kojigenba-srv.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: test-hello-service
+            port:
+              number: 80

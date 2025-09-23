@@ -1,0 +1,387 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: external-unbound
+  namespace: external-dns
+  labels:
+    app: external-unbound
+    version: v2.0
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: external-unbound
+  template:
+    metadata:
+      labels:
+        app: external-unbound
+        version: v2.0
+    spec:
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+      
+      volumes:
+      - name: shared-data
+        emptyDir: {}
+      - name: unbound-config
+        configMap:
+          name: external-unbound-config
+      - name: manual-config
+        configMap:
+          name: external-unbound-manual-config
+          optional: true
+      
+      initContainers:
+      - name: blocklist-downloader
+        image: ubuntu:24.04
+        securityContext:
+          runAsUser: 0
+          allowPrivilegeEscalation: false
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        volumeMounts:
+        - name: shared-data
+          mountPath: /shared
+        - name: manual-config
+          mountPath: /manual-config
+          readOnly: true
+        command: ["/bin/bash"]
+        args:
+        - -c
+        - |
+          set -e
+          echo "=== External-Unbound Comprehensive Blocklist Generator v2.0 ==="
+          echo "🕒 Start time: $(date)"
+          
+          # DNS Bootstrap solution
+          echo "🔧 Configuring DNS for package installation..."
+          echo "nameserver 1.1.1.1" > /etc/resolv.conf
+          echo "nameserver 8.8.8.8" >> /etc/resolv.conf
+          
+          echo "📦 Installing dependencies..."
+          apt-get update -qq >/dev/null 2>&1
+          apt-get install -y -qq curl ca-certificates >/dev/null 2>&1
+          
+          # Working directory
+          WORK_DIR="/tmp/blocklists"
+          mkdir -p "$WORK_DIR"
+          cd "$WORK_DIR"
+          
+          # Download statistics
+          SUCCESS=0
+          FAILED=0
+          
+          # Download function
+          download_list() {
+            local name="$1"
+            local url="$2" 
+            local filename="$3"
+            
+            echo -n "📥 $name... "
+            if curl -sL --connect-timeout 15 --max-time 60 "$url" -o "$filename" 2>/dev/null; then
+              if [ -s "$filename" ]; then
+                local lines=$(wc -l < "$filename")
+                echo "✅ ($lines lines)"
+                SUCCESS=$((SUCCESS + 1))
+                return 0
+              else
+                echo "❌ (empty)"
+                FAILED=$((FAILED + 1))
+                return 1
+              fi
+            else
+              echo "❌ (failed)"
+              FAILED=$((FAILED + 1))
+              return 1
+            fi
+          }
+          
+          echo ""
+          echo "=== Downloading filter lists ==="
+          
+          # Download all filter lists
+          download_list "uBlock-Ads" \
+            "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters.txt" \
+            "ublock-ads.txt" || true
+          
+          download_list "uBlock-Badware" \
+            "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/badware.txt" \
+            "ublock-badware.txt" || true
+          
+          download_list "uBlock-Privacy" \
+            "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/privacy.txt" \
+            "ublock-privacy.txt" || true
+          
+          download_list "uBlock-Unbreak" \
+            "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/unbreak.txt" \
+            "ublock-unbreak.txt" || true
+          
+          download_list "EasyList" \
+            "https://easylist.to/easylist/easylist.txt" \
+            "easylist.txt" || true
+          
+          download_list "EasyPrivacy" \
+            "https://easylist.to/easylist/easyprivacy.txt" \
+            "easyprivacy.txt" || true
+          
+          download_list "Peter-Lowe" \
+            "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext" \
+            "peter-lowe.hosts" || true
+          
+          download_list "Steven-Black" \
+            "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts" \
+            "stevenblack.hosts" || true
+          
+          download_list "AdGuard-Japanese" \
+            "https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/master/filters/filter_7_Japanese/filter.txt" \
+            "adguard-jp.txt" || true
+          
+          echo ""
+          echo "Downloads complete: $SUCCESS successful, $FAILED failed"
+          echo ""
+          
+          # Process filters
+          echo "=== Processing filters ==="
+          
+          # DNS-compatible domain extraction function
+          extract_domains() {
+            local file="$1"
+            [ ! -f "$file" ] && return
+            
+            echo -n "  📋 Processing $(basename "$file")... "
+            
+            # Extract basic domain blocks only (DNS-compatible)
+            local count=$(cat "$file" 2>/dev/null | \
+              grep -v '^!' | grep -v '^\[' | grep -v '^#' | grep -v '^$' | \
+              grep -v '##' | grep -v '###' | \
+              grep -v '\$script' | grep -v '\$third-party' | grep -v '\$image' | \
+              grep -v '\$stylesheet' | grep -v '\$xmlhttprequest' | \
+              grep -E '^\|\||^[a-zA-Z0-9]' | \
+              sed 's/||//g; s/\^.*//g; s/\$.*//g; s/|.*//g; s#/.*##g' | \
+              grep -E '^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$' | \
+              sort -u | tee -a domains.txt | wc -l)
+            
+            echo "$count domains"
+          }
+          
+          # Exception extraction function (@@rules)
+          extract_exceptions() {
+            local file="$1"
+            [ ! -f "$file" ] && return
+            
+            echo -n "  📋 Processing exceptions from $(basename "$file")... "
+            local count=$(cat "$file" 2>/dev/null | \
+              grep '^@@' | \
+              grep -v '##' | grep -v '###' | \
+              grep -v '\$script' | grep -v '\$third-party' | \
+              sed 's/^@@||//g; s/^@@//g' | \
+              sed 's/\^.*//g; s/\$.*//g' | \
+              sed 's/\?.*//g; s/|.*//g' | \
+              sed 's#/.*##g' | \
+              grep -E '^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$' | \
+              sort -u | tee -a exceptions.txt | wc -l)
+            echo "$count domains"
+          }
+          
+          # Initialize files
+          > domains.txt
+          > exceptions.txt
+          
+          # Process downloaded files
+          for file in *.txt *.hosts; do
+            [ -f "$file" ] && extract_domains "$file"
+          done
+
+          # 手動調整ファイル処理
+          echo ""
+          echo "=== Processing manual adjustment files ==="
+          
+          # 手動ブロックリスト処理
+          echo "📝 Processing manual blocklist..."
+          if [ -f "/manual-config/manual-blocklist.txt" ]; then
+            MANUAL_BLOCKED=$(cat /manual-config/manual-blocklist.txt | \
+              grep -v '^#' | grep -v '^$' | \
+              grep -E '^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$' | \
+              sort -u | tee -a domains.txt | wc -l)
+            echo "   📋 Manual blocklist: $MANUAL_BLOCKED domains added"
+          else
+            MANUAL_BLOCKED=0
+            echo "   📋 Manual blocklist: file not found, skipping"
+          fi
+          
+          # 手動ホワイトリスト処理
+          echo "📝 Processing manual whitelist..."
+          if [ -f "/manual-config/manual-whitelist.txt" ]; then
+            MANUAL_WHITELISTED=$(cat /manual-config/manual-whitelist.txt | \
+              grep -v '^#' | grep -v '^$' | \
+              grep -E '^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$' | \
+              sort -u | tee -a exceptions.txt | wc -l)
+            echo "   📋 Manual whitelist: $MANUAL_WHITELISTED domains added"
+          else
+            MANUAL_WHITELISTED=0
+            echo "   📋 Manual whitelist: file not found, skipping"
+          fi
+          
+          # 手動DNSレコード処理
+          echo "📝 Processing manual DNS records..."
+          if [ -f "/manual-config/manual-dns-records.txt" ]; then
+            MANUAL_DNS_LINES=$(cat /manual-config/manual-dns-records.txt | \
+              grep -v '^#' | grep -v '^$' | wc -l)
+            if [ "$MANUAL_DNS_LINES" -gt 0 ]; then
+              echo "   📋 Manual DNS records: $MANUAL_DNS_LINES lines will be added to config"
+              MANUAL_DNS_AVAILABLE=1
+            else
+              echo "   📋 Manual DNS records: file exists but no records found"
+              MANUAL_DNS_AVAILABLE=0
+            fi
+          else
+            echo "   📋 Manual DNS records: file not found, skipping"
+            MANUAL_DNS_AVAILABLE=0
+          fi
+          
+          echo "📊 Manual adjustments: +$MANUAL_BLOCKED blocked, +$MANUAL_WHITELISTED whitelisted, $MANUAL_DNS_LINES DNS records"
+
+          
+          echo ""
+          echo "=== Processing exception rules ==="
+          
+          # Process exception rules from unbreak file
+          extract_exceptions "ublock-unbreak.txt"
+          
+          # Add manual whitelist (protected domains)
+          echo "🛡️  Adding protected domains..."
+          cat >> exceptions.txt << 'EOF'
+          kojigenba-srv.com
+          github.com
+          githubusercontent.com
+          cloudflare.com
+          kubernetes.io
+          docker.io
+          EOF
+          
+          # Remove duplicates and apply exceptions
+          echo "🔄 Applying exceptions and deduplicating..."
+          sort -u domains.txt > domains_unique.txt
+          sort -u exceptions.txt > exceptions_unique.txt
+          
+          # Remove exceptions from domains
+          comm -23 domains_unique.txt exceptions_unique.txt > final_domains.txt
+          
+          # Statistics
+          TOTAL_DOMAINS=$(wc -l < final_domains.txt)
+          TOTAL_EXCEPTIONS=$(wc -l < exceptions_unique.txt)
+          
+          echo ""
+          echo "=== Converting to Unbound local-zone format ==="
+          
+          # Create output directory
+          mkdir -p /shared/local-zones
+          
+          # Generate Unbound local-zone configuration
+          cat > /shared/local-zones/blocklist.conf << EOF
+          # Unbound Local-zone Ad-blocking Configuration
+          # Generated: $(date)
+          # Total blocked domains: $TOTAL_DOMAINS
+          # Total exceptions applied: $TOTAL_EXCEPTIONS
+          # DNS-level blocking with automatic subdomain coverage
+          
+          EOF
+          
+          # Convert domains to local-zone format
+          echo "🔄 Converting $TOTAL_DOMAINS domains to local-zone format..."
+          while read -r domain; do
+            echo "local-zone: \"${domain}.\" redirect"
+            echo "local-data: \"${domain} A 0.0.0.0\""
+            echo ""
+          done < final_domains.txt >> /shared/local-zones/blocklist.conf
+
+          # 手動DNSレコード追記
+          if [ "$MANUAL_DNS_AVAILABLE" = "1" ]; then
+            echo ""
+            echo "🔧 Adding manual DNS records..."
+            echo "" >> /shared/local-zones/blocklist.conf
+            echo "# Manual DNS Records (from manual-dns-records.txt)" >> /shared/local-zones/blocklist.conf
+            cat /manual-config/manual-dns-records.txt | \
+              grep -v '^#' | grep -v '^$' >> /shared/local-zones/blocklist.conf
+            echo "   📋 Manual DNS records added to configuration"
+          fi
+          
+          # Set permissions
+          chown -R root:root /shared/local-zones
+          chmod -R 644 /shared/local-zones/*
+          
+          # Final statistics
+          echo ""
+          echo "=== Final Statistics ==="
+          echo "📊 Total blocked domains: $TOTAL_DOMAINS"
+          echo "📊 Exception domains applied: $TOTAL_EXCEPTIONS"
+          echo "📊 Configuration file: /shared/local-zones/blocklist.conf"
+          echo "📊 File size: $(du -sh /shared/local-zones/blocklist.conf | cut -f1)"
+          echo "🎯 DNS-level blocking with automatic subdomain coverage enabled"
+          echo "✅ Comprehensive blocklist generation completed successfully"
+          echo ""
+
+      containers:
+      - name: unbound
+        image: ghcr.io/koji-genba/external-unbound:v1.5
+        ports:
+        - containerPort: 5353
+          name: dns-tcp
+          protocol: TCP
+        - containerPort: 5353
+          name: dns-udp
+          protocol: UDP
+        
+        volumeMounts:
+        - name: shared-data
+          mountPath: /shared
+          readOnly: true
+        - name: unbound-config
+          mountPath: /opt/unbound/etc/unbound/unbound.conf
+          subPath: unbound.conf
+          readOnly: true
+        
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - 'dig @127.0.0.1 -p 5353 google.com +short +time=5 | grep -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" >/dev/null'
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        
+        readinessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - 'dig @127.0.0.1 -p 5353 google.com +short +time=5 | grep -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" >/dev/null'
+          initialDelaySeconds: 20
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        
+        securityContext:
+          # runAsNonRoot: true  # コメントアウト（root実行を許可）
+          readOnlyRootFilesystem: false
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - NET_BIND_SERVICE  # 特権ポートバインド許可

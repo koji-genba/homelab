@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: external-unbound-manual-config
+  namespace: external-dns
+  labels:
+    app: external-unbound
+    component: manual-config
+    version: v1.0
+data:
+  manual-blocklist.txt: |
+    # Manual Custom Blocklist
+    # Add custom domains to block here (one per line)
+    # Format: domain.com (subdomains will be automatically blocked)
+    # 
+    # Examples:
+    # suspicious-ads.example.com
+    # tracking.badsite.com
+    #
+    # Current manual blocks: 0
+
+  manual-whitelist.txt: |
+    # Manual Custom Whitelist  
+    # Add domains to exclude from blocking here (one per line)
+    # Format: domain.com
+    #
+    # Examples:
+    # legitimate-service.example.com
+    # important-api.company.com
+    #
+    # Current manual exclusions: 0
+
+  manual-dns-records.txt: |
+    # Manual DNS Records
+    # Add custom Unbound configuration here
+    # Format: Raw Unbound configuration syntax
+    #
+    # Examples:
+    # local-data: "internal.example.com A 192.168.1.100"
+    # local-data: "api.internal.com CNAME server.internal.com"
+    # local-zone: "test.local." static
+    # local-data: "test.local. A 127.0.0.1"
+    #
+    # Forward specific domain to custom DNS:
+    # forward-zone:
+    #     name: "corp.example.com."
+    #     forward-addr: 10.0.0.1
+    #
+    # Current manual DNS records: 0

@@ -1,0 +1,33 @@
+---
+# DNS Service (LoadBalancer) - メイン機能
+apiVersion: v1
+kind: Service
+metadata:
+  name: external-unbound-dns
+  namespace: external-dns
+  labels:
+    app: external-unbound
+    component: dns-service
+    version: v1.3
+  annotations:
+    service.kubernetes.io/load-balancer-class: "metallb.io/metallb"
+    metallb.universe.tf/loadBalancerIPs: 192.168.11.101
+spec:
+  type: LoadBalancer
+  
+  ports:
+  - port: 53
+    targetPort: 5353
+    protocol: UDP
+    name: dns-udp
+  - port: 53
+    targetPort: 5353
+    protocol: TCP
+    name: dns-tcp
+  
+  selector:
+    app: external-unbound
+  
+  # DNS用の最適化設定
+  sessionAffinity: None
+  externalTrafficPolicy: Local
