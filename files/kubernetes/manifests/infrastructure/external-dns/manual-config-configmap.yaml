@@ -48,3 +48,7 @@ data:
     #
     # Current manual DNS records: 0
     local-data: "dnsTestRecord.kojigenba-srv.com. A 192.168.63.254"
+    local-data: "ldap.kojigenba-srv.com. A 192.168.11.100"
+    local-data: "ldaps.kojigenba-srv.com. A 192.168.11.102"
+    
+    

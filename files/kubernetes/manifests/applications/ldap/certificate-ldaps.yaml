@@ -1,0 +1,20 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ldaps-kojigenba-srv-com-tls
+  namespace: lldap
+  labels:
+    app.kubernetes.io/name: lldap
+    app.kubernetes.io/component: authentication
+    app.kubernetes.io/part-of: authentication-infrastructure
+spec:
+  secretName: ldaps-kojigenba-srv-com-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+  - ldaps.kojigenba-srv.com
+  usages:
+  - digital signature
+  - key encipherment
+  - server auth
