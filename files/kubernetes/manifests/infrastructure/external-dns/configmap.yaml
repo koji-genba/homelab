@@ -18,6 +18,9 @@ data:
     
     server:
         # === 基本設定 ===
+        # モジュール設定（RPZ対応）
+        module-config: "respip validator iterator"
+
         # ポート・インターフェース
         port: 5353
         interface: 0.0.0.0
@@ -106,8 +109,8 @@ data:
         rrset-roundrobin: yes
         minimal-responses: yes
         
-        # === local-zone設定（広告ブロック）===
-        # Init Containerで生成されたlocal-zoneファイルを読み込み
+        # === local-zone設定（手動カスタム設定）===
+        # manual-config ConfigMapからの追加設定読み込み
         include: "/shared/local-zones/*.conf"
         
         # === 基本local-zone（必要最小限）===
@@ -153,6 +156,11 @@ data:
     #     control-port: 8953
     #     control-use-cert: no  # localhost通信のためTLS無効
         
+    # === RPZ設定（Hagezi広告ブロック）===
+    rpz:
+        name: "hagezi.rpz."
+        zonefile: "/shared/rpz/hagezi-pro.txt"
+
     # === 上流DNS設定 ===
     forward-zone:
         name: "."

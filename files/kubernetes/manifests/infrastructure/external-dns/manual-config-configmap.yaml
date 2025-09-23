@@ -47,3 +47,4 @@ data:
     #     forward-addr: 10.0.0.1
     #
     # Current manual DNS records: 0
+    local-data: "dnsTestRecord.kojigenba-srv.com. A 192.168.63.254"
