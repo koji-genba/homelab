@@ -156,10 +156,42 @@ data:
     #     control-port: 8953
     #     control-use-cert: no  # localhost通信のためTLS無効
         
-    # === RPZ設定（Hagezi広告ブロック）===
+    # === RPZ設定（Hagezi リスト複数読み込み）===
+    # 基本保護: Pro Multi (464,498エントリー)
     rpz:
-        name: "hagezi.rpz."
+        name: "hagezi-pro.rpz."
         zonefile: "/shared/rpz/hagezi-pro.txt"
+        rpz-action-override: "nxdomain"
+
+    # セキュリティ強化: TIF Full
+    rpz:
+        name: "hagezi-tif.rpz."
+        zonefile: "/shared/rpz/hagezi-tif.txt"
+        rpz-action-override: "nxdomain"
+
+    # DNS迂回防止: DoH/VPN/Proxy Bypass
+    rpz:
+        name: "hagezi-doh-bypass.rpz."
+        zonefile: "/shared/rpz/hagezi-doh-bypass.txt"
+        rpz-action-override: "nxdomain"
+
+    # 動的DNS悪用対策: Dynamic DNS
+    rpz:
+        name: "hagezi-dyndns.rpz."
+        zonefile: "/shared/rpz/hagezi-dyndns.txt"
+        rpz-action-override: "nxdomain"
+
+    # 悪質ホスティング対策: Badware Hoster
+    rpz:
+        name: "hagezi-badware.rpz."
+        zonefile: "/shared/rpz/hagezi-badware.txt"
+        rpz-action-override: "nxdomain"
+
+    # 短縮URL対策: URL Shortener
+    rpz:
+        name: "hagezi-urlshortener.rpz."
+        zonefile: "/shared/rpz/hagezi-urlshortener.txt"
+        rpz-action-override: "nxdomain"
 
     # === 上流DNS設定 ===
     forward-zone:
