@@ -1,0 +1,34 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: lldap-ingress
+  namespace: lldap
+  labels:
+    app.kubernetes.io/name: lldap
+    app.kubernetes.io/component: authentication
+    app.kubernetes.io/part-of: authentication-infrastructure
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - ldap.kojigenba-srv.com
+    secretName: ldap-kojigenba-srv-com-tls
+  rules:
+  - host: ldap.kojigenba-srv.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: lldap-web
+            port:
+              number: 17170

@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lldap-config
+  namespace: lldap
+  labels:
+    app.kubernetes.io/name: lldap
+    app.kubernetes.io/component: authentication
+data:
+  lldap_config.toml: |
+    # LLDAP Configuration File
+
+    # Database settings
+    database_url = "sqlite:///data/users.db"
+
+    # LDAP settings
+    ldap_host = "0.0.0.0"
+    ldap_port = 3890
+    ldap_base_dn = "dc=kojigenba-srv,dc=com"
+
+    # LDAPS settings
+    ldaps_options.enabled = true
+    ldaps_options.port = 636
+    ldaps_options.cert_file = "/certs/tls.crt"
+    ldaps_options.key_file = "/certs/tls.key"
+
+    # HTTP/Web UI settings
+    http_host = "0.0.0.0"
+    http_port = 17170
+    http_url = "https://ldap.kojigenba-srv.com"
+
+    # SMTP settings (disabled)
+    smtp_options.enable_password_reset = false
+
+    # Verbose logging for troubleshooting
+    verbose = true

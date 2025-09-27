@@ -1,0 +1,5 @@
+{
+  "name": "system-readonly",
+  "displayName": "Read-only Access",
+  "description": "Read-only access for service accounts"
+}
