@@ -1,0 +1,5 @@
+{
+  "name": "system-users",
+  "displayName": "Standard Users",
+  "description": "Basic system users with standard privileges"
+}

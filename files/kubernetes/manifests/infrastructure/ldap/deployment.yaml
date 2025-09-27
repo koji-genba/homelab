@@ -91,3 +91,7 @@ spec:
         secret:
           secretName: ldaps-kojigenba-srv-com-tls
           defaultMode: 0444
+      - name: bootstrap-config
+        configMap:
+          name: lldap-bootstrap-config
+          defaultMode: 0444
