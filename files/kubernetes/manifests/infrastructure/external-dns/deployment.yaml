@@ -141,19 +141,57 @@ spec:
           echo ""
           echo "=== Processing manual adjustment files ==="
 
+          # ホワイトリストドメイン収集（RPZ処理前に実行）
+          echo "📝 Collecting whitelist domains for RPZ exclusion..."
+          WHITELIST_DOMAINS=""
+          if [ -f "/manual-config/manual-whitelist.txt" ]; then
+            WHITELIST_DOMAINS=$(cat /manual-config/manual-whitelist.txt | \
+              grep -v '^#' | grep -v '^$' | \
+              grep -E '^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$' | \
+              sort -u)
+            WHITELIST_COUNT=$(echo "$WHITELIST_DOMAINS" | grep -c '^' 2>/dev/null || echo "0")
+            echo "   📋 Whitelist domains collected: $WHITELIST_COUNT domains"
+          else
+            echo "   📋 No whitelist file found, skipping RPZ exclusion"
+          fi
+
+          # RPZファイルからホワイトリストドメインを除外
+          if [ -n "$WHITELIST_DOMAINS" ] && [ "$WHITELIST_COUNT" -gt 0 ]; then
+            echo "📝 Excluding whitelist domains from RPZ files..."
+            for rpz_file in /shared/rpz/*.txt; do
+              if [ -f "$rpz_file" ]; then
+                ORIGINAL_COUNT=$(grep -c "CNAME \." "$rpz_file" 2>/dev/null || echo "0")
+                # 各ホワイトリストドメインを除外
+                while IFS= read -r domain; do
+                  if [ -n "$domain" ]; then
+                    # RPZファイルからドメインとそのサブドメインを除外
+                    # 例: "t.co CNAME ." と "*.t.co CNAME ." を除外
+                    sed -i "/^${domain} CNAME \./d" "$rpz_file" 2>/dev/null || true
+                    sed -i "/^\*\.${domain} CNAME \./d" "$rpz_file" 2>/dev/null || true
+                  fi
+                done <<< "$WHITELIST_DOMAINS"
+                NEW_COUNT=$(grep -c "CNAME \." "$rpz_file" 2>/dev/null || echo "0")
+                EXCLUDED_COUNT=$((ORIGINAL_COUNT - NEW_COUNT))
+                if [ "$EXCLUDED_COUNT" -gt 0 ]; then
+                  echo "   📋 $(basename "$rpz_file"): excluded $EXCLUDED_COUNT entries"
+                fi
+              fi
+            done
+          fi
+
           # 手動ブロックリスト処理（local-zone形式で出力）
           echo "📝 Processing manual blocklist..."
           if [ -f "/manual-config/manual-blocklist.txt" ]; then
             MANUAL_BLOCKED=$(cat /manual-config/manual-blocklist.txt | \
               grep -v '^#' | grep -v '^$' | \
-              grep -E '^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$' | \
+              grep -E '^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$' | \
               sort -u | wc -l)
 
             if [ "$MANUAL_BLOCKED" -gt 0 ]; then
               echo "# Manual Blocklist (from manual-blocklist.txt)" > /shared/local-zones/manual-blocklist.conf
               cat /manual-config/manual-blocklist.txt | \
                 grep -v '^#' | grep -v '^$' | \
-                grep -E '^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$' | \
+                grep -E '^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$' | \
                 sort -u | while read -r domain; do
                   echo "local-zone: \"${domain}.\" redirect"
                   echo "local-data: \"${domain} A 0.0.0.0\""
@@ -172,14 +210,14 @@ spec:
           if [ -f "/manual-config/manual-whitelist.txt" ]; then
             MANUAL_WHITELISTED=$(cat /manual-config/manual-whitelist.txt | \
               grep -v '^#' | grep -v '^$' | \
-              grep -E '^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$' | \
+              grep -E '^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$' | \
               sort -u | wc -l)
 
             if [ "$MANUAL_WHITELISTED" -gt 0 ]; then
               echo "# Manual Whitelist (from manual-whitelist.txt)" > /shared/local-zones/manual-whitelist.conf
               cat /manual-config/manual-whitelist.txt | \
                 grep -v '^#' | grep -v '^$' | \
-                grep -E '^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$' | \
+                grep -E '^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$' | \
                 sort -u | while read -r domain; do
                   echo "local-zone: \"${domain}.\" transparent"
                   echo ""
@@ -253,6 +291,9 @@ spec:
         - name: unbound-config
           mountPath: /opt/unbound/etc/unbound/unbound.conf
           subPath: unbound.conf
+          readOnly: true
+        - name: manual-config
+          mountPath: /manual-config
           readOnly: true
         
         livenessProbe:
