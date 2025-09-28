@@ -141,8 +141,23 @@ spec:
           echo ""
           echo "=== Processing manual adjustment files ==="
 
-          # ホワイトリストドメイン収集（RPZ処理前に実行）
-          echo "📝 Collecting whitelist domains for RPZ exclusion..."
+          # manual-blocklistとwhitelist ドメイン収集（RPZ処理前に実行）
+          echo "📝 Collecting manual domains for RPZ processing..."
+
+          # ブロックリストドメイン収集
+          BLOCKLIST_DOMAINS=""
+          if [ -f "/manual-config/manual-blocklist.txt" ]; then
+            BLOCKLIST_DOMAINS=$(cat /manual-config/manual-blocklist.txt | \
+              grep -v '^#' | grep -v '^$' | \
+              grep -E '^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$' | \
+              sort -u)
+            BLOCKLIST_COUNT=$(echo "$BLOCKLIST_DOMAINS" | grep -c '^' 2>/dev/null || echo "0")
+            echo "   📋 Blocklist domains collected: $BLOCKLIST_COUNT domains"
+          else
+            echo "   📋 No blocklist file found"
+          fi
+
+          # ホワイトリストドメイン収集
           WHITELIST_DOMAINS=""
           if [ -f "/manual-config/manual-whitelist.txt" ]; then
             WHITELIST_DOMAINS=$(cat /manual-config/manual-whitelist.txt | \
@@ -152,58 +167,57 @@ spec:
             WHITELIST_COUNT=$(echo "$WHITELIST_DOMAINS" | grep -c '^' 2>/dev/null || echo "0")
             echo "   📋 Whitelist domains collected: $WHITELIST_COUNT domains"
           else
-            echo "   📋 No whitelist file found, skipping RPZ exclusion"
+            echo "   📋 No whitelist file found"
           fi
 
-          # RPZファイルからホワイトリストドメインを除外
-          if [ -n "$WHITELIST_DOMAINS" ] && [ "$WHITELIST_COUNT" -gt 0 ]; then
-            echo "📝 Excluding whitelist domains from RPZ files..."
-            for rpz_file in /shared/rpz/*.txt; do
-              if [ -f "$rpz_file" ]; then
-                ORIGINAL_COUNT=$(grep -c "CNAME \." "$rpz_file" 2>/dev/null || echo "0")
-                # 各ホワイトリストドメインを除外
+          # RPZファイルの処理（ホワイトリスト除外とブロックリスト追加）
+          echo "📝 Processing RPZ files for manual adjustments..."
+          for rpz_file in /shared/rpz/*.txt; do
+            if [ -f "$rpz_file" ]; then
+              ORIGINAL_COUNT=$(grep -c "CNAME \." "$rpz_file" 2>/dev/null || echo "0")
+              EXCLUDED_COUNT=0
+              ADDED_COUNT=0
+
+              # ホワイトリストドメインを除外
+              if [ -n "$WHITELIST_DOMAINS" ] && [ "$WHITELIST_COUNT" -gt 0 ]; then
                 while IFS= read -r domain; do
                   if [ -n "$domain" ]; then
                     # RPZファイルからドメインとそのサブドメインを除外
-                    # 例: "t.co CNAME ." と "*.t.co CNAME ." を除外
                     sed -i "/^${domain} CNAME \./d" "$rpz_file" 2>/dev/null || true
                     sed -i "/^\*\.${domain} CNAME \./d" "$rpz_file" 2>/dev/null || true
                   fi
                 done <<< "$WHITELIST_DOMAINS"
-                NEW_COUNT=$(grep -c "CNAME \." "$rpz_file" 2>/dev/null || echo "0")
-                EXCLUDED_COUNT=$((ORIGINAL_COUNT - NEW_COUNT))
-                if [ "$EXCLUDED_COUNT" -gt 0 ]; then
-                  echo "   📋 $(basename "$rpz_file"): excluded $EXCLUDED_COUNT entries"
-                fi
               fi
-            done
-          fi
 
-          # 手動ブロックリスト処理（local-zone形式で出力）
-          echo "📝 Processing manual blocklist..."
-          if [ -f "/manual-config/manual-blocklist.txt" ]; then
-            MANUAL_BLOCKED=$(cat /manual-config/manual-blocklist.txt | \
-              grep -v '^#' | grep -v '^$' | \
-              grep -E '^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$' | \
-              sort -u | wc -l)
+              # ブロックリストドメインを追加（重複チェック付き）
+              if [ -n "$BLOCKLIST_DOMAINS" ] && [ "$BLOCKLIST_COUNT" -gt 0 ]; then
+                while IFS= read -r domain; do
+                  if [ -n "$domain" ]; then
+                    # 既存チェック：重複を避ける
+                    if ! grep -q "^${domain} CNAME \." "$rpz_file" 2>/dev/null; then
+                      echo "${domain} CNAME ." >> "$rpz_file"
+                      ADDED_COUNT=$((ADDED_COUNT + 1))
+                    fi
+                    if ! grep -q "^\*\.${domain} CNAME \." "$rpz_file" 2>/dev/null; then
+                      echo "*.${domain} CNAME ." >> "$rpz_file"
+                      ADDED_COUNT=$((ADDED_COUNT + 1))
+                    fi
+                  fi
+                done <<< "$BLOCKLIST_DOMAINS"
+              fi
 
-            if [ "$MANUAL_BLOCKED" -gt 0 ]; then
-              echo "# Manual Blocklist (from manual-blocklist.txt)" > /shared/local-zones/manual-blocklist.conf
-              cat /manual-config/manual-blocklist.txt | \
-                grep -v '^#' | grep -v '^$' | \
-                grep -E '^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$' | \
-                sort -u | while read -r domain; do
-                  echo "local-zone: \"${domain}.\" redirect"
-                  echo "local-data: \"${domain} A 0.0.0.0\""
-                  echo ""
-                done >> /shared/local-zones/manual-blocklist.conf
-              echo "   📋 Manual blocklist: $MANUAL_BLOCKED domains added"
-            else
-              echo "   📋 Manual blocklist: no valid domains found"
+              # 統計情報表示
+              NEW_COUNT=$(grep -c "CNAME \." "$rpz_file" 2>/dev/null || echo "0")
+              EXCLUDED_COUNT=$((ORIGINAL_COUNT + ADDED_COUNT - NEW_COUNT))
+
+              if [ "$EXCLUDED_COUNT" -gt 0 ] || [ "$ADDED_COUNT" -gt 0 ]; then
+                echo "   📋 $(basename "$rpz_file"): excluded $EXCLUDED_COUNT, added $ADDED_COUNT entries"
+              fi
             fi
-          else
-            echo "   📋 Manual blocklist: file not found, skipping"
-          fi
+          done
+
+          # 注: Manual blocklist はRPZファイルに直接追加済み（上記処理で完了）
+          echo "📝 Manual blocklist processing complete (integrated with RPZ)"
 
           # 手動ホワイトリスト処理（RPZのブロックを上書き）
           echo "📝 Processing manual whitelist..."
