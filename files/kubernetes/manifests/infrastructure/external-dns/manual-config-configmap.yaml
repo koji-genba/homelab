@@ -6,34 +6,56 @@ metadata:
   labels:
     app: external-unbound
     component: manual-config
-    version: v1.0
+    version: v1.1
 data:
   manual-blocklist.txt: |
     # Manual Custom Blocklist
     # Add custom domains to block here (one per line)
     # Format: domain.com (subdomains will be automatically blocked)
-    # 
+    #
+    # Processing Method: RPZ Integration
+    # - Domains are added directly to all 6 RPZ files
+    # - Both domain.com and *.domain.com entries are created
+    # - Duplicate entries are automatically detected and skipped
+    # - Takes effect immediately after pod restart
+    #
     # Examples:
     # suspicious-ads.example.com
     # tracking.badsite.com
+    # malware.dangerous-site.net
     #
     # Current manual blocks: 0
 
   manual-whitelist.txt: |
-    # Manual Custom Whitelist  
+    # Manual Custom Whitelist
     # Add domains to exclude from blocking here (one per line)
     # Format: domain.com
+    #
+    # Processing Method: RPZ Exclusion + Local-zone Transparent
+    # - Domains are removed from all 6 RPZ files before Unbound starts
+    # - Both domain.com and *.domain.com entries are excluded
+    # - Additional local-zone transparent setting ensures bypass
+    # - Whitelist takes precedence over any blocklist entries
+    # - Takes effect immediately after pod restart
     #
     # Examples:
     # legitimate-service.example.com
     # important-api.company.com
+    # url-shortener.trusted-site.net
     #
-    # Current manual exclusions: 0
+    # Current manual exclusions: 1
+    t.co
 
   manual-dns-records.txt: |
     # Manual DNS Records
     # Add custom Unbound configuration here
     # Format: Raw Unbound configuration syntax
+    #
+    # Processing Method: Direct Local-zone Configuration
+    # - Raw Unbound configuration lines are copied directly
+    # - No validation or processing is performed
+    # - Supports all Unbound local-data and forward-zone directives
+    # - Takes effect immediately after pod restart
     #
     # Examples:
     # local-data: "internal.example.com A 192.168.1.100"
@@ -46,9 +68,9 @@ data:
     #     name: "corp.example.com."
     #     forward-addr: 10.0.0.1
     #
-    # Current manual DNS records: 0
+    # Current manual DNS records: 5
     local-data: "dnsTestRecord.kojigenba-srv.com. A 192.168.63.254"
+    local-data: "staging.kojigenba-srv.com. A 192.168.11.100"
+    local-data: "prod.kojigenba-srv.com. A 192.168.11.100"
     local-data: "ldap.kojigenba-srv.com. A 192.168.11.100"
     local-data: "ldaps.kojigenba-srv.com. A 192.168.11.102"
-    
-    
