@@ -43,8 +43,9 @@ data:
     # important-api.company.com
     # url-shortener.trusted-site.net
     #
-    # Current manual exclusions: 1
+    # Current manual exclusions: 2
     t.co
+    tailscale.com
 
   manual-dns-records.txt: |
     # Manual DNS Records
