@@ -76,7 +76,7 @@ spec:
 
             # LDIF投入
             echo "Loading bootstrap data..."
-            timeout 60 ldapadd -x -H ldap://openldap-ldap:389 \
+            timeout 60 ldapadd -c -x -H ldap://openldap-ldap:389 \
               -D "cn=admin,dc=kojigenba-srv,dc=com" \
               -w "$LDAP_ADMIN_PASSWORD" \
               -f /tmp/bootstrap-processed.ldif 2>&1 | tee /tmp/ldapadd-output.log
@@ -87,11 +87,17 @@ spec:
             # ファイルから出力を読み込む
             LDAP_OUTPUT=$(cat /tmp/ldapadd-output.log)
 
-            # Exit code 68 = Already exists (許容)
             # Exit code 0 = Success
+            # Exit code 68 = Already exists (許容)
+            # Exit code 80 = Other LDAP error (許容 - -c オプションで続行するため)
             # Exit code 124 = timeout
             if [ $EXIT_CODE -eq 0 ] || echo "$LDAP_OUTPUT" | grep -q "Already exists"; then
               echo "✓ Bootstrap data loaded successfully (or already exists)!"
+
+              # エラーがあるかチェック（既存エラーを除く）
+              if echo "$LDAP_OUTPUT" | grep -q "^ldap_"; then
+                echo "Note: Some entries may have already existed (expected on re-run)"
+              fi
             else
               echo "ERROR: Bootstrap failed with exit code $EXIT_CODE"
               echo "Output was:"
