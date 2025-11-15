@@ -51,6 +51,12 @@ spec:
             secretKeyRef:
               name: openldap-secrets
               key: phpadmin_app_key
+        - name: LDAP_LOGIN_ATTR
+          value: "uid"
+        - name: LDAP_LOGIN_OBJECTCLASS
+          value: "posixAccount"
+        - name: LDAP_LOGGING
+          value: "true"
         volumeMounts:
         - name: env-file
           mountPath: /app/.env
