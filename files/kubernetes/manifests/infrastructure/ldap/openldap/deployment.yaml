@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openldap
+  namespace: openldap
+  labels:
+    app.kubernetes.io/name: openldap
+    app.kubernetes.io/component: authentication
+    app.kubernetes.io/part-of: authentication-infrastructure
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: openldap
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: openldap
+        app.kubernetes.io/component: authentication
+    spec:
+      containers:
+      - name: openldap
+        image: ghcr.io/koji-genba/openldap:v1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: ldap
+          containerPort: 389
+          protocol: TCP
+        - name: ldaps
+          containerPort: 636
+          protocol: TCP
+        env:
+        - name: LDAP_ADMIN_SSHA_HASH
+          valueFrom:
+            secretKeyRef:
+              name: openldap-secrets
+              key: admin_ssha_hash
+        - name: LDAP_CONFIG_SSHA_HASH
+          valueFrom:
+            secretKeyRef:
+              name: openldap-secrets
+              key: config_ssha_hash
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/ldap
+        - name: slapd-config
+          mountPath: /etc/ldap/slapd.conf.template
+          subPath: slapd.conf.template
+          readOnly: true
+        - name: ldaps-certs
+          mountPath: /certs
+          readOnly: true
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        livenessProbe:
+          tcpSocket:
+            port: 389
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          tcpSocket:
+            port: 389
+          initialDelaySeconds: 10
+          periodSeconds: 10
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: openldap-data-pvc
+      - name: slapd-config
+        configMap:
+          name: openldap-config
+          defaultMode: 0444
+      - name: ldaps-certs
+        secret:
+          secretName: ldaps-kojigenba-srv-com-tls
+          defaultMode: 0444

@@ -1,0 +1,34 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: phpadmin-env
+  namespace: openldap
+  labels:
+    app.kubernetes.io/name: phpadmin
+    app.kubernetes.io/component: authentication
+    app.kubernetes.io/part-of: authentication-infrastructure
+data:
+  .env: |
+    APP_NAME="phpLDAPadmin"
+    APP_ENV=production
+    APP_DEBUG=false
+    APP_URL=http://localhost:8080
+
+    LOG_CHANNEL=stack
+    LOG_LEVEL=info
+
+    LDAP_HOST=openldap-ldap.openldap.svc.cluster.local
+    LDAP_PORT=389
+    LDAP_USERNAME=cn=admin,dc=kojigenba-srv,dc=com
+    LDAP_BIND_PASSWORD=YOUR_LDAP_ADMIN_PASSWORD_HERE
+    LDAP_BASE_DN=dc=kojigenba-srv,dc=com
+    LDAP_CACHE=false
+    LDAP_ALERT_ROOTDN=true
+    LDAP_TIMEOUT=5
+
+    CACHE_DRIVER=file
+    QUEUE_CONNECTION=sync
+    SESSION_DRIVER=file
+    SESSION_LIFETIME=120
+
+    MAIL_MAILER=log

@@ -69,9 +69,10 @@ data:
     #     name: "corp.example.com."
     #     forward-addr: 10.0.0.1
     #
-    # Current manual DNS records: 5
+    # Current manual DNS records: 6
     local-data: "dnsTestRecord.kojigenba-srv.com. A 192.168.63.254"
     local-data: "staging.kojigenba-srv.com. A 192.168.11.100"
     local-data: "prod.kojigenba-srv.com. A 192.168.11.100"
     local-data: "ldap.kojigenba-srv.com. A 192.168.11.100"
     local-data: "ldaps.kojigenba-srv.com. A 192.168.11.102"
+    local-data: "phpadmin.kojigenba-srv.com. A 192.168.11.100"

@@ -1,10 +1,10 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: lldap-ingress
-  namespace: lldap
+  name: ldap-ingress
+  namespace: openldap
   labels:
-    app.kubernetes.io/name: lldap
+    app.kubernetes.io/name: openldap
     app.kubernetes.io/component: authentication
     app.kubernetes.io/part-of: authentication-infrastructure
   annotations:
@@ -20,6 +20,7 @@ spec:
   tls:
   - hosts:
     - ldap.kojigenba-srv.com
+    - phpadmin.kojigenba-srv.com
     secretName: ldap-kojigenba-srv-com-tls
   rules:
   - host: ldap.kojigenba-srv.com
@@ -29,6 +30,16 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: lldap-web
+            name: phpadmin
             port:
-              number: 17170
+              number: 80
+  - host: phpadmin.kojigenba-srv.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: phpadmin
+            port:
+              number: 80

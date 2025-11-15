@@ -1,9 +1,0 @@
-{
-  "id": "testuser",
-  "email": "testuser@kojigenba-srv.com",
-  "displayName": "Test User",
-  "firstName": "Test",
-  "lastName": "User",
-  "password": "REPLACE_WITH_SECURE_PASSWORD",
-  "groups": ["system-users"]
-}

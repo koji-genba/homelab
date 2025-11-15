@@ -1,0 +1,145 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: openldap-bootstrap
+  namespace: openldap
+  labels:
+    app.kubernetes.io/name: openldap
+    app.kubernetes.io/component: authentication
+    app.kubernetes.io/part-of: authentication-infrastructure
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: openldap-bootstrap
+        app.kubernetes.io/component: authentication
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: bootstrap
+        image: ubuntu:24.04
+        command:
+          - /bin/bash
+          - -c
+          - |
+            set -e
+
+            echo "=== OpenLDAP Bootstrap Job ==="
+            echo "Timestamp: $(date)"
+
+            # 必要なツールのインストール
+            echo "Installing ldap-utils and gettext-base..."
+            apt-get update -qq
+            apt-get install -y -qq ldap-utils gettext-base
+
+            # OpenLDAPの起動待機（Root DSEへの接続確認）
+            echo "Waiting for OpenLDAP to be ready..."
+            MAX_ATTEMPTS=120
+            ATTEMPT=0
+
+            while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+              if ldapsearch -x -H ldap://openldap-ldap:389 \
+                 -D "cn=admin,dc=kojigenba-srv,dc=com" \
+                 -w "$LDAP_ADMIN_PASSWORD" \
+                 -b "" -s base "(objectClass=*)" >/dev/null 2>&1; then
+                echo "✓ OpenLDAP is ready!"
+                sleep 5  # 安全のため少し待つ
+                break
+              fi
+              ATTEMPT=$((ATTEMPT + 1))
+              echo "  Attempt $ATTEMPT/$MAX_ATTEMPTS - Waiting..."
+              sleep 2
+            done
+
+            if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+              echo "ERROR: OpenLDAP did not become ready after $((MAX_ATTEMPTS * 2)) seconds"
+              exit 1
+            fi
+
+            # ベースDNの存在確認（冪等性）
+            echo "Checking if base DN already exists..."
+            if ldapsearch -x -H ldap://openldap-ldap:389 \
+               -D "cn=admin,dc=kojigenba-srv,dc=com" \
+               -w "$LDAP_ADMIN_PASSWORD" \
+               -b "dc=kojigenba-srv,dc=com" \
+               -s base "(objectClass=*)" >/dev/null 2>&1; then
+              echo "✓ Base DN already exists - skipping bootstrap"
+              exit 0
+            fi
+
+            echo "Base DN not found - proceeding with bootstrap..."
+
+            # 環境変数チェック
+            : ${ADMIN_USER_SSHA_HASH:?ERROR: ADMIN_USER_SSHA_HASH not set}
+            : ${ADMIN_USER_NT_HASH:?ERROR: ADMIN_USER_NT_HASH not set}
+
+            # LDIF処理（環境変数置換）
+            echo "Processing bootstrap LDIF..."
+            export ADMIN_USER_SSHA_HASH
+            export ADMIN_USER_NT_HASH
+
+            envsubst < /bootstrap/bootstrap.ldif > /tmp/bootstrap-processed.ldif
+
+            # デバッグ出力（パスワードハッシュはマスク）
+            echo "Generated LDIF preview (passwords masked):"
+            sed 's/userPassword:.*/userPassword: ***MASKED***/g; s/sambaNTPassword:.*/sambaNTPassword: ***MASKED***/g' \
+              /tmp/bootstrap-processed.ldif | head -20
+            echo "... (truncated)"
+
+            # LDIF投入
+            echo "Loading bootstrap data..."
+            ldapadd -x -H ldap://openldap-ldap:389 \
+              -D "cn=admin,dc=kojigenba-srv,dc=com" \
+              -w "$LDAP_ADMIN_PASSWORD" \
+              -f /tmp/bootstrap-processed.ldif
+
+            EXIT_CODE=$?
+            if [ $EXIT_CODE -eq 0 ]; then
+              echo "✓ Bootstrap data loaded successfully!"
+            else
+              echo "ERROR: Bootstrap failed with exit code $EXIT_CODE"
+              exit $EXIT_CODE
+            fi
+
+            # 確認
+            echo "Verifying bootstrap..."
+            ldapsearch -x -H ldap://openldap-ldap:389 \
+              -D "cn=admin,dc=kojigenba-srv,dc=com" \
+              -w "$LDAP_ADMIN_PASSWORD" \
+              -b "dc=kojigenba-srv,dc=com" \
+              -LLL "(objectClass=organizationalUnit)" dn
+
+            echo "=== Bootstrap completed successfully ==="
+        env:
+        - name: LDAP_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: openldap-secrets
+              key: admin_password
+        - name: ADMIN_USER_SSHA_HASH
+          valueFrom:
+            secretKeyRef:
+              name: openldap-secrets
+              key: admin_user_ssha_hash
+        - name: ADMIN_USER_NT_HASH
+          valueFrom:
+            secretKeyRef:
+              name: openldap-secrets
+              key: admin_user_nt_hash
+        volumeMounts:
+        - name: bootstrap-config
+          mountPath: /bootstrap
+          readOnly: true
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: bootstrap-config
+        configMap:
+          name: openldap-bootstrap-config
+          defaultMode: 0444

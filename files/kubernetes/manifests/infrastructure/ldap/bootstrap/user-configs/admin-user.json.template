@@ -1,9 +1,0 @@
-{
-  "id": "admin-user",
-  "email": "admin@kojigenba-srv.com",
-  "displayName": "Administrator",
-  "firstName": "System",
-  "lastName": "Administrator",
-  "password": "REPLACE_WITH_SECURE_PASSWORD",
-  "groups": ["lldap_admin", "system-admins"]
-}

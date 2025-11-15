@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openldap-config
+  namespace: openldap
+  labels:
+    app.kubernetes.io/name: openldap
+    app.kubernetes.io/component: authentication
+data:
+  slapd.conf.template: |
+    # OpenLDAP Configuration for Samba Integration
+
+    # ログレベル（stats = 接続・操作ログ）
+    loglevel stats
+
+    # プロトコル
+    allow bind_v2
+
+    # スキーマ読み込み（順序重要：sambaは最後）
+    include /etc/ldap/schema/core.schema
+    include /etc/ldap/schema/cosine.schema
+    include /etc/ldap/schema/inetorgperson.schema
+    include /etc/ldap/schema/nis.schema
+    include /etc/ldap/schema/samba.schema
+
+    # モジュールロード
+    modulepath /usr/lib/ldap
+    moduleload back_mdb.la
+    moduleload memberof.la
+
+    # データベース設定
+    database mdb
+    suffix "dc=kojigenba-srv,dc=com"
+    rootdn "cn=admin,dc=kojigenba-srv,dc=com"
+    rootpw ${LDAP_ADMIN_SSHA_HASH}
+    directory /var/lib/ldap
+
+    # インデックス
+    index objectClass eq
+    index cn pres,sub,eq
+    index sn pres,sub,eq
+    index mail pres,sub,eq
+    index givenName pres,sub,eq
+    index uidNumber eq
+    index gidNumber eq
+    index memberUid eq
+    index sambaSID eq
+    index sambaPrimaryGroupSID eq
+    index sambaDomainName eq
+
+    # データベース制限
+    sizelimit 500
+    timelimit 3600
+
+    # TLS設定
+    # Reference: https://www.openldap.org/doc/admin26/tls.html
+    TLSCertificateFile /certs/tls.crt
+    TLSCertificateKeyFile /certs/tls.key
+    # TLSCACertificateFile is optional; cert-manager may not provide ca.crt
+    # TLSCACertificateFile /certs/ca.crt
+    TLSDHParamFile /etc/ldap/dhparam.pem
+    # Note: TLSCipherSuite is omitted to use OpenSSL 3.0 default secure ciphers
+    # OpenSSL 3.0 cipher string format compatibility with slapd has limitations
+    # Default OpenSSL 3.0 AEAD ciphers (ECDHE-RSA-AES*-GCM, DHE-RSA-AES*-GCM, etc.)
+    # provide strong security without explicit configuration
+
+    # MemberOf Overlay
+    overlay memberof
+    memberof-group-oc groupOfNames
+    memberof-member-ad member
+    memberof-memberof-ad memberOf

@@ -47,13 +47,17 @@ crash.*.log
 !**/secret.yaml.template
 !**/cloudflare-secret.yaml.template
 
-# LDAP Bootstrap configuration files (contain default credentials)
-files/kubernetes/manifests/infrastructure/ldap/bootstrap-configmap.yaml
-files/kubernetes/manifests/infrastructure/ldap/bootstrap/user-configs/*.json
-files/kubernetes/manifests/infrastructure/ldap/bootstrap/group-configs/*.json
-!files/kubernetes/manifests/infrastructure/ldap/bootstrap-configmap.yaml.template
-!files/kubernetes/manifests/infrastructure/ldap/bootstrap/user-configs/*.json.template
-!files/kubernetes/manifests/infrastructure/ldap/bootstrap/group-configs/*.json.template
+# OpenLDAP Bootstrap configuration files (contain default credentials)
+files/kubernetes/manifests/infrastructure/ldap/openldap/bootstrap-configmap.yaml
+files/kubernetes/manifests/infrastructure/ldap/openldap/bootstrap/user-configs/*.json
+files/kubernetes/manifests/infrastructure/ldap/openldap/bootstrap/group-configs/*.json
+!files/kubernetes/manifests/infrastructure/ldap/openldap/bootstrap-configmap.yaml.template
+!files/kubernetes/manifests/infrastructure/ldap/openldap/bootstrap/user-configs/*.json.template
+!files/kubernetes/manifests/infrastructure/ldap/openldap/bootstrap/group-configs/*.json.template
+
+# phpLDAPadmin configuration (contains LDAP admin password)
+files/kubernetes/manifests/infrastructure/ldap/phpldapadmin/configmap-phpadmin.yaml
+!files/kubernetes/manifests/infrastructure/ldap/phpldapadmin/configmap-phpadmin.yaml.template
 
 # ==========================================
 # Terraform関連

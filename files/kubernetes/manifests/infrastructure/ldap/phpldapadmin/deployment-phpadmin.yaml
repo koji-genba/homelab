@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: phpadmin
+  namespace: openldap
+  labels:
+    app.kubernetes.io/name: phpadmin
+    app.kubernetes.io/component: authentication
+    app.kubernetes.io/part-of: authentication-infrastructure
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: phpadmin
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: phpadmin
+        app.kubernetes.io/component: authentication
+    spec:
+      dnsConfig:
+        options:
+        - name: ndots
+          value: "1"
+      containers:
+      - name: phpadmin
+        image: ghcr.io/koji-genba/phpldapadmin:v1
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        env:
+        - name: LDAP_HOST
+          value: "openldap-ldap.openldap.svc.cluster.local"
+        - name: LDAP_PORT
+          value: "389"
+        - name: LDAP_BASE_DN
+          value: "dc=kojigenba-srv,dc=com"
+        - name: LDAP_USERNAME
+          value: "cn=admin,dc=kojigenba-srv,dc=com"
+        - name: LDAP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: openldap-secrets
+              key: admin_password
+        - name: APP_KEY
+          valueFrom:
+            secretKeyRef:
+              name: openldap-secrets
+              key: phpadmin_app_key
+        volumeMounts:
+        - name: env-file
+          mountPath: /app/.env
+          subPath: .env
+          readOnly: true
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /login
+            port: 8080
+          initialDelaySeconds: 300
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /login
+            port: 8080
+          initialDelaySeconds: 300
+          periodSeconds: 10
+          timeoutSeconds: 10
+          successThreshold: 1
+          failureThreshold: 3
+      volumes:
+      - name: env-file
+        configMap:
+          name: phpadmin-env
+          defaultMode: 0444
