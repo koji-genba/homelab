@@ -10,7 +10,7 @@ metadata:
 spec:
   secretName: ldaps-kojigenba-srv-com-tls
   issuerRef:
-    name: letsencrypt-staging
+    name: letsencrypt-prod
     kind: ClusterIssuer
   dnsNames:
   - ldaps.kojigenba-srv.com
