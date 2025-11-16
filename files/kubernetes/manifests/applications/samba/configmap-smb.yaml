@@ -26,8 +26,8 @@ data:
     comment = Shared Storage
     browseable = yes
     writable = yes
-    create mask = 0755
-    directory mask = 0755
+    create mask = 0600
+    directory mask = 0700
     valid users = @samba-users
 
     [archive]
@@ -35,6 +35,6 @@ data:
     comment = Archive Storage
     browseable = yes
     writable = yes
-    create mask = 0755
-    directory mask = 0755
+    create mask = 0600
+    directory mask = 0700
     valid users = @samba-users
