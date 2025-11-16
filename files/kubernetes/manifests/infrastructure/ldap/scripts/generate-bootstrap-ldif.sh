@@ -166,14 +166,12 @@ EOF_GROUP_END
 done
 
 # ユーザーエントリ生成
-NEXT_UID=10001
-NEXT_SID=1001
-
 for user_file in "$USER_CONFIGS_DIR"/*.json; do
   if [ ! -f "$user_file" ]; then
     continue
   fi
 
+  # 基本情報の読み込み
   user_id=$(jq -r '.id' "$user_file")
   email=$(jq -r '.email' "$user_file")
   display_name=$(jq -r '.displayName' "$user_file")
@@ -182,32 +180,55 @@ for user_file in "$USER_CONFIGS_DIR"/*.json; do
   password=$(jq -r '.password' "$user_file")
   groups=$(jq -r '.groups[]' "$user_file" 2>/dev/null || echo "")
 
-  # プライマリグループを決定（最初の有効なグループ、なければsystem-users）
-  primary_group=""
-  for g in $groups; do
-    if [ -n "${GROUP_GID_MAP[$g]}" ]; then
-      primary_group="$g"
+  # UID/GID/SID/homeDirectory/loginShellの読み込み（JSON指定を優先）
+  uid_number=$(jq -r '.uid // empty' "$user_file")
+  gid_number=$(jq -r '.gid // empty' "$user_file")
+  samba_sid=$(jq -r '.sambaSID // empty' "$user_file")
+  home_directory=$(jq -r '.homeDirectory // empty' "$user_file")
+  login_shell=$(jq -r '.loginShell // empty' "$user_file")
+
+  # 必須フィールドの検証
+  if [ -z "$uid_number" ]; then
+    echo "ERROR: Missing required field 'uid' in $user_file"
+    echo "Please add: \"uid\": <number> (e.g., 10001)"
+    exit 1
+  fi
+
+  if [ -z "$gid_number" ]; then
+    echo "ERROR: Missing required field 'gid' in $user_file"
+    echo "Please add: \"gid\": <number> (e.g., 10002 for system-users)"
+    exit 1
+  fi
+
+  if [ -z "$samba_sid" ]; then
+    echo "ERROR: Missing required field 'sambaSID' in $user_file"
+    echo "Please add: \"sambaSID\": \"S-1-5-21-3623811015-3361044348-30300820-<RID>\""
+    exit 1
+  fi
+
+  # デフォルト値の設定
+  if [ -z "$home_directory" ]; then
+    home_directory="/export/home/$user_id"
+  fi
+
+  if [ -z "$login_shell" ]; then
+    login_shell="/bin/bash"
+  fi
+
+  # プライマリグループSIDを決定（gidNumberから逆引き）
+  primary_sid=""
+  for group_name in "${!GROUP_GID_MAP[@]}"; do
+    if [ "${GROUP_GID_MAP[$group_name]}" = "$gid_number" ]; then
+      primary_sid="${GROUP_SID_MAP[$group_name]}"
       break
     fi
   done
 
-  if [ -z "$primary_group" ]; then
-    primary_group="system-users"
-  fi
-
-  primary_gid="${GROUP_GID_MAP[$primary_group]}"
-  primary_sid="${GROUP_SID_MAP[$primary_group]}"
-
-  # UID/SIDの割り当て
-  uid_number=$NEXT_UID
-  samba_sid="S-1-5-21-3623811015-3361044348-30300820-$NEXT_SID"
-
-  # 特別な処理: admin-userは固定値を使用
-  if [ "$user_id" = "admin-user" ] || [ "$user_id" = "admin" ]; then
-    uid_number=10001
-    samba_sid="S-1-5-21-3623811015-3361044348-30300820-1001"
-    primary_gid="${GROUP_GID_MAP[system-admins]}"
-    primary_sid="${GROUP_SID_MAP[system-admins]}"
+  # プライマリグループSIDが見つからない場合はエラー
+  if [ -z "$primary_sid" ]; then
+    echo "ERROR: GID $gid_number does not match any known group in $user_file"
+    echo "Known GIDs: system-admins=10001, system-users=10002, system-readonly=10003, samba-users=10004"
+    exit 1
   fi
 
   # 環境変数名用にハイフンをアンダースコアに変換
@@ -226,9 +247,9 @@ for user_file in "$USER_CONFIGS_DIR"/*.json; do
     userPassword: \${${user_id_env}_SSHA_HASH}
     uid: $user_id
     uidNumber: $uid_number
-    gidNumber: $primary_gid
-    homeDirectory: /export/home/$user_id
-    loginShell: /bin/bash
+    gidNumber: $gid_number
+    homeDirectory: $home_directory
+    loginShell: $login_shell
     sambaSID: $samba_sid
     sambaNTPassword: \${${user_id_env}_NT_HASH}
     sambaPrimaryGroupSID: $primary_sid
@@ -236,12 +257,6 @@ for user_file in "$USER_CONFIGS_DIR"/*.json; do
     sambaPwdLastSet: 1763216334
 
 EOF_USER
-
-  # 次のUID/SID
-  if [ "$user_id" != "admin" ]; then
-    NEXT_UID=$((NEXT_UID + 1))
-    NEXT_SID=$((NEXT_SID + 1))
-  fi
 done
 
 echo "✓ Bootstrap ConfigMap generated successfully!"

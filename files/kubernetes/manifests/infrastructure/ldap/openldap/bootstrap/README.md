@@ -31,23 +31,46 @@ bootstrap/
 cat > user-configs/newuser.json <<EOF
 {
   "id": "newuser",
+  "uid": 10100,
+  "gid": 10002,
+  "sambaSID": "S-1-5-21-3623811015-3361044348-30300820-2100",
   "email": "newuser@kojigenba-srv.com",
   "displayName": "New User",
   "firstName": "New",
   "lastName": "User",
   "password": "initial-password-123",
-  "groups": ["system-users", "samba-users"]
+  "groups": ["system-users", "samba-users"],
+  "homeDirectory": "/export/home/newuser",
+  "loginShell": "/bin/bash"
 }
 EOF
 ```
 
-**フィールド説明:**
-- `id`: ユーザーID（UNIX uid、LDAP uidとして使用）
+**必須フィールド:**
+- `id`: ユーザーID（LDAP uid、ユニークである必要がある）
+- `uid`: UNIX UID番号（例: 10100、**ユニークかつ固定値推奨**）
+- `gid`: プライマリグループのGID（例: 10002=system-users）
+- `sambaSID`: Samba SID（例: S-1-5-21-...-2100、**ユニークである必要がある**）
 - `email`: メールアドレス
 - `displayName`: 表示名
 - `firstName`: 名
 - `lastName`: 姓
 - `password`: 初期パスワード（プレーンテキスト、ハッシュ化されて保存）
+- `groups`: 所属グループ配列（例: ["system-users", "samba-users"]）
+
+**オプションフィールド（デフォルト値あり）:**
+- `homeDirectory`: ホームディレクトリ（デフォルト: `/export/home/<id>`）
+- `loginShell`: ログインシェル（デフォルト: `/bin/bash`）
+
+**UID/GID/SID割り当てガイドライン:**
+- UID: 10001から開始、連番で割り当て（10001はadmin-user用に予約）
+- GID: 既存グループから選択
+  - 10001: system-admins
+  - 10002: system-users（推奨デフォルト）
+  - 10003: system-readonly
+  - 10004: samba-users
+- Samba SID: `S-1-5-21-3623811015-3361044348-30300820-<RID>`
+  - RID: 1001から開始、UIDと同じ値を使用推奨（例: UID 10002 → RID 1002）
 - `groups`: 所属グループの配列
 
 **利用可能なグループ:**
