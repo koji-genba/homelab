@@ -74,5 +74,6 @@ data:
     local-data: "staging.kojigenba-srv.com. A 192.168.11.100"
     local-data: "prod.kojigenba-srv.com. A 192.168.11.100"
     local-data: "ldap.kojigenba-srv.com. A 192.168.11.100"
-    local-data: "ldaps.kojigenba-srv.com. A 192.168.11.102"
     local-data: "phpadmin.kojigenba-srv.com. A 192.168.11.100"
+    local-data: "ldaps.kojigenba-srv.com. A 192.168.11.102"
+    local-data: "samba.kojigenba-srv.com. A 192.168.11.103"
