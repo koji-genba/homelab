@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openldap-bootstrap-update-config
+  namespace: openldap
+  labels:
+    app.kubernetes.io/name: openldap
+    app.kubernetes.io/component: authentication
+data:
+  # 既存エントリを更新するための LDIF
+  # ldapmodify 形式で記述
+  update.ldif: |
+    # Group: samba-users - memberUid の更新
+    dn: cn=samba-users,ou=groups,dc=kojigenba-srv,dc=com
+    changetype: modify
+    replace: memberUid
+    memberUid: admin-user
+    memberUid: koji-genba
+    -
+
+    # Group: system-users - memberUid の更新
+    dn: cn=system-users,ou=groups,dc=kojigenba-srv,dc=com
+    changetype: modify
+    replace: memberUid
+    memberUid: admin-user
+    memberUid: koji-genba
+    -
+
+    # Group: system-admins - memberUid の更新
+    dn: cn=system-admins,ou=groups,dc=kojigenba-srv,dc=com
+    changetype: modify
+    replace: memberUid
+    memberUid: admin-user
+    -
+

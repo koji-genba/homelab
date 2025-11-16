@@ -1,0 +1,9 @@
+{
+  "id": "example-user",
+  "email": "example@kojigenba-srv.com",
+  "displayName": "Example User",
+  "firstName": "Example",
+  "lastName": "User",
+  "password": "CHANGE_ME_STRONG_PASSWORD",
+  "groups": ["system-users"]
+}

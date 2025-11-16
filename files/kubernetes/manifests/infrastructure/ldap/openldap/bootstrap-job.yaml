@@ -57,14 +57,10 @@ spec:
               exit 1
             fi
 
-            # 環境変数チェック
-            : ${ADMIN_USER_SSHA_HASH:?ERROR: ADMIN_USER_SSHA_HASH not set}
-            : ${ADMIN_USER_NT_HASH:?ERROR: ADMIN_USER_NT_HASH not set}
-
             # LDIF処理（環境変数置換）
+            # Note: envFromでSecret内の全ての環境変数が自動的に設定される
+            # ユーザー固有の環境変数チェックは不要（JSON設定に依存）
             echo "Processing bootstrap LDIF..."
-            export ADMIN_USER_SSHA_HASH
-            export ADMIN_USER_NT_HASH
 
             envsubst < /bootstrap/bootstrap.ldif > /tmp/bootstrap-processed.ldif
 
@@ -105,6 +101,27 @@ spec:
               exit $EXIT_CODE
             fi
 
+            # 既存エントリの更新（memberUid など）
+            echo "Applying updates to existing entries..."
+            if [ -f /bootstrap-update/update.ldif ]; then
+              timeout 60 ldapmodify -c -x -H ldap://openldap-ldap:389 \
+                -D "cn=admin,dc=kojigenba-srv,dc=com" \
+                -w "$LDAP_ADMIN_PASSWORD" \
+                -f /bootstrap-update/update.ldif 2>&1 | tee /tmp/ldapmodify-output.log
+
+              UPDATE_EXIT_CODE=${PIPESTATUS[0]}
+              echo "ldapmodify exit code: $UPDATE_EXIT_CODE"
+
+              if [ $UPDATE_EXIT_CODE -eq 0 ]; then
+                echo "✓ Updates applied successfully!"
+              else
+                echo "WARNING: Some updates may have failed (this is expected if entries don't exist yet)"
+                cat /tmp/ldapmodify-output.log
+              fi
+            else
+              echo "No update LDIF found, skipping..."
+            fi
+
             # 確認
             echo "Verifying bootstrap..."
             ldapsearch -x -H ldap://openldap-ldap:389 \
@@ -114,25 +131,21 @@ spec:
               -LLL "(objectClass=organizationalUnit)" dn
 
             echo "=== Bootstrap completed successfully ==="
+        envFrom:
+        - secretRef:
+            name: openldap-secrets
         env:
         - name: LDAP_ADMIN_PASSWORD
           valueFrom:
             secretKeyRef:
               name: openldap-secrets
               key: admin_password
-        - name: ADMIN_USER_SSHA_HASH
-          valueFrom:
-            secretKeyRef:
-              name: openldap-secrets
-              key: admin_user_ssha_hash
-        - name: ADMIN_USER_NT_HASH
-          valueFrom:
-            secretKeyRef:
-              name: openldap-secrets
-              key: admin_user_nt_hash
         volumeMounts:
         - name: bootstrap-config
           mountPath: /bootstrap
+          readOnly: true
+        - name: bootstrap-update-config
+          mountPath: /bootstrap-update
           readOnly: true
         resources:
           requests:
@@ -145,4 +158,8 @@ spec:
       - name: bootstrap-config
         configMap:
           name: openldap-bootstrap-config
+          defaultMode: 0444
+      - name: bootstrap-update-config
+        configMap:
+          name: openldap-bootstrap-update-config
           defaultMode: 0444

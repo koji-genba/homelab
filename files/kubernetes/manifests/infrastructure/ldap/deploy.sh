@@ -16,6 +16,11 @@ echo ""
 if [ "$1" == "--clean" ]; then
   echo "⚠️  Clean mode: Deleting resources..."
 
+  # Deploymentを先に削除（PVCのアンマウントを促進）
+  echo "Deleting Deployments..."
+  kubectl delete deployment -n $NAMESPACE --all --ignore-not-found=true 2>/dev/null || true
+  sleep 3
+
   # Podを先に強制削除（PVCの削除を進めるため）
   echo "Deleting Pods..."
   kubectl delete pod -n $NAMESPACE --all --grace-period=0 --force 2>/dev/null || true
@@ -83,24 +88,30 @@ sleep 2
 
 # Check for required Secret
 echo "Checking for required Secret..."
-if ! kubectl get secret openldap-secrets -n $NAMESPACE >/dev/null 2>&1; then
-  echo "ERROR: Secret 'openldap-secrets' not found in namespace '$NAMESPACE'"
+while ! kubectl get secret openldap-secrets -n $NAMESPACE >/dev/null 2>&1; do
+  echo "⚠️  Secret 'openldap-secrets' not found in namespace '$NAMESPACE'"
   echo ""
-  echo "Please run: scripts/generate-ldap-secrets.sh"
-  echo "Then apply: kubectl apply -f secret.yaml"
-  exit 1
-fi
+  echo "Required actions:"
+  echo "  1. Run: scripts/generate-all.sh"
+  echo "  2. Apply: kubectl apply -f secret.yaml"
+  echo ""
+  echo "Press Enter after applying the secret to continue, or Ctrl+C to cancel..."
+  read
+done
 echo "✓ Secret 'openldap-secrets' found"
 echo ""
 
 # Check for phpLDAPadmin ConfigMap
 echo "Checking for phpLDAPadmin ConfigMap..."
-if ! kubectl get configmap phpadmin-env -n $NAMESPACE >/dev/null 2>&1; then
-  echo "ERROR: ConfigMap 'phpadmin-env' not found in namespace '$NAMESPACE'"
+while ! kubectl get configmap phpadmin-env -n $NAMESPACE >/dev/null 2>&1; do
+  echo "⚠️  ConfigMap 'phpadmin-env' not found in namespace '$NAMESPACE'"
   echo ""
-  echo "Please apply: kubectl apply -f phpldapadmin/configmap-phpadmin.yaml"
-  exit 1
-fi
+  echo "Required action:"
+  echo "  Apply: kubectl apply -f phpldapadmin/configmap-phpadmin.yaml"
+  echo ""
+  echo "Press Enter after applying the ConfigMap to continue, or Ctrl+C to cancel..."
+  read
+done
 echo "✓ ConfigMap 'phpadmin-env' found"
 echo ""
 
@@ -114,6 +125,7 @@ echo ""
 echo "[Step 3/6] Creating ConfigMap and bootstrap data..."
 kubectl apply -f "$SCRIPT_DIR/openldap/configmap.yaml"
 kubectl apply -f "$SCRIPT_DIR/openldap/bootstrap-configmap.yaml"
+kubectl apply -f "$SCRIPT_DIR/openldap/bootstrap-update-configmap.yaml"
 
 # Step 4: Create TLS Certificates (MUST be before Deployment to ensure Secret exists)
 echo ""
