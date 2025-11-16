@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: samba-config
+  namespace: samba
+  labels:
+    app.kubernetes.io/name: samba
+    app.kubernetes.io/component: configuration
+data:
+  smb.conf: |
+    [global]
+    workgroup = HOMELAB
+    security = user
+    passdb backend = tdbsam
+
+    [shared]
+    path = /mnt/shared
+    comment = Shared Storage
+    browseable = yes
+    writable = yes
+    create mask = 0755
+    directory mask = 0755
+
+    [archive]
+    path = /mnt/archive
+    comment = Archive Storage
+    browseable = yes
+    writable = yes
+    create mask = 0755
+    directory mask = 0755

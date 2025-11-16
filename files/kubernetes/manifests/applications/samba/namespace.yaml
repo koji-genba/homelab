@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: samba
+  labels:
+    app.kubernetes.io/name: samba
+    app.kubernetes.io/component: file-sharing
+    app.kubernetes.io/part-of: file-services
