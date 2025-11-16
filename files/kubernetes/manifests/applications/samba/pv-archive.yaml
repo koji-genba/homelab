@@ -17,6 +17,12 @@ spec:
     - hard
     - nfsvers=4.1
     - noatime
+    - async
+    - rsize=1048576
+    - wsize=1048576
+    - timeo=600
+    - retrans=2
+    - nconnect=4
   nfs:
     server: 192.168.10.11
     path: /mnt/sdc/archive
