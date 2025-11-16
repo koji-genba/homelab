@@ -5,10 +5,11 @@ OpenLDAPユーザ認証を利用したSambaファイルサーバーのKubernetes
 ## 概要
 
 - **プロトコル**: SMB3 (TCP 445)
-- **認証**: OpenLDAP (dc=kojigenba-srv,dc=com)
+- **認証**: OpenLDAP ldapsam backend (dc=kojigenba-srv,dc=com)
 - **ストレージ**: NFS共有 (nfs-shared StorageClass)
 - **対応クライアント**: Windows, macOS, Android
 - **アクセス権限**: `samba-users` LDAP グループ所属者
+- **NSS統合**: nslcd による LDAP ユーザー/グループ解決
 
 ## アーキテクチャ
 
@@ -16,7 +17,10 @@ OpenLDAPユーザ認証を利用したSambaファイルサーバーのKubernetes
 クライアント (Win/Mac/Android)
     ↓ SMB3 (445/TCP)
 Samba Container (K8s Pod)
-    ↓ LDAP
+    ├─ smbd (ldapsam backend)
+    ├─ nslcd (NSS LDAP daemon)
+    └─ LDAP クエリ
+         ↓
 OpenLDAP (openldap namespace)
     ↓ NFS
 NFS Shared Storage (/tank/data/shared)
@@ -54,11 +58,16 @@ samba/
 ```bash
 # Samba Dockerイメージをビルド
 cd docker
-docker build -t ghcr.io/koji-genba/samba:v1.10 .
+docker build -t ghcr.io/koji-genba/samba:v1.32 .
 
 # レジストリにプッシュ
-docker push ghcr.io/koji-genba/samba:v1.10
+docker push ghcr.io/koji-genba/samba:v1.32
 ```
+
+**v1.32 での変更点:**
+- NSS LDAP (nslcd) 統合を追加
+- UNIX ユーザー/グループの LDAP からの解決をサポート
+- Primary Group SID の正しい解決を実現
 
 ### 2. OpenLDAPの更新
 
@@ -141,14 +150,34 @@ smb://192.168.11.103/shared
 
 ### LDAP連携設定
 
-```
+#### Samba ldapsam 設定
+
+```ini
 security = user
 passdb backend = ldapsam:ldap://openldap-ldap.openldap.svc.cluster.local:389
 ldap suffix = dc=kojigenba-srv,dc=com
+ldap user suffix = ou=people
+ldap group suffix = ou=groups
 ldap admin dn = cn=admin,dc=kojigenba-srv,dc=com
 ldap passwd sync = yes
 ldap timeout = 10
+ldap ssl = off
+netbios name = k8s-samba
+workgroup = HOMELAB
 ```
+
+#### NSS LDAP 設定 (nslcd)
+
+```ini
+uri ldap://openldap-ldap.openldap.svc.cluster.local:389
+base dc=kojigenba-srv,dc=com
+base passwd ou=people,dc=kojigenba-srv,dc=com
+base group ou=groups,dc=kojigenba-srv,dc=com
+binddn cn=admin,dc=kojigenba-srv,dc=com
+bindpw <LDAP_BIND_PASSWORD>
+```
+
+NSS により、Samba は LDAP から UNIX ユーザー/グループ情報を取得し、Primary Group SID を正しく解決できます。
 
 ## トラブルシューティング
 
@@ -191,6 +220,32 @@ kubectl exec -it deployment/samba -n samba -- ldapsearch -x \
   -b dc=kojigenba-srv,dc=com \
   -D cn=admin,dc=kojigenba-srv,dc=com \
   -W "cn=samba-users,ou=groups,dc=kojigenba-srv,dc=com"
+```
+
+### NSS LDAP 動作確認
+
+```bash
+# ユーザー情報を取得
+kubectl exec -it deployment/samba -n samba -- getent passwd admin
+
+# グループ情報を取得
+kubectl exec -it deployment/samba -n samba -- getent group samba-users
+
+# ユーザーのグループメンバーシップを確認
+kubectl exec -it deployment/samba -n samba -- id admin
+
+# nslcd デーモンの状態確認
+kubectl exec -it deployment/samba -n samba -- pgrep -a nslcd
+```
+
+### Samba ユーザーデータベース確認
+
+```bash
+# Samba のユーザー情報を確認
+kubectl exec -it deployment/samba -n samba -- pdbedit -Lv admin
+
+# Samba のグループマッピングを確認
+kubectl exec -it deployment/samba -n samba -- net groupmap list
 ```
 
 ### クライアント接続テスト

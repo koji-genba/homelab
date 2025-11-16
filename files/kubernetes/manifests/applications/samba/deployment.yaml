@@ -22,8 +22,8 @@ spec:
     spec:
       containers:
       - name: samba
-        image: ghcr.io/koji-genba/samba:v1.10
-        imagePullPolicy: IfNotPresent
+        image: ghcr.io/koji-genba/samba:v1.32
+        imagePullPolicy: Always
         ports:
         - name: smb
           containerPort: 445
@@ -34,6 +34,8 @@ spec:
             secretKeyRef:
               name: samba-secrets
               key: ldap_bind_password
+        - name: DEBUG_ENTRYPOINT
+          value: "1"
         volumeMounts:
         - name: samba-config
           mountPath: /etc/samba/smb.conf
@@ -77,6 +79,7 @@ spec:
               - SETUID
               - SETGID
               - SYS_CHROOT
+              - SYS_PTRACE
           privileged: false
       volumes:
       - name: samba-config

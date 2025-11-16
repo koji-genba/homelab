@@ -49,5 +49,4 @@ EXPOSE 445/tcp
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD smbclient -L localhost -U% 2>/dev/null | grep -q Server || exit 1
 
-ENTRYPOINT ["/bin/bash"]
-CMD ["-c", "/usr/local/bin/docker-entrypoint.sh && exec /usr/sbin/smbd -F -d 3"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

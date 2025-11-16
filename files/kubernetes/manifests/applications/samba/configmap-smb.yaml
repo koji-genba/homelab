@@ -10,8 +10,16 @@ data:
   smb.conf: |
     [global]
     workgroup = HOMELAB
+    netbios name = k8s-samba
     security = user
-    passdb backend = tdbsam
+    passdb backend = ldapsam:ldap://openldap-ldap.openldap.svc.cluster.local:389
+    ldap suffix = dc=kojigenba-srv,dc=com
+    ldap user suffix = ou=people
+    ldap group suffix = ou=groups
+    ldap admin dn = cn=admin,dc=kojigenba-srv,dc=com
+    ldap passwd sync = yes
+    ldap timeout = 10
+    ldap ssl = off
 
     [shared]
     path = /mnt/shared
@@ -20,6 +28,7 @@ data:
     writable = yes
     create mask = 0755
     directory mask = 0755
+    valid users = @samba-users
 
     [archive]
     path = /mnt/archive
@@ -28,3 +37,4 @@ data:
     writable = yes
     create mask = 0755
     directory mask = 0755
+    valid users = @samba-users
