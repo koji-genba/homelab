@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: samba-shared-pv
+  labels:
+    app.kubernetes.io/name: samba
+    app.kubernetes.io/component: storage
+    storage-type: nfs-shared
+spec:
+  capacity:
+    storage: 4Ti
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-shared-static
+  mountOptions:
+    - hard
+    - nfsvers=4.1
+    - noatime
+  nfs:
+    server: 192.168.10.11
+    path: /tank/data/shared

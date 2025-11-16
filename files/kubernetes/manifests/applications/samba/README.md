@@ -6,7 +6,7 @@ OpenLDAPユーザ認証を利用したSambaファイルサーバーのKubernetes
 
 - **プロトコル**: SMB3 (TCP 445)
 - **認証**: OpenLDAP ldapsam backend (dc=kojigenba-srv,dc=com)
-- **ストレージ**: NFS共有 (nfs-shared StorageClass)
+- **ストレージ**: Static NFS PV (192.168.10.11:/tank/data/shared)
 - **対応クライアント**: Windows, macOS, Android
 - **アクセス権限**: `samba-users` LDAP グループ所属者
 - **NSS統合**: nslcd による LDAP ユーザー/グループ解決
@@ -32,7 +32,10 @@ NFS Shared Storage (/tank/data/shared)
 samba/
 ├── README.md                    # このファイル
 ├── namespace.yaml               # Namespace定義
-├── pvc-shared.yaml             # PersistentVolumeClaim
+├── pv-shared.yaml              # Static PV (shared用)
+├── pvc-shared.yaml             # PVC (shared用)
+├── pv-archive.yaml             # Static PV (archive用)
+├── pvc-archive.yaml            # PVC (archive用)
 ├── configmap-smb.yaml          # Samba設定 (smb.conf)
 ├── deployment.yaml             # Deployment定義
 ├── service.yaml                # LoadBalancer Service
@@ -47,8 +50,10 @@ samba/
 
 - Kubernetes クラスタが稼働中
 - OpenLDAP が `openldap` namespace で稼働中
-- MetalLB が インストール済み
-- NFS Provisioner が稼働中
+- MetalLB がインストール済み
+- NFSサーバー (192.168.10.11) が稼働中
+  - `/tank/data/shared` がエクスポート済み
+  - `/mnt/sdc/archive` がエクスポート済み
 - Docker イメージレジストリへのアクセス権限
 
 ## デプロイメント手順
@@ -146,7 +151,8 @@ smb://192.168.11.103/shared
 - **パス**: /mnt/archive
 - **説明**: Archive Storage
 - **アクセス権限**: `@samba-users` グループメンバー
-- **ステータス**: 現在は emptyDir で起動（将来的に別NFS実装予定）
+- **ファイル作成マスク**: 0755
+- **ストレージ**: Static NFS PV (192.168.10.11:/mnt/sdc/archive, 6TB)
 
 ### LDAP連携設定
 
@@ -254,14 +260,21 @@ kubectl exec -it deployment/samba -n samba -- net groupmap list
 ```powershell
 # 共有資源を表示
 net view \\192.168.11.103
+
+# shared共有に接続
+net use Z: \\192.168.11.103\shared /user:admin
+
+# archive共有に接続
+net use Y: \\192.168.11.103\archive /user:admin
 ```
 
 #### macOS
 ```bash
 # Finderから接続
-# Cmd+K → smb://192.168.11.103/shared
+# Cmd+K → smb://192.168.11.103/shared または smb://192.168.11.103/archive
 # または
 mount_smbfs -o nobrowse //username@192.168.11.103/shared /Volumes/shared
+mount_smbfs -o nobrowse //username@192.168.11.103/archive /Volumes/archive
 ```
 
 #### Linux
@@ -291,13 +304,41 @@ EOF
 
 ## ストレージ情報
 
-### PVC設定
+### Static PV 設定
 
-- **名前**: samba-shared-storage
-- **ストレージクラス**: nfs-shared
-- **容量**: 1.5Ti
+既存のNFSデータを直接マウントするため、Static PersistentVolumeを使用しています。
+
+#### Shared Storage (PV/PVC)
+
+**PersistentVolume (samba-shared-pv)**
+- **ストレージクラス**: nfs-shared-static
+- **容量**: 4Ti
 - **アクセスモード**: ReadWriteMany
-- **バックエンド**: /tank/data/shared (Proxmox ZFS)
+- **Reclaim Policy**: Retain
+- **NFSサーバー**: 192.168.10.11
+- **NFSパス**: /tank/data/shared (直接マウント)
+
+**PersistentVolumeClaim (samba-shared-storage)**
+- **ストレージクラス**: nfs-shared-static
+- **ボリューム名**: samba-shared-pv (静的バインド)
+- **容量**: 4Ti
+- **アクセスモード**: ReadWriteMany
+
+#### Archive Storage (PV/PVC)
+
+**PersistentVolume (samba-archive-pv)**
+- **ストレージクラス**: nfs-archive-static
+- **容量**: 6Ti
+- **アクセスモード**: ReadWriteMany
+- **Reclaim Policy**: Retain
+- **NFSサーバー**: 192.168.10.11
+- **NFSパス**: /mnt/sdc/archive (直接マウント)
+
+**PersistentVolumeClaim (samba-archive-storage)**
+- **ストレージクラス**: nfs-archive-static
+- **ボリューム名**: samba-archive-pv (静的バインド)
+- **容量**: 6Ti
+- **アクセスモード**: ReadWriteMany
 
 ## セキュリティ考慮事項
 

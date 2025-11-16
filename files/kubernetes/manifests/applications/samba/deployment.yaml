@@ -90,8 +90,8 @@ spec:
         persistentVolumeClaim:
           claimName: samba-shared-storage
       - name: samba-archive
-        emptyDir:
-          sizeLimit: 1.5Ti
+        persistentVolumeClaim:
+          claimName: samba-archive-storage
       - name: samba-logs
         emptyDir:
           sizeLimit: 10Gi
