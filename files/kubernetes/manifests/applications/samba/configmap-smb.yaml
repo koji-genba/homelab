@@ -22,18 +22,30 @@ data:
     ldap ssl = off
 
     # Performance Optimization
-    socket options = TCP_NODELAY IPTOS_LOWDELAY SO_RCVBUF=524288 SO_SNDBUF=524288
+    socket options = TCP_NODELAY IPTOS_LOWDELAY SO_RCVBUF=8388608 SO_SNDBUF=8388608
     use sendfile = yes
-    aio read size = 16384
-    aio write size = 16384
+    aio read size = 1048576
+    aio write size = 1048576
+    write cache size = 8388608
     read raw = yes
     write raw = yes
-    max xmit = 65535
-    min receivefile size = 16384
+    max xmit = 16777216
+    min receivefile size = 1048576
     getwd cache = yes
-    strict allocate = yes
+    strict allocate = no
     strict sync = no
     sync always = no
+    kernel oplocks = no
+    level2 oplocks = yes
+    posix locking = no
+
+    # SMB3 Performance
+    server signing = disabled
+    server multi channel support = yes
+    deadtime = 15
+    smb2 max read = 16777216
+    smb2 max write = 16777216
+    smb2 max trans = 16777216
 
     [shared]
     path = /mnt/shared
