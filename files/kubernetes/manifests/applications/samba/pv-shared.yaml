@@ -17,7 +17,7 @@ spec:
     - hard
     - nfsvers=4.1
     - noatime
-    - async
+    - sync
     - rsize=1048576
     - wsize=1048576
     - timeo=600

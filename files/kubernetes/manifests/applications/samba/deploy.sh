@@ -48,9 +48,12 @@ sed "s|\${ADMIN_PASSWORD}|${ADMIN_PASSWORD}|g" \
 log_info "Applying Samba configuration..."
 kubectl apply -f "${SCRIPT_DIR}/configmap-smb.yaml"
 
-# Apply PVC
-log_info "Creating persistent volume claim..."
+# Apply PV and PVC
+log_info "Creating persistent volumes and claims..."
+kubectl apply -f "${SCRIPT_DIR}/pv-shared.yaml"
 kubectl apply -f "${SCRIPT_DIR}/pvc-shared.yaml"
+kubectl apply -f "${SCRIPT_DIR}/pv-archive.yaml"
+kubectl apply -f "${SCRIPT_DIR}/pvc-archive.yaml"
 
 # Apply Deployment
 log_info "Deploying Samba pod..."

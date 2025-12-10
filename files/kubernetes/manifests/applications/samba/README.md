@@ -53,7 +53,7 @@ samba/
 - MetalLB がインストール済み
 - NFSサーバー (192.168.10.11) が稼働中
   - `/tank/data/shared` がエクスポート済み
-  - `/mnt/sdc/archive` がエクスポート済み
+  - `/mnt/archive/archive` がエクスポート済み
 - Docker イメージレジストリへのアクセス権限
 
 ## デプロイメント手順
@@ -152,7 +152,7 @@ smb://192.168.11.103/shared
 - **説明**: Archive Storage
 - **アクセス権限**: `@samba-users` グループメンバー
 - **ファイル作成マスク**: 0755
-- **ストレージ**: Static NFS PV (192.168.10.11:/mnt/sdc/archive, 6TB)
+- **ストレージ**: Static NFS PV (192.168.10.11:/mnt/archive/archive, 6TB)
 
 ### LDAP連携設定
 
@@ -332,7 +332,7 @@ EOF
 - **アクセスモード**: ReadWriteMany
 - **Reclaim Policy**: Retain
 - **NFSサーバー**: 192.168.10.11
-- **NFSパス**: /mnt/sdc/archive (直接マウント)
+- **NFSパス**: /mnt/archive/archive (直接マウント)
 
 **PersistentVolumeClaim (samba-archive-storage)**
 - **ストレージクラス**: nfs-archive-static
