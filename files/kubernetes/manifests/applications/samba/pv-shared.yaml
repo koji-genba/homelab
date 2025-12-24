@@ -25,4 +25,4 @@ spec:
     - nconnect=4
   nfs:
     server: 192.168.10.11
-    path: /tank/data/shared
+    path: /tank-gen2/data/shared
