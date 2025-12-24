@@ -31,7 +31,7 @@ spec:
             - name: NFS_SERVER
               value: 192.168.10.11
             - name: NFS_PATH
-              value: /tank/data/k8s-volumes
+              value: /tank-gen2/data/k8s-volumes
           resources:
             requests:
               memory: "128Mi"
@@ -43,4 +43,4 @@ spec:
         - name: nfs-client-root
           nfs:
             server: 192.168.10.11
-            path: /tank/data/k8s-volumes
+            path: /tank-gen2/data/k8s-volumes

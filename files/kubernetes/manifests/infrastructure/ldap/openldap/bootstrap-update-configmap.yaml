@@ -14,7 +14,6 @@ data:
     dn: cn=samba-users,ou=groups,dc=kojigenba-srv,dc=com
     changetype: modify
     replace: memberUid
-    memberUid: admin-user
     memberUid: koji-genba
     -
 
@@ -22,14 +21,6 @@ data:
     dn: cn=system-users,ou=groups,dc=kojigenba-srv,dc=com
     changetype: modify
     replace: memberUid
-    memberUid: admin-user
     memberUid: koji-genba
-    -
-
-    # Group: system-admins - memberUid の更新
-    dn: cn=system-admins,ou=groups,dc=kojigenba-srv,dc=com
-    changetype: modify
-    replace: memberUid
-    memberUid: admin-user
     -
 

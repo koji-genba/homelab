@@ -25,4 +25,4 @@ spec:
     - nconnect=4
   nfs:
     server: 192.168.10.11
-    path: /mnt/archive/archive
+    path: /tank-gen1/data/archive
