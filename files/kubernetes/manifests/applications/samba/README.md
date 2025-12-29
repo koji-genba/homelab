@@ -6,7 +6,7 @@ OpenLDAPユーザ認証を利用したSambaファイルサーバーのKubernetes
 
 - **プロトコル**: SMB3 (TCP 445)
 - **認証**: OpenLDAP ldapsam backend (dc=kojigenba-srv,dc=com)
-- **ストレージ**: Static NFS PV (192.168.10.11:/tank/data/shared)
+- **ストレージ**: Static NFS PV (192.168.10.11:/tank-gen2/data/shared)
 - **対応クライアント**: Windows, macOS, Android
 - **アクセス権限**: `samba-users` LDAP グループ所属者
 - **NSS統合**: nslcd による LDAP ユーザー/グループ解決
@@ -23,7 +23,7 @@ Samba Container (K8s Pod)
          ↓
 OpenLDAP (openldap namespace)
     ↓ NFS
-NFS Shared Storage (/tank/data/shared)
+NFS Shared Storage (/tank-gen2/data/shared)
 ```
 
 ## ファイル構成
@@ -52,8 +52,8 @@ samba/
 - OpenLDAP が `openldap` namespace で稼働中
 - MetalLB がインストール済み
 - NFSサーバー (192.168.10.11) が稼働中
-  - `/tank/data/shared` がエクスポート済み
-  - `/mnt/archive/archive` がエクスポート済み
+  - `/tank-gen2/data/shared` がエクスポート済み
+  - `/tank-gen1/data/archive` がエクスポート済み
 - Docker イメージレジストリへのアクセス権限
 
 ## デプロイメント手順
@@ -61,18 +61,23 @@ samba/
 ### 1. Dockerイメージのビルドとプッシュ
 
 ```bash
+# バージョン変数を設定
+export SAMBA_VERSION="v1.32"
+
 # Samba Dockerイメージをビルド
 cd docker
-docker build -t ghcr.io/koji-genba/samba:v1.32 .
+docker build -t ghcr.io/koji-genba/samba:${SAMBA_VERSION} .
 
 # レジストリにプッシュ
-docker push ghcr.io/koji-genba/samba:v1.32
+docker push ghcr.io/koji-genba/samba:${SAMBA_VERSION}
 ```
 
 **v1.32 での変更点:**
 - NSS LDAP (nslcd) 統合を追加
 - UNIX ユーザー/グループの LDAP からの解決をサポート
 - Primary Group SID の正しい解決を実現
+
+> **注**: バージョン番号は環境変数 `SAMBA_VERSION` で管理しています。デプロイ時には [deployment.yaml](deployment.yaml#L25) で指定されたバージョンと一致させてください。
 
 ### 2. OpenLDAPの更新
 
@@ -145,14 +150,18 @@ smb://192.168.11.103/shared
 - **パス**: /mnt/shared
 - **説明**: Shared Storage
 - **アクセス権限**: `@samba-users` グループメンバー
-- **ファイル作成マスク**: 0755
+- **パーミッション設定**:
+  - ファイル作成マスク: 0600
+  - ディレクトリ作成マスク: 0700
 
 #### [archive] 共有
 - **パス**: /mnt/archive
 - **説明**: Archive Storage
 - **アクセス権限**: `@samba-users` グループメンバー
-- **ファイル作成マスク**: 0755
-- **ストレージ**: Static NFS PV (192.168.10.11:/mnt/archive/archive, 6TB)
+- **パーミッション設定**:
+  - ファイル作成マスク: 0600
+  - ディレクトリ作成マスク: 0700
+- **ストレージ**: Static NFS PV (192.168.10.11:/tank-gen1/data/archive, 6TB)
 
 ### LDAP連携設定
 
@@ -223,9 +232,10 @@ kubectl exec -it deployment/samba -n samba -- testparm -s
 # Pod内でLDAPへの接続を確認
 kubectl exec -it deployment/samba -n samba -- ldapsearch -x \
   -H ldap://openldap-ldap.openldap.svc.cluster.local:389 \
-  -b dc=kojigenba-srv,dc=com \
+  -b ou=groups,dc=kojigenba-srv,dc=com \
   -D cn=admin,dc=kojigenba-srv,dc=com \
-  -W "cn=samba-users,ou=groups,dc=kojigenba-srv,dc=com"
+  -W \
+  "(cn=samba-users)"
 ```
 
 ### NSS LDAP 動作確認
@@ -316,7 +326,7 @@ EOF
 - **アクセスモード**: ReadWriteMany
 - **Reclaim Policy**: Retain
 - **NFSサーバー**: 192.168.10.11
-- **NFSパス**: /tank/data/shared (直接マウント)
+- **NFSパス**: /tank-gen2/data/shared (直接マウント)
 
 **PersistentVolumeClaim (samba-shared-storage)**
 - **ストレージクラス**: nfs-shared-static
@@ -332,7 +342,7 @@ EOF
 - **アクセスモード**: ReadWriteMany
 - **Reclaim Policy**: Retain
 - **NFSサーバー**: 192.168.10.11
-- **NFSパス**: /mnt/archive/archive (直接マウント)
+- **NFSパス**: /tank-gen1/data/archive (直接マウント)
 
 **PersistentVolumeClaim (samba-archive-storage)**
 - **ストレージクラス**: nfs-archive-static
@@ -349,6 +359,7 @@ Deployment では以下の Linux Capability を追加しています：
 - `DAC_OVERRIDE`: ファイルアクセス制御
 - `SETUID` / `SETGID`: ユーザ ID 切り替え
 - `SYS_CHROOT`: chroot操作
+- `SYS_PTRACE`: プロセストレース（デバッグ用）
 
 特権モード（privileged）は無効化しています。
 

@@ -16,25 +16,25 @@ Kubernetes上のOpenLDAP（Samba統合対応）
 
 ```bash
 cd files/kubernetes/manifests/infrastructure/ldap/docker
-docker build -t ghcr.io/koji-genba/openldap:v1 .
+docker build -t ghcr.io/koji-genba/openldap:<version> .
 
-# ghcr.io にプッシュ
-docker push ghcr.io/koji-genba/openldap:v1
+# ghcr.io にプッシュ（適宜バージョンを変更）
+docker push ghcr.io/koji-genba/openldap:<version>
 ```
 
 #### phpLDAPadmin イメージ
 
 ```bash
 cd files/kubernetes/manifests/infrastructure/ldap/docker/phpadmin
-docker build -t ghcr.io/koji-genba/phpldapadmin:v1.2 .
+docker build -t ghcr.io/koji-genba/phpldapadmin:<version> .
 
-# ghcr.io にプッシュ
-docker push ghcr.io/koji-genba/phpldapadmin:v1.2
+# ghcr.io にプッシュ（適宜バージョンを変更）
+docker push ghcr.io/koji-genba/phpldapadmin:<version>
 ```
 
 **注**: 公式イメージ `leenooks/phplaadmin` をベースにしているため、Docker Hub へのアクセスが必要です。
 
-**注**: Kubernetes は `imagePullPolicy: IfNotPresent` で両イメージを参照するため、ghcr.io に存在する必要があります。
+**注**: OpenLDAPイメージは `imagePullPolicy: IfNotPresent` で参照されます。phpLDAPadminイメージは `Always` でプルされます。いずれもghcr.ioに存在する必要があります。
 
 ### 2. Namespace作成（先に実施）
 
@@ -129,7 +129,7 @@ ldapsearch -x -H ldap://localhost:389 \
 ### LDAPS接続テスト
 
 ```bash
-ldapsearch -x -H ldaps://ldap.kojigenba-srv.com:636 \
+ldapsearch -x -H ldaps://ldaps.kojigenba-srv.com:636 \
   -D "cn=admin,dc=kojigenba-srv,dc=com" \
   -W \
   -b "dc=kojigenba-srv,dc=com" \
