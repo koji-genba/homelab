@@ -1,5 +1,5 @@
 # storageclass.yaml
-# StorageClass for /tank/data/k8s-volumes backend
+# StorageClass for /tank-gen2/data/k8s-volumes backend
 # Naming convention: nfs-<backend-path-name>
 apiVersion: storage.k8s.io/v1
 kind: StorageClass

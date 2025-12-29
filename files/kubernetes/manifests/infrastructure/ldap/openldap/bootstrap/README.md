@@ -1,4 +1,4 @@
-p# OpenLDAP Bootstrap User/Group Management
+# OpenLDAP Bootstrap User/Group Management
 
 このディレクトリには、OpenLDAPのユーザーとグループを宣言的に管理するためのJSON設定ファイルが含まれています。
 
