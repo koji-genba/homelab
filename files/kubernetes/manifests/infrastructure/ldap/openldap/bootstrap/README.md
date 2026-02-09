@@ -11,13 +11,11 @@ bootstrap/
 │   ├── admin-user.json
 │   ├── koji-genba.json
 │   └── ...
-├── group-configs/         # グループ定義JSONファイル
-│   ├── system-admins.json
-│   ├── system-users.json
-│   ├── system-readonly.json
-│   └── samba-users.json
-├── user-schemas/          # ユーザースキーマ定義（参考用）
-└── group-schemas/         # グループスキーマ定義（参考用）
+└── group-configs/         # グループ定義JSONファイル
+    ├── system-admins.json
+    ├── system-users.json
+    ├── system-readonly.json
+    └── samba-users.json
 ```
 
 ## ユーザー管理

@@ -25,14 +25,14 @@ docker push ghcr.io/koji-genba/openldap:<version>
 #### phpLDAPadmin イメージ
 
 ```bash
-cd files/kubernetes/manifests/infrastructure/ldap/docker/phpadmin
+cd files/kubernetes/manifests/infrastructure/ldap/docker/phpLDAPadmin
 docker build -t ghcr.io/koji-genba/phpldapadmin:<version> .
 
 # ghcr.io にプッシュ（適宜バージョンを変更）
 docker push ghcr.io/koji-genba/phpldapadmin:<version>
 ```
 
-**注**: 公式イメージ `leenooks/phplaadmin` をベースにしているため、Docker Hub へのアクセスが必要です。
+**注**: 公式イメージ `phpldapadmin/phpldapadmin` をベースにしているため、Docker Hub へのアクセスが必要です。
 
 **注**: OpenLDAPイメージは `imagePullPolicy: IfNotPresent` で参照されます。phpLDAPadminイメージは `Always` でプルされます。いずれもghcr.ioに存在する必要があります。
 
