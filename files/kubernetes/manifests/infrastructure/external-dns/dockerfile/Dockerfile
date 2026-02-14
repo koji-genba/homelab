@@ -10,10 +10,12 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # unboundユーザーはパッケージで既に作成済み
-# 必要なディレクトリ作成と権限設定のみ実行
+# 必要なディレクトリ作成と権限設定
 RUN mkdir -p /opt/unbound/etc/unbound/local-zones \
     && mkdir -p /opt/unbound/var/lib/unbound \
-    && chown -R unbound:unbound /opt/unbound
+    && mkdir -p /shared/local-zones \
+    && mkdir -p /shared/rpz \
+    && chown -R unbound:unbound /opt/unbound /shared
 
 # エントリーポイントスクリプトコピー
 COPY entrypoint.sh /entrypoint.sh

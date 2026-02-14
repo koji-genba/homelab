@@ -1,0 +1,141 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: blocklist-updater
+  namespace: external-dns
+  labels:
+    app: external-unbound
+    component: updater
+spec:
+  schedule: "0 17 * * *"  # 毎日 17:00 UTC (日本時間 2:00)
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    metadata:
+      labels:
+        app: blocklist-updater
+        component: updater-job
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 900  # 15分でタイムアウト
+      template:
+        metadata:
+          labels:
+            app: blocklist-updater
+            component: updater-pod
+        spec:
+          restartPolicy: Never
+          serviceAccountName: blocklist-updater
+
+          volumes:
+          - name: shared-data
+            persistentVolumeClaim:
+              claimName: blocklist-data
+          - name: manual-config
+            configMap:
+              name: external-unbound-manual-config
+              optional: true
+          - name: scripts
+            configMap:
+              name: blocklist-downloader-script
+              defaultMode: 0555
+          - name: restarter-script
+            configMap:
+              name: pod-restarter-script
+              defaultMode: 0555
+
+          initContainers:
+          - name: blocklist-downloader
+            image: ubuntu:24.04
+            securityContext:
+              runAsUser: 0
+              allowPrivilegeEscalation: false
+            command: ["/bin/bash"]
+            args: ["/scripts/blocklist-downloader.sh"]
+            volumeMounts:
+            - name: shared-data
+              mountPath: /shared
+            - name: manual-config
+              mountPath: /manual-config
+              readOnly: true
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            resources:
+              requests:
+                memory: "500Mi"
+                cpu: "250m"
+              limits:
+                memory: "1Gi"
+                cpu: "500m"
+
+          containers:
+          - name: updater
+            image: bitnami/kubectl:latest
+            command: ["/bin/bash"]
+            args: ["/scripts/pod-restarter.sh"]
+            volumeMounts:
+            - name: restarter-script
+              mountPath: /scripts
+              readOnly: true
+            resources:
+              requests:
+                memory: "64Mi"
+                cpu: "100m"
+              limits:
+                memory: "128Mi"
+                cpu: "200m"
+---
+# ServiceAccount for CronJob
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: blocklist-updater
+  namespace: external-dns
+  labels:
+    app: external-unbound
+    component: updater-sa
+---
+# Role with necessary permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: external-dns
+  name: blocklist-updater
+  labels:
+    app: external-unbound
+    component: updater-role
+rules:
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "watch", "patch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get"]
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["create"]
+---
+# RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: blocklist-updater
+  namespace: external-dns
+  labels:
+    app: external-unbound
+    component: updater-rb
+subjects:
+- kind: ServiceAccount
+  name: blocklist-updater
+  namespace: external-dns
+roleRef:
+  kind: Role
+  name: blocklist-updater
+  apiGroup: rbac.authorization.k8s.io

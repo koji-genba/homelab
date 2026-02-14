@@ -4,10 +4,15 @@ set -e
 echo "=== External-Unbound DNS Server ==="
 echo "Configuration: /opt/unbound/etc/unbound/unbound.conf"
 echo "Local-zones: /shared/local-zones/"
+echo "RPZ: /shared/rpz/"
 echo "Process: DNS-only (monitoring disabled)"
 echo "DNSSEC: Disabled (trust anchor issues avoided)"
 
-# ローカルゾーン設定ファイルの存在確認
+# 必要なディレクトリを作成（PVCマウント時に空の場合）
+mkdir -p /shared/local-zones /shared/rpz
+echo "📁 Ensured directories exist: /shared/local-zones, /shared/rpz"
+
+# ローカルゾーン設定ファイルの確認
 if [ -d "/shared/local-zones" ]; then
     ZONE_COUNT=$(find /shared/local-zones -name "*.conf" | wc -l)
     if [ "$ZONE_COUNT" -gt 0 ]; then
@@ -20,9 +25,20 @@ if [ -d "/shared/local-zones" ]; then
         fi
     else
         echo "⚠️  Warning: No local-zone files found in /shared/local-zones/"
+        echo "   CronJob will populate blocklists on next scheduled run (17:00 UTC daily)"
     fi
 else
-    echo "⚠️  Warning: /shared/local-zones directory not found"
+    echo "⚠️  Warning: /shared/local-zones directory not found (PVC not mounted)"
+fi
+
+# RPZファイルの確認
+RPZ_COUNT=$(find /shared/rpz -name "*.txt" 2>/dev/null | wc -l)
+if [ "$RPZ_COUNT" -gt 0 ]; then
+    echo "📋 RPZ blocklist files detected: $RPZ_COUNT files"
+else
+    echo "⚠️  Warning: No RPZ files found in /shared/rpz/"
+    echo "   CronJob will populate blocklists on next scheduled run (17:00 UTC daily)"
+    echo "   DNS will work without blocklists until then"
 fi
 
 # DNSSEC無効化のため、trust anchor初期化をスキップ
