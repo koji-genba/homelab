@@ -32,7 +32,7 @@ spec:
 
       containers:
       - name: unbound
-        image: ghcr.io/koji-genba/external-unbound:v1.5
+        image: ghcr.io/koji-genba/external-unbound:v1.8
         ports:
         - containerPort: 5353
           name: dns-tcp
@@ -44,7 +44,7 @@ spec:
         volumeMounts:
         - name: shared-data
           mountPath: /shared
-          readOnly: true
+          readOnly: false
         - name: unbound-config
           mountPath: /opt/unbound/etc/unbound/unbound.conf
           subPath: unbound.conf

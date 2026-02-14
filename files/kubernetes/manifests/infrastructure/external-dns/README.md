@@ -33,7 +33,9 @@ external-dns/
 ├── blocklist/                     # ブロックリスト自動更新
 │   ├── pvc.yaml                   # ブロックリストデータ用PVC
 │   ├── cronjob.yaml               # 自動更新CronJob
-│   └── script-configmap.yaml      # ダウンロードスクリプト
+│   └── scripts/                   # スクリプトファイル
+│       ├── blocklist-downloader.sh  # ブロックリストダウンロードスクリプト
+│       └── pod-restarter.sh       # Pod再起動スクリプト
 └── dockerfile/                    # カスタムイメージビルド用
     ├── Dockerfile
     └── entrypoint.sh
@@ -73,6 +75,27 @@ cd files/kubernetes/manifests/infrastructure/external-dns/
 kubectl apply -k .
 ```
 
+**⚠️ 初回デプロイ時の注意事項**
+
+PVCが空の状態（初回デプロイまたは全リソース削除後）では、Deploymentが起動する前にブロックリストをダウンロードする必要があります。
+
+```bash
+# 1. リソースをデプロイ
+kubectl apply -k .
+
+# 2. Deploymentが CrashLoopBackOff になった場合、ブロックリストを初期化
+kubectl create job --from=cronjob/blocklist-updater init-blocklist -n external-dns
+
+# 3. ジョブの完了を待つ（約60-90秒）
+kubectl wait --for=condition=complete --timeout=300s job/init-blocklist -n external-dns
+
+# 4. Deploymentを再起動
+kubectl rollout restart deployment/external-unbound -n external-dns
+
+# 5. クリーンアップ
+kubectl delete job init-blocklist -n external-dns
+```
+
 ### 3. 個別デプロイ（詳細制御が必要な場合）
 
 ```bash
@@ -85,9 +108,12 @@ kubectl apply -f dns/deployment.yaml
 kubectl apply -f dns/service.yaml
 
 # ブロックリスト自動更新
+# 注: scriptsディレクトリ配下のファイルはconfigMapGeneratorで自動的にConfigMapに変換されます
 kubectl apply -f blocklist/pvc.yaml
-kubectl apply -f blocklist/script-configmap.yaml
 kubectl apply -f blocklist/cronjob.yaml
+
+# または一括デプロイを推奨（Kustomizeがスクリプトを自動的にConfigMapに変換）
+kubectl apply -k .
 ```
 
 ### 4. 動作確認
@@ -207,7 +233,7 @@ kubectl logs -n external-dns -l job-name=manual-update-<timestamp> -c updater
 
 ### 使用中のRPZブロックリスト
 
-`blocklist/script-configmap.yaml` で以下の6つのRPZリストをダウンロード：
+`blocklist/scripts/blocklist-downloader.sh` で以下の6つのRPZリストをダウンロード：
 
 - **Hagezi Pro Multi**: 基本保護（464K エントリ）
 - **Hagezi TIF Full**: セキュリティ強化（755K エントリ）
@@ -231,6 +257,43 @@ kubectl exec -n external-dns deployment/external-unbound -- \
 
 # initContainerログで統計確認
 kubectl logs -n external-dns -l app=external-unbound -c blocklist-downloader
+```
+
+### スクリプトのカスタマイズ
+
+ブロックリストのダウンロードやPod再起動のロジックは、独立した `.sh` ファイルとして管理されています：
+
+**スクリプトファイル:**
+- `blocklist/scripts/blocklist-downloader.sh` - ブロックリストダウンロード処理
+- `blocklist/scripts/pod-restarter.sh` - Pod再起動処理
+
+**編集方法:**
+
+```bash
+# スクリプトを編集（シンタックスハイライトが効く）
+vi blocklist/scripts/blocklist-downloader.sh
+
+# 構文チェック
+bash -n blocklist/scripts/blocklist-downloader.sh
+
+# デプロイ（Kustomizeが自動的にConfigMapに変換）
+kubectl apply -k .
+```
+
+**メリット:**
+- ✅ エディタでシンタックスハイライトが効く
+- ✅ YAMLエスケープ不要で可読性が高い
+- ✅ 独立して構文チェック可能
+- ✅ スクリプト変更時にハッシュサフィックスが変わり、Podが自動更新される
+
+**ConfigMap確認:**
+
+```bash
+# Kustomizeが生成したConfigMapを確認
+kubectl get configmap -n external-dns | grep -E "blocklist-downloader|pod-restarter"
+
+# ConfigMap内のスクリプト内容を確認
+kubectl get configmap -n external-dns <configmap-name> -o yaml
 ```
 
 ## パフォーマンス調整
@@ -276,6 +339,37 @@ kubectl describe svc external-unbound-dns -n external-dns
 
 # LoadBalancer IP確認（192.168.11.101が割り当てられているか）
 kubectl get svc -n external-dns
+```
+
+### PodがCrashLoopBackOffになる（初回デプロイ時）
+
+**症状**: 初回デプロイやPVC削除後のデプロイで、PodがCrashLoopBackOffになる
+
+**原因**: PVCが空の状態でDeploymentが起動しようとすると、RPZファイルが存在しないためUnboundの設定検証が失敗します。
+
+**解決方法**:
+
+```bash
+# 1. エラーログで原因確認
+kubectl logs -n external-dns -l app=external-unbound --tail=20
+
+# エラー例:
+# [error] cannot open zonefile /shared/rpz/hagezi-pro.txt
+
+# 2. ブロックリスト初期化ジョブを実行
+kubectl create job --from=cronjob/blocklist-updater init-blocklist -n external-dns
+
+# 3. ジョブの完了を待つ（約60-90秒）
+kubectl wait --for=condition=complete --timeout=300s job/init-blocklist -n external-dns
+
+# 4. Deploymentを再起動
+kubectl rollout restart deployment/external-unbound -n external-dns
+
+# 5. Pod起動確認
+kubectl get pods -n external-dns
+
+# 6. クリーンアップ
+kubectl delete job init-blocklist -n external-dns
 ```
 
 ### ブロックリストが更新されない
@@ -369,8 +463,8 @@ kubectl delete -k .
 ```bash
 # ブロックリスト自動更新
 kubectl delete -f blocklist/cronjob.yaml
-kubectl delete -f blocklist/script-configmap.yaml
 kubectl delete -f blocklist/pvc.yaml
+# 注: ConfigMapはKustomizeが自動生成するため、個別削除は不要（kubectl delete -k . を推奨）
 
 # DNS本体
 kubectl delete -f dns/service.yaml

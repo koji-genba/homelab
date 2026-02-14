@@ -13,4 +13,12 @@ resources:
   # Blocklist Auto-Update
   - blocklist/pvc.yaml
   - blocklist/cronjob.yaml
-  - blocklist/script-configmap.yaml
+
+configMapGenerator:
+  - name: blocklist-downloader-script
+    files:
+      - blocklist/scripts/blocklist-downloader.sh
+
+  - name: pod-restarter-script
+    files:
+      - blocklist/scripts/pod-restarter.sh
