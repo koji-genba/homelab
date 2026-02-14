@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: blocklist-data
+  namespace: external-dns
+  labels:
+    app: external-unbound
+    component: blocklist-storage
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs-k8s-volumes
+  resources:
+    requests:
+      storage: 100Mi

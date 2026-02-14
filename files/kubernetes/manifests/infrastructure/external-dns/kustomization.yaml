@@ -4,12 +4,10 @@ kind: Kustomization
 namespace: external-dns
 
 resources:
+  - pvc.yaml
   - deployment.yaml
   - service.yaml
   - configmap.yaml
   - manual-config-configmap.yaml
-
-configMapGenerator:
-  - name: blocklist-downloader-script
-    files:
-      - scripts/blocklist-downloader.sh
+  - blocklist-updater-cronjob.yaml
+  - blocklist-downloader-script-configmap.yaml
