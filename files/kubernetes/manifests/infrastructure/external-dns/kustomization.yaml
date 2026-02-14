@@ -4,10 +4,13 @@ kind: Kustomization
 namespace: external-dns
 
 resources:
-  - pvc.yaml
-  - deployment.yaml
-  - service.yaml
-  - configmap.yaml
-  - manual-config-configmap.yaml
-  - blocklist-updater-cronjob.yaml
-  - blocklist-downloader-script-configmap.yaml
+  # DNS Server (Unbound)
+  - dns/deployment.yaml
+  - dns/service.yaml
+  - dns/configmap.yaml
+  - dns/manual-config-configmap.yaml
+
+  # Blocklist Auto-Update
+  - blocklist/pvc.yaml
+  - blocklist/cronjob.yaml
+  - blocklist/script-configmap.yaml

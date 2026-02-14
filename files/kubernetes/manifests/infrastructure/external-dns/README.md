@@ -19,10 +19,31 @@
 - 手動ブロックリスト/ホワイトリスト機能
 - キャッシュ最適化
 
+## ディレクトリ構造
+
+```
+external-dns/
+├── README.md                      # このファイル
+├── kustomization.yaml             # Kustomize設定
+├── dns/                           # DNS本体（Unbound）
+│   ├── deployment.yaml            # Unboundデプロイメント
+│   ├── service.yaml               # LoadBalancerサービス
+│   ├── configmap.yaml             # Unbound設定
+│   └── manual-config-configmap.yaml  # 手動DNS設定
+├── blocklist/                     # ブロックリスト自動更新
+│   ├── pvc.yaml                   # ブロックリストデータ用PVC
+│   ├── cronjob.yaml               # 自動更新CronJob
+│   └── script-configmap.yaml      # ダウンロードスクリプト
+└── dockerfile/                    # カスタムイメージビルド用
+    ├── Dockerfile
+    └── entrypoint.sh
+```
+
 ## 前提条件
 
 - Kubernetesクラスタが構築済み
 - MetalLBがデプロイ済み
+- NFSストレージクラス（`nfs-k8s-volumes`）が利用可能
 - Dockerイメージビルド環境（カスタムイメージ使用時）
 
 ## デプロイ手順
@@ -41,37 +62,35 @@ docker build -t ghcr.io/koji-genba/external-unbound:<version> .
 docker push ghcr.io/koji-genba/external-unbound:<version>
 ```
 
-### 2. ConfigMap作成
+### 2. 一括デプロイ（推奨）
+
+Kustomize を使って全リソースを一括デプロイ：
 
 ```bash
-cd ../
+cd files/kubernetes/manifests/infrastructure/external-dns/
 
-# Unbound設定
-kubectl apply -f configmap.yaml
-
-# カスタムDNSゾーン設定（オプション）
-kubectl apply -f manual-config-configmap.yaml
+# すべてのリソースをデプロイ
+kubectl apply -k .
 ```
 
-### 3. Deployment デプロイ
+### 3. 個別デプロイ（詳細制御が必要な場合）
 
 ```bash
-kubectl apply -f deployment.yaml
+cd files/kubernetes/manifests/infrastructure/external-dns/
+
+# DNS本体
+kubectl apply -f dns/configmap.yaml
+kubectl apply -f dns/manual-config-configmap.yaml
+kubectl apply -f dns/deployment.yaml
+kubectl apply -f dns/service.yaml
+
+# ブロックリスト自動更新
+kubectl apply -f blocklist/pvc.yaml
+kubectl apply -f blocklist/script-configmap.yaml
+kubectl apply -f blocklist/cronjob.yaml
 ```
 
-### 4. Service デプロイ（LoadBalancer）
-
-```bash
-kubectl apply -f service.yaml
-```
-
-### 5. ブロックリスト自動更新CronJob
-
-```bash
-kubectl apply -f blocklist-updater-cronjob.yaml
-```
-
-### 6. 動作確認
+### 4. 動作確認
 
 ```bash
 # Pod確認
@@ -123,7 +142,7 @@ kubectl run -it --rm dns-test --image=busybox --restart=Never -- \
 
 ## カスタムDNSレコード設定
 
-### manual-config-configmap.yaml 編集
+### dns/manual-config-configmap.yaml 編集
 
 `external-unbound-manual-config` ConfigMapには3つの設定ファイルがあります：
 
@@ -153,46 +172,51 @@ data:
 適用:
 
 ```bash
-kubectl apply -f manual-config-configmap.yaml
+kubectl apply -f dns/manual-config-configmap.yaml
 
-# Pod再起動（設定反映）
-kubectl rollout restart deployment/external-unbound -n external-dns
+# ブロックリスト自動更新を手動実行（手動設定を反映）
+kubectl create job -n external-dns --from=cronjob/blocklist-updater manual-update-$(date +%s)
 ```
 
 ## ブロックリスト管理
 
 ### RPZ自動更新の仕組み
 
-このシステムは**Pod削除→再作成方式**でブロックリストを更新します：
+このシステムは**PVC + CronJob方式**でブロックリストを更新します：
 
 1. CronJobが毎日17:00 UTC (翌日2:00 JST)に実行
-2. `external-unbound` のPodを削除
-3. Deploymentが自動的に新しいPodを作成
-4. 新しいPodのinitContainerが最新のRPZファイルを6つダウンロード
-5. Unboundが最新のブロックリストで起動
+2. initContainerが最新のRPZファイル6つをPVCにダウンロード
+3. メインコンテナがDeploymentをrollout restart
+4. 新しいPodが起動し、PVC上の最新ブロックリストを読み込む
+
+**PVC を使用する利点:**
+- ブロックリストがPod再起動後も永続化
+- 初回起動時にダウンロード不要で高速起動
+- ネットワーク障害時でも既存データで起動可能
 
 ### 手動更新
 
 ```bash
-# CronJobを手動実行（Pod削除→再作成）
+# CronJobを手動実行
 kubectl create job -n external-dns --from=cronjob/blocklist-updater manual-update-$(date +%s)
 
 # ログ確認
-kubectl logs -n external-dns -l job-name=manual-update-<timestamp>
+kubectl logs -n external-dns -l job-name=manual-update-<timestamp> -c blocklist-downloader
+kubectl logs -n external-dns -l job-name=manual-update-<timestamp> -c updater
 ```
 
 ### 使用中のRPZブロックリスト
 
-deployment.yamlのinitContainerで以下の6つのRPZリストをダウンロード：
+`blocklist/script-configmap.yaml` で以下の6つのRPZリストをダウンロード：
 
-- **Hagezi Pro Multi**: 基本保護
-- **Hagezi TIF Full**: セキュリティ強化
-- **DoH/VPN/Proxy Bypass**: DNS迂回防止
-- **Dynamic DNS**: 動的DNS悪用対策
-- **Badware Hoster**: 悪質ホスティング対策
-- **URL Shortener**: 短縮URL対策
+- **Hagezi Pro Multi**: 基本保護（464K エントリ）
+- **Hagezi TIF Full**: セキュリティ強化（755K エントリ）
+- **DoH/VPN/Proxy Bypass**: DNS迂回防止（14K エントリ）
+- **Dynamic DNS**: 動的DNS悪用対策（3K エントリ）
+- **Badware Hoster**: 悪質ホスティング対策（4K エントリ）
+- **URL Shortener**: 短縮URL対策（6K エントリ）
 
-すべて `rpz/` 形式を使用（`domains/` 形式ではありません）
+**合計**: 約167万ドメインをブロック
 
 ### 現在のブロックリスト確認
 
@@ -213,7 +237,7 @@ kubectl logs -n external-dns -l app=external-unbound -c blocklist-downloader
 
 ### キャッシュ設定
 
-[configmap.yaml](configmap.yaml)で調整:
+[dns/configmap.yaml](dns/configmap.yaml) で調整:
 
 ```yaml
 # キャッシュサイズ
@@ -334,12 +358,27 @@ Set-DnsClientServerAddress -InterfaceAlias "Ethernet" -ServerAddresses "<DNS_IP>
 
 ## アンインストール
 
+### 一括削除（推奨）
+
 ```bash
-kubectl delete -f blocklist-updater-cronjob.yaml
-kubectl delete -f service.yaml
-kubectl delete -f deployment.yaml
-kubectl delete -f manual-config-configmap.yaml
-kubectl delete -f configmap.yaml
+kubectl delete -k .
+```
+
+### 個別削除
+
+```bash
+# ブロックリスト自動更新
+kubectl delete -f blocklist/cronjob.yaml
+kubectl delete -f blocklist/script-configmap.yaml
+kubectl delete -f blocklist/pvc.yaml
+
+# DNS本体
+kubectl delete -f dns/service.yaml
+kubectl delete -f dns/deployment.yaml
+kubectl delete -f dns/manual-config-configmap.yaml
+kubectl delete -f dns/configmap.yaml
+
+# Namespace削除（全リソース削除）
 kubectl delete namespace external-dns
 ```
 
