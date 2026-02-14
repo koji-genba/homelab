@@ -106,9 +106,10 @@ NFS Server (192.168.10.11)
 homelab/
 ├── files/
 │   ├── infrastructure/
-│   │   └── terraform/              # VMの定義
-│   │       ├── k8s-cluster/        # Kubernetesクラスタ用VM構築
-│   │       └── tailscale-gateway/  # VPN Gateway用VM構築
+│   │   ├── terraform/              # VMの定義
+│   │   │   ├── k8s-cluster/        # Kubernetesクラスタ用VM構築
+│   │   │   └── tailscale-gateway/  # VPN Gateway用VM構築
+│   │   └── network/                # ネットワーク機器設定 (IX2215)
 │   └── kubernetes/
 │       ├── kubespray/              # Kubernetesクラスタ自動構築（Ansible）
 │       │   ├── ansible.cfg

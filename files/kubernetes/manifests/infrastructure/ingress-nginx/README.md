@@ -60,7 +60,7 @@ metadata:
   name: example-ingress
   namespace: my-namespace
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-production
+    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   ingressClassName: nginx
   tls:
@@ -89,7 +89,7 @@ metadata:
   name: tls-example-ingress
   namespace: my-namespace
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-production  # cert-manager連携
+    cert-manager.io/cluster-issuer: letsencrypt-prod  # cert-manager連携
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"  # HTTP→HTTPS自動リダイレクト
 spec:
   ingressClassName: nginx
