@@ -21,6 +21,9 @@ data:
     ldap timeout = 10
     ldap ssl = off
 
+    # DOS Attributes - Disable to avoid 0x80070032 errors on certain filesystems
+    store dos attributes = no
+
     # Performance Optimization
     socket options = TCP_NODELAY IPTOS_LOWDELAY SO_RCVBUF=8388608 SO_SNDBUF=8388608
     use sendfile = yes
