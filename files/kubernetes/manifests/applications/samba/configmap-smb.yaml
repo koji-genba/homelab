@@ -36,8 +36,8 @@ data:
     min receivefile size = 1048576
     getwd cache = yes
     strict allocate = no
-    strict sync = no
-    sync always = no
+    strict sync = yes
+    sync always = yes
     kernel oplocks = no
     level2 oplocks = yes
     posix locking = no
@@ -52,7 +52,16 @@ data:
 
     [shared]
     path = /mnt/shared
-    comment = Shared Storage
+    comment = Shared Storage (mergerfs)
+    browseable = yes
+    writable = yes
+    create mask = 0600
+    directory mask = 0700
+    valid users = @samba-users
+
+    [shared-hdd]
+    path = /mnt/shared-hdd
+    comment = Shared Storage (HDD direct)
     browseable = yes
     writable = yes
     create mask = 0600

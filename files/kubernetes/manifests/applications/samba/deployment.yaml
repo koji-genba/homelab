@@ -43,6 +43,8 @@ spec:
           readOnly: true
         - name: samba-shared
           mountPath: /mnt/shared
+        - name: samba-shared-hdd
+          mountPath: /mnt/shared-hdd
         - name: samba-archive
           mountPath: /mnt/archive
         - name: samba-logs
@@ -89,6 +91,9 @@ spec:
       - name: samba-shared
         persistentVolumeClaim:
           claimName: samba-shared-storage
+      - name: samba-shared-hdd
+        persistentVolumeClaim:
+          claimName: samba-shared-hdd-storage
       - name: samba-archive
         persistentVolumeClaim:
           claimName: samba-archive-storage

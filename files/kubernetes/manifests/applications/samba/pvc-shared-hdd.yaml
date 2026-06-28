@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: samba-shared-storage
+  name: samba-shared-hdd-storage
   namespace: samba
   labels:
     app.kubernetes.io/name: samba
@@ -9,8 +9,8 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: nfs-shared-static
-  volumeName: samba-shared-pv
+  storageClassName: nfs-shared-hdd-static
+  volumeName: samba-shared-hdd-pv
   resources:
     requests:
-      storage: 19Ti
+      storage: 18Ti

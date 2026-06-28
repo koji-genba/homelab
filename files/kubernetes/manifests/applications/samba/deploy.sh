@@ -52,6 +52,8 @@ kubectl apply -f "${SCRIPT_DIR}/configmap-smb.yaml"
 log_info "Creating persistent volumes and claims..."
 kubectl apply -f "${SCRIPT_DIR}/pv-shared.yaml"
 kubectl apply -f "${SCRIPT_DIR}/pvc-shared.yaml"
+kubectl apply -f "${SCRIPT_DIR}/pv-shared-hdd.yaml"
+kubectl apply -f "${SCRIPT_DIR}/pvc-shared-hdd.yaml"
 kubectl apply -f "${SCRIPT_DIR}/pv-archive.yaml"
 kubectl apply -f "${SCRIPT_DIR}/pvc-archive.yaml"
 
