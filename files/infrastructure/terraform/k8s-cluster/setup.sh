@@ -10,9 +10,9 @@ if ! command -v terraform &> /dev/null; then
     exit 1
 fi
 
-if [ ! -f ~/.ssh/k8s_ed25519 ]; then
-    echo "❌ SSH key not found at ~/.ssh/k8s_ed25519"
-    echo "Generate with: ssh-keygen -t ed25519 -f ~/.ssh/k8s_ed25519 -C 'k8s-cluster'"
+if [ ! -f ~/.ssh/homelab ]; then
+    echo "❌ SSH key not found at ~/.ssh/homelab"
+    echo "Generate with: ssh-keygen -t ed25519 -f ~/.ssh/homelab -C 'k8s-cluster'"
     exit 1
 fi
 
@@ -54,21 +54,21 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     echo "🔨 Applying configuration..."
     terraform apply plan.out
     rm plan.out
-    
+
     echo "✅ VMs created successfully!"
     echo ""
     echo "🧪 Testing SSH connections..."
     sleep 30
-    
+
     for ip in 21 22 23; do
         echo -n "Testing 192.168.10.$ip... "
-        if ssh -i ~/.ssh/k8s_ed25519 -o StrictHostKeyChecking=no -o ConnectTimeout=5 ubuntu@192.168.10.$ip 'hostname' 2>/dev/null; then
+        if ssh -i ~/.ssh/homelab -o StrictHostKeyChecking=no -o ConnectTimeout=5 ubuntu@192.168.10.$ip 'hostname' 2>/dev/null; then
             echo "✅"
         else
             echo "⚠️  Not ready yet"
         fi
     done
-    
+
     echo ""
     echo "🎉 Deployment complete! Check the output above for next steps."
 else

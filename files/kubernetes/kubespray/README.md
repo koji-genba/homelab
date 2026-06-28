@@ -66,7 +66,7 @@ ansible-playbook -i inventory/mycluster/hosts.yaml cluster.yml \
 ```bash
 # kubeconfig を取得
 mkdir -p ~/.kube
-scp -i ~/.ssh/k8s_ed25519 ubuntu@192.168.10.21:/etc/kubernetes/admin.conf ~/.kube/config
+scp -i ~/.ssh/homelab ubuntu@192.168.10.21:/etc/kubernetes/admin.conf ~/.kube/config
 
 # パーミッション設定
 chmod 600 ~/.kube/config
