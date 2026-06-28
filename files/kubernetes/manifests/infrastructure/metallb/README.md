@@ -29,7 +29,8 @@ helm repo update
 cd files/kubernetes/manifests/infrastructure/metallb/
 
 helm install metallb metallb/metallb \
-  -n metallb-system --create-namespace
+  -n metallb-system --create-namespace \
+  --set frr-k8s.prometheus.serviceMonitor.enabled=false
 ```
 
 ### 3. IP アドレスプール設定
