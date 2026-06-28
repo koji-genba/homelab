@@ -1,9 +1,9 @@
 # Kubernetes configuration
-kube_version: 1.31.1 
+kube_version: 1.35.4
 kube_network_plugin: flannel
 kube_network_plugin_multus: false
 
-# Service subnet configuration  
+# Service subnet configuration
 kube_service_addresses: 10.1.0.0/16
 kube_pods_subnet: 10.0.0.0/16
 
@@ -18,7 +18,7 @@ resolvconf_mode: host_resolvconf
 
 # Container runtime
 container_manager: containerd
-containerd_version: 1.7.22
+containerd_version: 2.2.3
 
 # Network configuration
 kube_proxy_mode: ipvs
@@ -55,4 +55,4 @@ disable_swap: true
 
 # Additional features for v2.28
 etcd_deployment_type: host
-etcd_version: 3.5.16
+etcd_version: 3.5.30
