@@ -25,7 +25,7 @@ variable "ssh_public_key" {
 variable "node_name" {
   description = "Proxmox node name"
   type        = string
-  default     = "pve"
+  default     = "pve1"
 }
 
 variable "datastore_id" {
