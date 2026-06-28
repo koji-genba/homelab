@@ -4,6 +4,8 @@ kind: Kustomization
 namespace: external-dns
 
 resources:
+  - namespace.yaml
+
   # DNS Server (Unbound)
   - dns/deployment.yaml
   - dns/service.yaml
