@@ -64,7 +64,7 @@ kubectl describe ipaddresspool homelab-pool -n metallb-system
 ### 現在の割り当て
 
 | サービス | IP アドレス | 用途 |
-|---------|------------|------|
+| --------- | ------------ | ------ |
 | External DNS | 192.168.11.101 | DNS（Unbound + Hagezi ブロックリスト） |
 | - | 192.168.11.102 | 予備 |
 | Samba | 192.168.11.103 | SMB3 ファイル共有 |
