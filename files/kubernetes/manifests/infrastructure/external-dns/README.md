@@ -87,12 +87,10 @@ kubectl apply -k .
 kubectl create job --from=cronjob/blocklist-updater init-blocklist -n external-dns
 
 # 3. ジョブの完了を待つ（約60-90秒）
+# ジョブ内でDeploymentの再起動まで自動実行される
 kubectl wait --for=condition=complete --timeout=300s job/init-blocklist -n external-dns
 
-# 4. Deploymentを再起動
-kubectl rollout restart deployment/external-unbound -n external-dns
-
-# 5. クリーンアップ
+# 4. クリーンアップ
 kubectl delete job init-blocklist -n external-dns
 ```
 
@@ -242,7 +240,7 @@ kubectl logs -n external-dns -l job-name=manual-update-<timestamp> -c updater
 - **Badware Hoster**: 悪質ホスティング対策（4K エントリ）
 - **URL Shortener**: 短縮URL対策（6K エントリ）
 
-**合計**: 約167万ドメインをブロック
+**合計**: 約124万ドメインをブロック
 
 ### 現在のブロックリスト確認
 
@@ -256,7 +254,7 @@ kubectl exec -n external-dns deployment/external-unbound -- \
   sh -c 'for f in /shared/rpz/*.txt; do echo "$f: $(grep -c "CNAME \." $f)"; done'
 
 # initContainerログで統計確認
-kubectl logs -n external-dns -l app=external-unbound -c blocklist-downloader
+kubectl logs -n external-dns -l app=blocklist-updater -c blocklist-downloader
 ```
 
 ### スクリプトのカスタマイズ
@@ -360,15 +358,13 @@ kubectl logs -n external-dns -l app=external-unbound --tail=20
 kubectl create job --from=cronjob/blocklist-updater init-blocklist -n external-dns
 
 # 3. ジョブの完了を待つ（約60-90秒）
+# ジョブ内でDeploymentの再起動まで自動実行される
 kubectl wait --for=condition=complete --timeout=300s job/init-blocklist -n external-dns
 
-# 4. Deploymentを再起動
-kubectl rollout restart deployment/external-unbound -n external-dns
-
-# 5. Pod起動確認
+# 4. Pod起動確認
 kubectl get pods -n external-dns
 
-# 6. クリーンアップ
+# 5. クリーンアップ
 kubectl delete job init-blocklist -n external-dns
 ```
 
@@ -388,7 +384,7 @@ kubectl logs -n external-dns -l job-name=blocklist-updater-<timestamp>
 kubectl create job -n external-dns --from=cronjob/blocklist-updater test-update
 
 # initContainerログ確認（RPZダウンロード状況）
-kubectl logs -n external-dns -l app=external-unbound -c blocklist-downloader
+kubectl logs -n external-dns -l app=blocklist-updater -c blocklist-downloader
 ```
 
 ### カスタムDNSレコードが機能しない
