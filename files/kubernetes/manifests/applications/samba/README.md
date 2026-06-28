@@ -6,7 +6,7 @@ OpenLDAPユーザ認証を利用したSambaファイルサーバーのKubernetes
 
 - **プロトコル**: SMB3 (TCP 445)
 - **認証**: OpenLDAP ldapsam backend (dc=kojigenba-srv,dc=com)
-- **ストレージ**: Static NFS PV (192.168.10.11:/tank-gen2/data/shared)
+- **ストレージ**: Static NFS PV (mergerfs: 192.168.10.11:/mnt/shared, HDD直接: 192.168.10.11:/mnt/tank-gen2/data/shared)
 - **対応クライアント**: Windows, macOS, Android
 - **アクセス権限**: `samba-users` LDAP グループ所属者
 - **NSS統合**: nslcd による LDAP ユーザー/グループ解決
@@ -22,8 +22,10 @@ Samba Container (K8s Pod)
     └─ LDAP クエリ
          ↓
 OpenLDAP (openldap namespace)
-    ↓ NFS
-NFS Shared Storage (/tank-gen2/data/shared)
+
+[shared]     → /mnt/shared          (mergerfs: SSD cache + HDD, 19Ti)
+[shared-hdd] → /mnt/tank-gen2/data/shared  (HDD直接, 18Ti)
+[archive]    → /mnt/tank-gen1/data/archive (archive, 6Ti)
 ```
 
 ## ファイル構成
@@ -32,8 +34,10 @@ NFS Shared Storage (/tank-gen2/data/shared)
 samba/
 ├── README.md                    # このファイル
 ├── namespace.yaml               # Namespace定義
-├── pv-shared.yaml              # Static PV (shared用)
-├── pvc-shared.yaml             # PVC (shared用)
+├── pv-shared.yaml              # Static PV (mergerfs shared用, 19Ti)
+├── pvc-shared.yaml             # PVC (mergerfs shared用)
+├── pv-shared-hdd.yaml          # Static PV (HDD直接 shared用, 18Ti)
+├── pvc-shared-hdd.yaml         # PVC (HDD直接 shared用)
 ├── pv-archive.yaml             # Static PV (archive用)
 ├── pvc-archive.yaml            # PVC (archive用)
 ├── configmap-smb.yaml          # Samba設定 (smb.conf)
@@ -52,8 +56,9 @@ samba/
 - OpenLDAP が `openldap` namespace で稼働中
 - MetalLB がインストール済み
 - NFSサーバー (192.168.10.11) が稼働中
-  - `/tank-gen2/data/shared` がエクスポート済み
-  - `/tank-gen1/data/archive` がエクスポート済み
+  - `/mnt/shared` がエクスポート済み (mergerfs union mount, fsid=100)
+  - `/mnt/tank-gen2/data/shared` がエクスポート済み
+  - `/mnt/tank-gen1/data/archive` がエクスポート済み
 - Docker イメージレジストリへのアクセス権限
 
 ## デプロイメント手順
@@ -147,12 +152,21 @@ smb://192.168.11.103/shared
 ### Samba共有設定 (smb.conf)
 
 #### [shared] 共有
-- **パス**: /mnt/shared
-- **説明**: Shared Storage
+- **パス**: /mnt/shared (mergerfs: SSD cache + HDD)
+- **説明**: Shared Storage (mergerfs)
 - **アクセス権限**: `@samba-users` グループメンバー
 - **パーミッション設定**:
   - ファイル作成マスク: 0600
   - ディレクトリ作成マスク: 0700
+
+#### [shared-hdd] 共有
+- **パス**: /mnt/shared-hdd (HDD直接マウント)
+- **説明**: Shared Storage (HDD direct) — パフォーマンス比較・直接コピー用
+- **アクセス権限**: `@samba-users` グループメンバー
+- **パーミッション設定**:
+  - ファイル作成マスク: 0600
+  - ディレクトリ作成マスク: 0700
+- **ストレージ**: Static NFS PV (192.168.10.11:/mnt/tank-gen2/data/shared, 18Ti)
 
 #### [archive] 共有
 - **パス**: /mnt/archive
@@ -318,20 +332,39 @@ EOF
 
 既存のNFSデータを直接マウントするため、Static PersistentVolumeを使用しています。
 
-#### Shared Storage (PV/PVC)
+#### Shared Storage — mergerfs (PV/PVC)
 
 **PersistentVolume (samba-shared-pv)**
 - **ストレージクラス**: nfs-shared-static
-- **容量**: 4Ti
+- **容量**: 19Ti (SSD 860GB + HDD 20TB の mergerfs union)
 - **アクセスモード**: ReadWriteMany
 - **Reclaim Policy**: Retain
 - **NFSサーバー**: 192.168.10.11
-- **NFSパス**: /tank-gen2/data/shared (直接マウント)
+- **NFSパス**: /mnt/shared (mergerfs union mount, fsid=100)
+- **マウントオプション**: sync
 
 **PersistentVolumeClaim (samba-shared-storage)**
 - **ストレージクラス**: nfs-shared-static
 - **ボリューム名**: samba-shared-pv (静的バインド)
-- **容量**: 4Ti
+- **容量**: 19Ti
+- **アクセスモード**: ReadWriteMany
+
+#### Shared Storage — HDD直接 (PV/PVC)
+
+**PersistentVolume (samba-shared-hdd-pv)**
+- **ストレージクラス**: nfs-shared-hdd-static
+- **容量**: 18Ti (Toshiba N300 ×2 mirror, 20TB ≈ 18Ti)
+- **アクセスモード**: ReadWriteMany
+- **Reclaim Policy**: Retain
+- **NFSサーバー**: 192.168.10.11
+- **NFSパス**: /mnt/tank-gen2/data/shared (HDD直接)
+- **マウントオプション**: sync
+- **用途**: パフォーマンス比較・大容量データの直接コピー
+
+**PersistentVolumeClaim (samba-shared-hdd-storage)**
+- **ストレージクラス**: nfs-shared-hdd-static
+- **ボリューム名**: samba-shared-hdd-pv (静的バインド)
+- **容量**: 18Ti
 - **アクセスモード**: ReadWriteMany
 
 #### Archive Storage (PV/PVC)
@@ -342,7 +375,8 @@ EOF
 - **アクセスモード**: ReadWriteMany
 - **Reclaim Policy**: Retain
 - **NFSサーバー**: 192.168.10.11
-- **NFSパス**: /tank-gen1/data/archive (直接マウント)
+- **NFSパス**: /mnt/tank-gen1/data/archive
+- **マウントオプション**: sync
 
 **PersistentVolumeClaim (samba-archive-storage)**
 - **ストレージクラス**: nfs-archive-static
