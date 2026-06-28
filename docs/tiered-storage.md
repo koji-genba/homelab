@@ -97,4 +97,4 @@ zfs snapshot tank-gen2/data/shared@pre-migration-YYYYMMDD
 zfs destroy tank-gen2/data/shared@pre-migration-YYYYMMDD
 ```
 
-ログ: `/var/log/mover.log`
+ログ: `/var/log/mover.log`（logrotate: `files/infrastructure/storage/mover.logrotate` を `/etc/logrotate.d/mover` に配置）

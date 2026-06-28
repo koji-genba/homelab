@@ -7,16 +7,21 @@ LOCKFILE=/var/run/mover.lock
 
 exec >> /var/log/mover.log 2>&1
 
-if [ -f "$LOCKFILE" ]; then
+if ! mountpoint -q "$SRC" || ! mountpoint -q "$DST"; then
+    echo "$(date '+%F %T') ERROR: $SRC or $DST not mounted, abort"
+    exit 1
+fi
+
+exec 9>"$LOCKFILE"
+if ! flock -n 9; then
     echo "$(date '+%F %T') already running, skip"
     exit 0
 fi
-touch "$LOCKFILE"
-trap "rm -f $LOCKFILE" EXIT
 
 echo "$(date '+%F %T') start (SETTLE_MINUTES=${SETTLE_MINUTES})"
 
-find "$SRC" -type f -cmin +${SETTLE_MINUTES} -print0 | while IFS= read -r -d '' src_file; do
+errors=0
+while IFS= read -r -d '' src_file; do
     rel="${src_file#$SRC/}"
     dst_file="$DST/$rel"
 
@@ -36,12 +41,18 @@ find "$SRC" -type f -cmin +${SETTLE_MINUTES} -print0 | while IFS= read -r -d '' 
     else
         rm -f "$dst_file"
         echo "FAILED: $rel"
+        ((errors++))
     fi
-done
+done < <(find "$SRC" -type f -cmin +${SETTLE_MINUTES} -print0)
 
 find "$SRC" -mindepth 1 -type d -empty -delete
 
-echo "$(date '+%F %T') done"
+echo "$(date '+%F %T') done (errors=${errors})"
+
+if [ "$errors" -gt 0 ]; then
+    echo "$(date '+%F %T') snapshot skipped due to errors"
+    exit 1
+fi
 
 # --- snapshot ---
 TODAY=$(date +%Y-%m-%d)
