@@ -28,18 +28,9 @@ data:
     socket options = TCP_NODELAY IPTOS_LOWDELAY SO_RCVBUF=8388608 SO_SNDBUF=8388608
     use sendfile = yes
     aio read size = 1048576
-    aio write size = 1048576
-    write cache size = 8388608
-    read raw = yes
-    write raw = yes
-    max xmit = 16777216
-    min receivefile size = 1048576
-    getwd cache = yes
-    strict allocate = no
     strict sync = yes
     sync always = yes
     kernel oplocks = no
-    level2 oplocks = yes
     posix locking = no
 
     # SMB3 Performance
