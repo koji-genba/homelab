@@ -67,16 +67,16 @@ locals {
     }
     "k8s-worker01" = {
       vm_id    = 102
-      cores    = 2
-      memory   = 4096
+      cores    = 4
+      memory   = 8192
       disk     = 40
       ip_vlan10 = "192.168.10.22"
       ip_vlan11 = "192.168.11.22"
     }
     "k8s-worker02" = {
       vm_id    = 103
-      cores    = 2
-      memory   = 4096
+      cores    = 4
+      memory   = 8192
       disk     = 40
       ip_vlan10 = "192.168.10.23"
       ip_vlan11 = "192.168.11.23"

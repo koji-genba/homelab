@@ -148,8 +148,8 @@ TerraformでProxmox VE上にKubernetesクラスタ用のVMを構築します。
 
 **構築されるVM**:
 - k8s-master01: 192.168.10.21, 192.168.11.21 (2 cores, 6GB RAM, 50GB disk)
-- k8s-worker01: 192.168.10.22, 192.168.11.22 (2 cores, 4GB RAM, 40GB disk)
-- k8s-worker02: 192.168.10.23, 192.168.11.23 (2 cores, 4GB RAM, 40GB disk)
+- k8s-worker01: 192.168.10.22, 192.168.11.22 (4 cores, 8GB RAM, 40GB disk)
+- k8s-worker02: 192.168.10.23, 192.168.11.23 (4 cores, 8GB RAM, 40GB disk)
 
 #### 1.2 Tailscale Gateway構築（オプション）
 
