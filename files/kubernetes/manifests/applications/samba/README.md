@@ -134,9 +134,14 @@ export SAMBA_ADMIN_PASSWORD="<OpenLDAP_admin_password>"
 
 ### サービスアドレス
 
-```
-smb://192.168.11.103/shared
-```
+| Share | アドレス | 用途 |
+|---|---|---|
+| shared | `\\192.168.11.103\shared` | 通常利用（mergerfs: SSD→HDD 透過） |
+| shared-hdd | `\\192.168.11.103\shared-hdd` | HDD直接（比較・直接コピー用） |
+| archive | `\\192.168.11.103\archive` | アーカイブ |
+
+> **注意**: `shared` に書いたファイルはまず SSD に乗り、毎朝5時の mover.sh で HDD に移動されます。
+> mover 実行前の SSD 上ファイルは `shared-hdd` からは見えません。通常は `shared` を使用してください。
 
 ### ネットワーク情報
 
@@ -285,8 +290,11 @@ kubectl exec -it deployment/samba -n samba -- net groupmap list
 # 共有資源を表示
 net view \\192.168.11.103
 
-# shared共有に接続
+# shared共有に接続（通常利用）
 net use Z: \\192.168.11.103\shared /user:admin
+
+# shared-hdd共有に接続（HDD直接）
+net use X: \\192.168.11.103\shared-hdd /user:admin
 
 # archive共有に接続
 net use Y: \\192.168.11.103\archive /user:admin
@@ -295,9 +303,11 @@ net use Y: \\192.168.11.103\archive /user:admin
 #### macOS
 ```bash
 # Finderから接続
-# Cmd+K → smb://192.168.11.103/shared または smb://192.168.11.103/archive
-# または
+# Cmd+K → smb://192.168.11.103/shared
+#          smb://192.168.11.103/shared-hdd
+#          smb://192.168.11.103/archive
 mount_smbfs -o nobrowse //username@192.168.11.103/shared /Volumes/shared
+mount_smbfs -o nobrowse //username@192.168.11.103/shared-hdd /Volumes/shared-hdd
 mount_smbfs -o nobrowse //username@192.168.11.103/archive /Volumes/archive
 ```
 
@@ -308,6 +318,7 @@ smbclient -L 192.168.11.103 -U username
 
 # マウント
 mount -t cifs //192.168.11.103/shared /mnt/shared -o username=username
+mount -t cifs //192.168.11.103/shared-hdd /mnt/shared-hdd -o username=username
 ```
 
 ## LDAPユーザの管理
