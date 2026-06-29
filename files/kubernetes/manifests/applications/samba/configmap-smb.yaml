@@ -28,8 +28,8 @@ data:
     socket options = TCP_NODELAY IPTOS_LOWDELAY SO_RCVBUF=8388608 SO_SNDBUF=8388608
     use sendfile = yes
     aio read size = 1048576
-    strict sync = yes
-    sync always = yes
+    strict sync = no
+    sync always = no
     kernel oplocks = no
     posix locking = no
 
