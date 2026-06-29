@@ -168,6 +168,7 @@ resource "proxmox_virtual_environment_vm" "k8s_nodes" {
     bridge  = var.network_bridge
     model   = "virtio"
     vlan_id = 10
+    queues  = each.value.cores
   }
 
   # VLAN11 NIC（サービス用）
@@ -175,6 +176,7 @@ resource "proxmox_virtual_environment_vm" "k8s_nodes" {
     bridge  = var.network_bridge
     model   = "virtio"
     vlan_id = 11
+    queues  = each.value.cores
   }
 
   operating_system {
