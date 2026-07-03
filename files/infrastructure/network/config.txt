@@ -158,10 +158,9 @@ device GigaEthernet1
 !
 ! vlan-groupと各ポートの対応付け (ポートvlan用)
 device GigaEthernet2
+  vlan-group 1 port 3
   vlan-group 2 port 2
-  vlan-group 3 port 3
-  vlan-group 4 port 4
-  vlan-group 6 port 1 5 6 7
+  vlan-group 6 port 1 4 5 6 7
 !
 device BRI0
   isdn switch-type hsd128k
@@ -268,6 +267,12 @@ interface GigaEthernet2:6.2
   auto-connect
   no ip address
   bridge-group 11
+  no shutdown
+!
+! vlan-group1 と bridge-group10 (=BVI10) の関連付け
+interface GigaEthernet2:1.0
+  no ip address
+  bridge-group 10
   no shutdown
 !
 ! vlan-group2 と bridge-group20 (=BVI20) の関連付け
