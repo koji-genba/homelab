@@ -1,0 +1,5 @@
+proxmox_password = "your-proxmox-password"
+ssh_public_key   = "ssh-ed25519 AAAAC3... your-key"
+
+# Existing cloud-init VM template, shared with k8s-cluster / tailscale-gateway.
+template_vm_id = 9000

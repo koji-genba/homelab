@@ -13,7 +13,8 @@ Management VLAN 10 (192.168.10.0/24)
 ├── k8s-master01: 192.168.10.21
 ├── k8s-worker01: 192.168.10.22
 ├── k8s-worker02: 192.168.10.23
-└── tailscale-gateway: 192.168.10.30
+├── tailscale-gateway: 192.168.10.30
+└── elastiflow: 192.168.10.40 (LXC, フロー分析)
 
 Service VLAN 11 (192.168.11.0/24)
 ├── k8s-master01: 192.168.11.21
@@ -100,15 +101,23 @@ NFS Server (192.168.10.11)
 | **Tailscale Gateway** | 外部ネットワークアクセス（サブネットルーター） |
 | **Cloudflare DNS** | DNS-01 Challenge用（cert-manager） |
 
+### Observability
+
+| サービス | 用途 |
+|---------|------|
+| **ElastiFlow** | ネットワークフロー分析（IX2215からのsFlowを収集・可視化、[詳細](files/infrastructure/terraform/elastiflow/README.md)） |
+| Elasticsearch + Kibana | ElastiFlowのバックエンド（単一ノード、LXC上にネイティブ構築） |
+
 ## ディレクトリ構造
 
 ```
 homelab/
 ├── files/
 │   ├── infrastructure/
-│   │   ├── terraform/              # VMの定義
+│   │   ├── terraform/              # VM/LXCの定義
 │   │   │   ├── k8s-cluster/        # Kubernetesクラスタ用VM構築
-│   │   │   └── tailscale-gateway/  # VPN Gateway用VM構築
+│   │   │   ├── tailscale-gateway/  # VPN Gateway用VM構築
+│   │   │   └── elastiflow/         # ネットワークフロー分析用LXC構築
 │   │   └── network/                # ネットワーク機器設定 (IX2215)
 │   └── kubernetes/
 │       ├── kubespray/              # Kubernetesクラスタ自動構築（Ansible）
@@ -231,3 +240,16 @@ OpenLDAP統合のSMB3ファイル共有サービスを提供します。
 - [archive]: NFS: 192.168.10.11:/tank-gen1/data/archive
 - 認証: OpenLDAP ldapsam backend
 - アクセス: samba-users グループメンバー
+
+### 6. Observability（オプション）
+
+#### 6.1 ElastiFlow構築
+
+IX2215からのsFlowを収集し、Elasticsearch + Kibanaでネットワークトラフィックを可視化します。DockerではなくネイティブパッケージでLXCコンテナ上に構築します。
+
+詳細は [elastiflow/README.md](files/infrastructure/terraform/elastiflow/README.md) を参照してください。
+
+**構成**:
+
+- elastiflow: 192.168.10.40（管理VLAN10、LXC）
+- IX2215側のsFlow設定は [network/README.md](files/infrastructure/network/README.md) を参照
