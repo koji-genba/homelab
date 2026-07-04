@@ -14,7 +14,8 @@ Management VLAN 10 (192.168.10.0/24)
 ├── k8s-worker01: 192.168.10.22
 ├── k8s-worker02: 192.168.10.23
 ├── tailscale-gateway: 192.168.10.30
-└── elastiflow: 192.168.10.40 (LXC, フロー分析)
+├── elastiflow: 192.168.10.40 (LXC, フロー分析)
+└── stashPadDev: 192.168.10.41 (stashPad開発VM)
 
 Service VLAN 11 (192.168.11.0/24)
 ├── k8s-master01: 192.168.11.21
@@ -117,7 +118,8 @@ homelab/
 │   │   ├── terraform/              # VM/LXCの定義
 │   │   │   ├── k8s-cluster/        # Kubernetesクラスタ用VM構築
 │   │   │   ├── tailscale-gateway/  # VPN Gateway用VM構築
-│   │   │   └── elastiflow/         # ネットワークフロー分析用LXC構築
+│   │   │   ├── elastiflow/         # ネットワークフロー分析用LXC構築
+│   │   │   └── stashpad-dev/       # stashPad開発用VM構築
 │   │   └── network/                # ネットワーク機器設定 (IX2215)
 │   └── kubernetes/
 │       ├── kubespray/              # Kubernetesクラスタ自動構築（Ansible）
@@ -165,6 +167,15 @@ TerraformでProxmox VE上にKubernetesクラスタ用のVMを構築します。
 外部からホームラボへのセキュアなアクセスを提供するVPN Gatewayを構築します。
 
 詳細は [Terraform tailscale-gateway README](files/infrastructure/terraform/tailscale-gateway/README.md) を参照してください。
+
+#### 1.3 stashPadDev VM構築（オプション）
+
+stashPad開発用の単体VMを構築します。
+
+詳細は [Terraform stashpad-dev README](files/infrastructure/terraform/stashpad-dev/README.md) を参照してください。
+
+**構築されるVM**:
+- stashPadDev: 192.168.10.41 (8 cores, 16GB RAM, 30GB disk)
 
 ### 2. Kubernetesクラスタ構築
 
