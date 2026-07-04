@@ -18,8 +18,6 @@ spec:
         app.kubernetes.io/name: stashpad
         app.kubernetes.io/component: media-library
     spec:
-      imagePullSecrets:
-        - name: ghcr-pull-secret
       containers:
         - name: stashpad
           # tag は overlay の kustomization.yaml (images:) で差し替える

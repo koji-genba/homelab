@@ -6,7 +6,3 @@ metadata:
 spec:
   image: ghcr.io/koji-genba/stashpad
   interval: 1m
-  # GHCRのstashpadパッケージがprivateなので、tag一覧取得にも認証が要る。
-  # README.md記載の手順で1回だけ作成しておくこと。
-  secretRef:
-    name: ghcr-pull-secret
