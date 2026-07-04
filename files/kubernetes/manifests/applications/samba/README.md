@@ -1,15 +1,15 @@
 # Samba File Server
 
-OpenLDAPユーザ認証を利用したSambaファイルサーバーのKubernetesデプロイメント。
+宣言的なローカルユーザ定義を利用したSambaファイルサーバーのKubernetesデプロイメント。
 
 ## 概要
 
 - **プロトコル**: SMB3 (TCP 445)
-- **認証**: OpenLDAP ldapsam backend (dc=kojigenba-srv,dc=com)
+- **認証**: ローカルユーザ + Samba tdbsam backend
 - **ストレージ**: Static NFS PV (mergerfs: 192.168.10.11:/mnt/shared, HDD直接: 192.168.10.11:/mnt/tank-gen2/data/shared)
 - **対応クライアント**: Windows, macOS, Android
-- **アクセス権限**: `samba-users` LDAP グループ所属者
-- **NSS統合**: nslcd による LDAP ユーザー/グループ解決
+- **アクセス権限**: `samba-users` ローカルグループ所属者
+- **状態管理**: Samba passdb は Pod 起動時に ConfigMap/Secret から毎回再生成
 
 ## アーキテクチャ
 
@@ -17,11 +17,9 @@ OpenLDAPユーザ認証を利用したSambaファイルサーバーのKubernetes
 クライアント (Win/Mac/Android)
     ↓ SMB3 (445/TCP)
 Samba Container (K8s Pod)
-    ├─ smbd (ldapsam backend)
-    ├─ nslcd (NSS LDAP daemon)
-    └─ LDAP クエリ
-         ↓
-OpenLDAP (openldap namespace)
+    ├─ smbd (tdbsam backend)
+    ├─ local UNIX users/groups
+    └─ generated Samba passdb
 
 [shared]     → /mnt/shared          (mergerfs: SSD cache + HDD, 19Ti)
 [shared-hdd] → /mnt/tank-gen2/data/shared  (HDD直接, 18Ti)
@@ -41,10 +39,14 @@ samba/
 ├── pv-archive.yaml             # Static PV (archive用)
 ├── pvc-archive.yaml            # PVC (archive用)
 ├── configmap-smb.yaml          # Samba設定 (smb.conf)
+├── config/
+│   ├── users.json              # ローカルユーザ/グループ定義
+│   └── secrets.json.template   # SambaパスワードJSONテンプレート
 ├── deployment.yaml             # Deployment定義
 ├── service.yaml                # LoadBalancer Service
-├── secret.yaml.template        # シークレットテンプレート
 ├── deploy.sh                   # デプロイメント実行スクリプト
+├── scripts/
+│   └── add-user.sh             # ユーザ追加補助スクリプト
 └── docker/
     ├── Dockerfile              # Sambaコンテナイメージ
     └── docker-entrypoint.sh    # 起動スクリプト
@@ -53,7 +55,6 @@ samba/
 ## 前提条件
 
 - Kubernetes クラスタが稼働中
-- OpenLDAP が `openldap` namespace で稼働中
 - MetalLB がインストール済み
 - NFSサーバー (192.168.10.11) が稼働中
   - `/mnt/shared` がエクスポート済み (mergerfs union mount, fsid=100)
@@ -67,7 +68,7 @@ samba/
 
 ```bash
 # バージョン変数を設定
-export SAMBA_VERSION="v1.32"
+export SAMBA_VERSION="v1.34"
 
 # Samba Dockerイメージをビルド
 cd docker
@@ -77,46 +78,41 @@ docker build -t ghcr.io/koji-genba/samba:${SAMBA_VERSION} .
 docker push ghcr.io/koji-genba/samba:${SAMBA_VERSION}
 ```
 
-**v1.32 での変更点:**
-- NSS LDAP (nslcd) 統合を追加
-- UNIX ユーザー/グループの LDAP からの解決をサポート
-- Primary Group SID の正しい解決を実現
+**v1.34 での変更点:**
+- OpenLDAP 依存を削除
+- ConfigMap/Secret からローカル UNIX ユーザと Samba passdb を起動時に再生成
+- Samba local SID を固定し、Samba 状態用 PV を不要化
+- `users.json` と `scripts/add-user.sh` による UID/RID/SID 管理を追加
 
 > **注**: バージョン番号は環境変数 `SAMBA_VERSION` で管理しています。デプロイ時には [deployment.yaml](deployment.yaml#L25) で指定されたバージョンと一致させてください。
 
-### 2. OpenLDAPの更新
+### 2. ユーザ定義の確認
 
-OpenLDAPのブートストラップ設定に `samba-users` グループが追加されているため、既存のOpenLDAPをリセットするか、手動でグループを追加する必要があります。
+`config/users.json` は Git 管理するユーザ定義です。UNIX UID/GID、Samba RID、所属グループ、パスワードを参照するための `passwordSecretKey` を宣言します。
 
-**方法A: OpenLDAPをリセット（推奨）**
+既存ファイルの所有権を維持するため、UID/GID は変更しないでください。現在の `koji-genba` は UID/GID `10002:10002` です。
+
+### 3. Samba Secretの作成
+
+`config/secrets.json` は Git 管理しないパスワード定義です。`config/users.json` の各ユーザが持つ `passwordSecretKey` と同じキー名で、実際の Samba パスワードを書きます。
+
 ```bash
-# OpenLDAPクラスタをリセット
-kubectl delete pvc openldap-data-pvc -n openldap
-kubectl rollout restart deployment/openldap -n openldap
-kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=openldap -n openldap --timeout=60s
+cp config/secrets.json.template config/secrets.json
+chmod 600 config/secrets.json
+vi config/secrets.json
 ```
 
-**方法B: 手動でグループを追加**
-```bash
-# LDAP操作ツールを使用してグループを追加
-ldapadd -x -D "cn=admin,dc=kojigenba-srv,dc=com" -W <<EOF
-dn: cn=samba-users,ou=groups,dc=kojigenba-srv,dc=com
-objectClass: posixGroup
-objectClass: sambaGroupMapping
-cn: samba-users
-gidNumber: 10004
-description: Samba File Share Users
-sambaGroupType: 2
-sambaSID: S-1-5-21-3623811015-3361044348-30300820-515
-EOF
+例:
+
+```json
+{
+  "koji-genba-password": "actual-samba-password"
+}
 ```
 
-### 3. Sambaのデプロイ
+### 4. Sambaのデプロイ
 
 ```bash
-# OpenLDAPのadminパスワードを環境変数に設定
-export SAMBA_ADMIN_PASSWORD="<OpenLDAP_admin_password>"
-
 # デプロイメント実行
 ./deploy.sh
 ```
@@ -124,7 +120,7 @@ export SAMBA_ADMIN_PASSWORD="<OpenLDAP_admin_password>"
 デプロイスクリプトが以下を自動実行します：
 - Namespace作成
 - Secret生成
-- ConfigMap適用
+- ConfigMap適用 (`smb.conf`, ユーザ定義)
 - PVC作成
 - Deployment起動
 - Service作成
@@ -182,36 +178,19 @@ export SAMBA_ADMIN_PASSWORD="<OpenLDAP_admin_password>"
   - ディレクトリ作成マスク: 0700
 - **ストレージ**: Static NFS PV (192.168.10.11:/tank-gen1/data/archive, 6TB)
 
-### LDAP連携設定
-
-#### Samba ldapsam 設定
+### ローカル認証設定
 
 ```ini
 security = user
-passdb backend = ldapsam:ldap://openldap-ldap.openldap.svc.cluster.local:389
-ldap suffix = dc=kojigenba-srv,dc=com
-ldap user suffix = ou=people
-ldap group suffix = ou=groups
-ldap admin dn = cn=admin,dc=kojigenba-srv,dc=com
-ldap passwd sync = yes
-ldap timeout = 10
-ldap ssl = off
-netbios name = k8s-samba
+server role = standalone server
+passdb backend = tdbsam
 workgroup = HOMELAB
+netbios name = k8s-samba
 ```
 
-#### NSS LDAP 設定 (nslcd)
+Pod 起動時に `config/users.json` 由来の ConfigMap と `samba-secrets` からローカル UNIX ユーザ/グループと Samba passdb を再生成します。`/var/lib/samba` は `emptyDir` のため、Samba の生成状態は再デプロイで保持しません。
 
-```ini
-uri ldap://openldap-ldap.openldap.svc.cluster.local:389
-base dc=kojigenba-srv,dc=com
-base passwd ou=people,dc=kojigenba-srv,dc=com
-base group ou=groups,dc=kojigenba-srv,dc=com
-binddn cn=admin,dc=kojigenba-srv,dc=com
-bindpw <LDAP_BIND_PASSWORD>
-```
-
-NSS により、Samba は LDAP から UNIX ユーザー/グループ情報を取得し、Primary Group SID を正しく解決できます。
+`localSid` は Samba が Windows SID のドメイン部分として使う値です。Samba は未保存時にランダムな `S-1-5-21-x-y-z` を生成して `secrets.tdb` に保存するため、`emptyDir` 運用では `config/users.json` で固定します。既存 LDAP 時代の Domain SID を引き継ぐため、現在は `S-1-5-21-3623811015-3361044348-30300820` を指定しています。
 
 ## トラブルシューティング
 
@@ -245,42 +224,27 @@ kubectl get svc -n samba
 kubectl exec -it deployment/samba -n samba -- testparm -s
 ```
 
-### LDAP接続テスト
-
-```bash
-# Pod内でLDAPへの接続を確認
-kubectl exec -it deployment/samba -n samba -- ldapsearch -x \
-  -H ldap://openldap-ldap.openldap.svc.cluster.local:389 \
-  -b ou=groups,dc=kojigenba-srv,dc=com \
-  -D cn=admin,dc=kojigenba-srv,dc=com \
-  -W \
-  "(cn=samba-users)"
-```
-
-### NSS LDAP 動作確認
+### ローカルユーザ動作確認
 
 ```bash
 # ユーザー情報を取得
-kubectl exec -it deployment/samba -n samba -- getent passwd admin
+kubectl exec -it deployment/samba -n samba -- getent passwd koji-genba
 
 # グループ情報を取得
 kubectl exec -it deployment/samba -n samba -- getent group samba-users
 
 # ユーザーのグループメンバーシップを確認
-kubectl exec -it deployment/samba -n samba -- id admin
-
-# nslcd デーモンの状態確認
-kubectl exec -it deployment/samba -n samba -- pgrep -a nslcd
+kubectl exec -it deployment/samba -n samba -- id koji-genba
 ```
 
 ### Samba ユーザーデータベース確認
 
 ```bash
 # Samba のユーザー情報を確認
-kubectl exec -it deployment/samba -n samba -- pdbedit -Lv admin
+kubectl exec -it deployment/samba -n samba -- pdbedit -Lv koji-genba
 
-# Samba のグループマッピングを確認
-kubectl exec -it deployment/samba -n samba -- net groupmap list
+# Samba local SIDを確認
+kubectl exec -it deployment/samba -n samba -- net getlocalsid
 ```
 
 ### クライアント接続テスト
@@ -291,13 +255,13 @@ kubectl exec -it deployment/samba -n samba -- net groupmap list
 net view \\192.168.11.103
 
 # shared共有に接続（通常利用）
-net use Z: \\192.168.11.103\shared /user:admin
+net use Z: \\192.168.11.103\shared /user:koji-genba
 
 # shared-hdd共有に接続（HDD直接）
-net use X: \\192.168.11.103\shared-hdd /user:admin
+net use X: \\192.168.11.103\shared-hdd /user:koji-genba
 
 # archive共有に接続
-net use Y: \\192.168.11.103\archive /user:admin
+net use Y: \\192.168.11.103\archive /user:koji-genba
 ```
 
 #### macOS
@@ -321,20 +285,44 @@ mount -t cifs //192.168.11.103/shared /mnt/shared -o username=username
 mount -t cifs //192.168.11.103/shared-hdd /mnt/shared-hdd -o username=username
 ```
 
-## LDAPユーザの管理
+## Sambaユーザの管理
 
 ### Sambaアクセス可能ユーザの追加
 
-Sambaにアクセス可能なユーザにするには、OpenLDAPでそのユーザを `samba-users` グループに追加します：
+Sambaにアクセス可能なユーザにするには、補助スクリプトで `config/users.json` にユーザを追加します。RID は既存 LDAP の規則に合わせて、UID `10001-10999` ではデフォルトで `UID - 9000` から計算されます。
 
 ```bash
-# LDAPで既存ユーザをsamba-usersグループに追加
-ldapmodify -x -D "cn=admin,dc=kojigenba-srv,dc=com" -W <<EOF
-dn: cn=samba-users,ou=groups,dc=kojigenba-srv,dc=com
-changetype: modify
-add: memberUid
-memberUid: username
-EOF
+scripts/add-user.sh newuser 10003
+```
+
+スクリプトは `config/users.json` に以下のようなユーザ定義を追加し、`config/secrets.json.template` に対応するパスワードキーも追加します。
+
+```json
+{
+  "name": "newuser",
+  "uid": 10003,
+  "gid": 10002,
+  "rid": 1003,
+  "groups": ["samba-users"],
+  "home": "/nonexistent",
+  "shell": "/usr/sbin/nologin",
+  "passwordSecretKey": "newuser-password"
+}
+```
+
+実際のパスワードは Git 管理対象外の `config/secrets.json` に書きます。
+
+```json
+{
+  "koji-genba-password": "current-password",
+  "newuser-password": "newuser-password"
+}
+```
+
+UID から計算される RID を使いたくない場合は、`--rid` で明示します。
+
+```bash
+scripts/add-user.sh newuser 10100 --rid 1100
 ```
 
 ## ストレージ情報
@@ -417,5 +405,4 @@ Deployment では以下の Linux Capability を追加しています：
 ## 参考情報
 
 - [Samba公式ドキュメント](https://www.samba.org/samba/docs/)
-- [OpenLDAP統合ガイド](https://www.samba.org/samba/docs/current/man-html/smb.conf.5.html#PASSDBBACKEND)
 - [Kubernetes StorageClass](https://kubernetes.io/docs/concepts/storage/storage-classes/)

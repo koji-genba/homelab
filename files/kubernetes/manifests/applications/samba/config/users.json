@@ -1,0 +1,27 @@
+{
+  "localSid": "S-1-5-21-3623811015-3361044348-30300820",
+  "groups": [
+    {
+      "name": "system-users",
+      "gid": 10002
+    },
+    {
+      "name": "samba-users",
+      "gid": 10004
+    }
+  ],
+  "users": [
+    {
+      "name": "koji-genba",
+      "uid": 10002,
+      "gid": 10002,
+      "rid": 1002,
+      "groups": [
+        "samba-users"
+      ],
+      "home": "/nonexistent",
+      "shell": "/usr/sbin/nologin",
+      "passwordSecretKey": "koji-genba-password"
+    }
+  ]
+}

@@ -22,24 +22,22 @@ spec:
     spec:
       containers:
       - name: samba
-        image: ghcr.io/koji-genba/samba:v1.32
+        image: ghcr.io/koji-genba/samba:v1.34
         imagePullPolicy: Always
         ports:
         - name: smb
           containerPort: 445
           protocol: TCP
-        env:
-        - name: LDAP_BIND_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: samba-secrets
-              key: ldap_bind_password
-        - name: DEBUG_ENTRYPOINT
-          value: "1"
         volumeMounts:
         - name: samba-config
           mountPath: /etc/samba/smb.conf
           subPath: smb.conf
+          readOnly: true
+        - name: samba-users
+          mountPath: /etc/samba/users
+          readOnly: true
+        - name: samba-secrets
+          mountPath: /run/samba-secrets
           readOnly: true
         - name: samba-shared
           mountPath: /mnt/shared
@@ -88,6 +86,14 @@ spec:
         configMap:
           name: samba-config
           defaultMode: 0644
+      - name: samba-users
+        configMap:
+          name: samba-users
+          defaultMode: 0644
+      - name: samba-secrets
+        secret:
+          secretName: samba-secrets
+          defaultMode: 0400
       - name: samba-shared
         persistentVolumeClaim:
           claimName: samba-shared-storage
