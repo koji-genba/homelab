@@ -1,0 +1,27 @@
+# samba の pv-shared.yaml と同じNFSサーバ(192.168.10.11)配下、
+# koji-genba ユーザーフォルダを読み取り専用でマウントする静的PV。
+# staging/prod は同じ実データを参照するが、PV<->PVCは1:1バインドのため
+# namespaceごとに別PVを用意している。
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: stashpad-media-pv-staging
+  labels:
+    app.kubernetes.io/name: stashpad
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/environment: staging
+spec:
+  capacity:
+    storage: 1Ti
+  accessModes:
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-media-static
+  mountOptions:
+    - hard
+    - nfsvers=4.1
+    - noatime
+    - ro
+  nfs:
+    server: 192.168.10.11
+    path: /mnt/shared/koji-genba

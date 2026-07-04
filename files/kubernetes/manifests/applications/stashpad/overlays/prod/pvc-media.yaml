@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: stashpad-media
+  namespace: stashpad-prod
+  labels:
+    app.kubernetes.io/name: stashpad
+    app.kubernetes.io/component: storage
+spec:
+  accessModes:
+    - ReadOnlyMany
+  storageClassName: nfs-media-static
+  volumeName: stashpad-media-pv-prod
+  resources:
+    requests:
+      storage: 1Ti
