@@ -1,17 +1,13 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-
 namespace: stashpad-staging
-
 resources:
   - ../../base
   - namespace.yaml
   - pv-media.yaml
   - pvc-media.yaml
   - ingress.yaml
-
-
 images:
   - name: ghcr.io/koji-genba/stashpad
     # Flux Image Update Automation がこの行を自動で書き換える(main pushのたびに追従)
-    newTag: edge # {"$imagepolicy": "flux-system:stashpad-staging:tag"}
+    newTag: main-3-3c4f8c6 # {"$imagepolicy": "flux-system:stashpad-staging:tag"}
