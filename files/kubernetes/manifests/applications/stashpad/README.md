@@ -72,12 +72,6 @@ kubectl apply -k files/kubernetes/manifests/infrastructure/external-dns/
 kubectl rollout restart deployment/external-unbound -n external-dns
 ```
 
-## 未確定の設定
-
-- `base/configmap.yaml` の `STASHPAD_LIBRARY_ROOTS`(`library-roots`)は仮に `/media` としている。
-  実際のライブラリ構成(`/mnt/shared/koji-genba` 配下、評価フォルダ分けなど)が固まったら
-  `/media/...` 配下の実パスのカンマ区切りに書き換えること。
-
 ## 動作確認
 
 ```bash

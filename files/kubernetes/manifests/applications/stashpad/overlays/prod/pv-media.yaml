@@ -1,4 +1,4 @@
-# staging と同じ実データ(NFS 192.168.10.11:/mnt/shared/koji-genba)を
+# staging と同じ実データ(NFS 192.168.10.11:/mnt/shared/koji-genba/stashPadLib)を
 # 読み取り専用で参照する静的PV。PV<->PVCは1:1バインドのためstaging用と別に定義。
 apiVersion: v1
 kind: PersistentVolume
@@ -22,4 +22,4 @@ spec:
     - ro
   nfs:
     server: 192.168.10.11
-    path: /mnt/shared/koji-genba
+    path: /mnt/shared/koji-genba/stashPadLib
