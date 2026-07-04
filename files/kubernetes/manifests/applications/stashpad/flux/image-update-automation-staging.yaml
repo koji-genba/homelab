@@ -19,8 +19,8 @@ spec:
       messageTemplate: |
         stashpad staging: イメージ自動更新
 
-        {{ range .Updated.Images -}}
-        - {{ . }}
+        {{ range .Changed.Changes -}}
+        - {{ .OldValue }} -> {{ .NewValue }}
         {{ end -}}
     push:
       branch: main
