@@ -117,6 +117,28 @@ GigaEthernet2.1-2.5のサブインターフェース設定により、**全ポ�
 
 - **設定**: +09:00 (JST)
 
+## フローエクスポート（sFlow）設定案 - ElastiFlow連携
+
+ネットワークトラフィック可視化のため、[ElastiFlow](../terraform/elastiflow/README.md)（VLAN10上のLXCコンテナ、192.168.10.40）にsFlowをエクスポートする案。
+
+**注意**: 以下はNEC UNIVERGE IX2000/IX3000シリーズの公式sFlow設定例を参考にしたコマンド案であり、`config.txt`（実機のrunning-config）にはまだ反映していない。適用前に実機で`show sflow information`等により構文を確認し、影響の小さいインターフェースから段階的に試すこと。IX2215はNetFlow/IPFIXの設定例が確認できなかったため、sFlow前提とする。
+
+```text
+! グローバル設定
+sflow agent ip 192.168.10.1        ! BVI10（管理VLANの自IP）をagentアドレスに
+sflow collector ip 192.168.10.40   ! ElastiFlowコンテナ（デフォルトUDP 6343）
+
+! インターフェース単位でサンプリングを有効化（まずはWAN側から）
+device GigaEthernet0.0
+  sflow sampling-rate 512 in
+  sflow sampling-rate 512 out
+  sflow polling-interval 30
+```
+
+- WAN側（GigaEthernet0.0）から始めて動作確認し、必要であればLAN側（VLAN間トラフィックの可視化）も検討する。ただしBVI/ブリッジインターフェース側でのsFlow対応可否は未確認のため、対応していなければWAN側のみの可視化に留める。
+- sFlowはUDPの片方向送信（ルーター→コレクタ）のみで、既存の通信に影響しない設定変更。
+- ACL上は management VLAN(10) → server_app VLAN(11) の通信は`server-out`で許可済みのため、コレクタへの到達性は問題ない想定。
+
 ## UFSキャッシュタイムアウト
 
 | VLAN | TCP | UDP |

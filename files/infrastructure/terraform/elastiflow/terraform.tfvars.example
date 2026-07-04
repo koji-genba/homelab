@@ -1,0 +1,2 @@
+proxmox_password = "your-proxmox-password"
+ssh_public_key   = "ssh-ed25519 AAAAC3... your-key"
