@@ -2,7 +2,8 @@
 
 自宅メディアライブラリ [stashPad](https://github.com/koji-genba/stashPad) のk8sデプロイ設定。
 CIは stashPad リポジトリの GitHub Actions(`.github/workflows/ci.yml`)、CDはこのリポジトリを
-Flux が pull 型で反映する構成。
+Flux が pull 型で反映する構成。stashPadリポジトリ・GHCRイメージともpublicなので、
+`imagePullSecrets` は不要。
 
 ## 仕組み
 
@@ -60,23 +61,7 @@ resources:
   - ../manifests/applications/stashpad/flux
 ```
 
-### 2. GHCR pull用シークレットの作成(stashPadリポジトリがprivateなため必須)
-
-GitHubで `read:packages` スコープのPATを発行し、以下を3箇所(stashpad-staging / stashpad-prod / flux-system)に作成する。値を含むためGit管理はしない。
-
-```bash
-for ns in stashpad-staging stashpad-prod flux-system; do
-  kubectl create secret docker-registry ghcr-pull-secret \
-    --docker-server=ghcr.io \
-    --docker-username=<GitHubユーザー名> \
-    --docker-password=<read:packages スコープのPAT> \
-    -n "$ns"
-done
-```
-
-(namespaceが存在しない場合はFluxが `overlays/*/namespace.yaml` を適用した後に実行する)
-
-### 3. DNS追加分の反映
+### 2. DNS追加分の反映
 
 `files/kubernetes/manifests/infrastructure/external-dns/dns/manual-config-configmap.yaml` に
 `staging.stashpad.kojigenba-srv.com` / `prod.stashpad.kojigenba-srv.com` を追記済み。
