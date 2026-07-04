@@ -16,7 +16,7 @@ resource "proxmox_virtual_environment_file" "cloud_config" {
         ssh_authorized_keys:
           - ${var.ssh_public_key}
         sudo: ALL=(ALL) NOPASSWD:ALL
-    
+
     packages:
       - qemu-guest-agent
       - net-tools
@@ -34,11 +34,11 @@ resource "proxmox_virtual_environment_file" "cloud_config" {
       - rsync
       - tree
       - unzip
-    
+
     package_update: true
     package_upgrade: false
     timezone: Asia/Tokyo
-    
+
     runcmd:
       - systemctl enable --now qemu-guest-agent
       - systemctl enable --now rpcbind
@@ -46,7 +46,7 @@ resource "proxmox_virtual_environment_file" "cloud_config" {
       - hostnamectl set-hostname $(hostname -s)
       - echo 'net.ipv4.ip_forward = 1' >> /etc/sysctl.conf
       - sysctl -p
-    
+
     final_message: "Cloud-init completed with comprehensive toolset at $TIMESTAMP"
     EOF
 
@@ -60,7 +60,7 @@ locals {
     "k8s-master01" = {
       vm_id    = 101
       cores    = 2
-      memory   = 6144
+      memory   = 8192
       disk     = 50
       ip_vlan10 = "192.168.10.21"
       ip_vlan11 = "192.168.11.21"
@@ -68,7 +68,7 @@ locals {
     "k8s-worker01" = {
       vm_id    = 102
       cores    = 4
-      memory   = 8192
+      memory   = 16384
       disk     = 40
       ip_vlan10 = "192.168.10.22"
       ip_vlan11 = "192.168.11.22"
@@ -76,7 +76,7 @@ locals {
     "k8s-worker02" = {
       vm_id    = 103
       cores    = 4
-      memory   = 8192
+      memory   = 16384
       disk     = 40
       ip_vlan10 = "192.168.10.23"
       ip_vlan11 = "192.168.11.23"
@@ -93,7 +93,7 @@ resource "proxmox_virtual_environment_vm" "k8s_nodes" {
   vm_id       = each.value.vm_id
   description = "Kubernetes ${contains(["k8s-master01"], each.key) ? "Master" : "Worker"} Node"
   tags        = contains(["k8s-master01"], each.key) ? ["kubernetes", "master"] : ["kubernetes", "worker"]
-  
+
   # 起動時の動作設定
   started = true
   on_boot = true
@@ -133,7 +133,7 @@ resource "proxmox_virtual_environment_vm" "k8s_nodes" {
 
   initialization {
     datastore_id = "vmpool"  # Cloud-initディスクもvmpoolに配置
-    
+
     # VLAN10 IP設定（管理用）
     ip_config {
       ipv4 {
@@ -159,7 +159,7 @@ resource "proxmox_virtual_environment_vm" "k8s_nodes" {
       username = "ubuntu"
       keys     = [var.ssh_public_key]
     }
-    
+
     user_data_file_id = proxmox_virtual_environment_file.cloud_config.id
   }
 
