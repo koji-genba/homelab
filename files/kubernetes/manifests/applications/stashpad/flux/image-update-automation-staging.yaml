@@ -1,0 +1,30 @@
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageUpdateAutomation
+metadata:
+  name: stashpad-staging
+  namespace: flux-system
+spec:
+  interval: 1m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        name: fluxcdbot
+        email: fluxcdbot@users.noreply.github.com
+      messageTemplate: |
+        stashpad staging: イメージ自動更新
+
+        {{ range .Updated.Images -}}
+        - {{ . }}
+        {{ end -}}
+    push:
+      branch: main
+  update:
+    # overlays/staging のみを対象にする(prodはここに含めない = 自動反映されない担保)
+    path: ./files/kubernetes/manifests/applications/stashpad/overlays/staging
+    strategy: Setters

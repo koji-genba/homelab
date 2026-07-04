@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: stashpad
+  labels:
+    app.kubernetes.io/name: stashpad
+spec:
+  selector:
+    app.kubernetes.io/name: stashpad
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

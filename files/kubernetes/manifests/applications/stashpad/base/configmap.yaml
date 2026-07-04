@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stashpad-config
+  labels:
+    app.kubernetes.io/name: stashpad
+data:
+  # TODO: 実際のライブラリ構成(/mnt/shared/koji-genba 配下のサブフォルダ)が
+  # 調整中のため、確定したら /media 以下の実パスに書き換えること。
+  # 例: /media/X/sound/echi/used/(評価フォルダ),/media/X/sound/noechi/used, ...
+  library-roots: "/media"

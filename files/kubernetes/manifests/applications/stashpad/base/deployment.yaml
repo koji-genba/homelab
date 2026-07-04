@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stashpad
+  labels:
+    app.kubernetes.io/name: stashpad
+    app.kubernetes.io/component: media-library
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: stashpad
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: stashpad
+        app.kubernetes.io/component: media-library
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      containers:
+        - name: stashpad
+          # tag は overlay の kustomization.yaml (images:) で差し替える
+          image: ghcr.io/koji-genba/stashpad:edge
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: STASHPAD_ADDR
+              value: ":8080"
+            - name: STASHPAD_DATA_DIR
+              value: /data
+            - name: STASHPAD_SCAN_ON_START
+              value: "true"
+            - name: STASHPAD_LIBRARY_ROOTS
+              valueFrom:
+                configMapKeyRef:
+                  name: stashpad-config
+                  key: library-roots
+          volumeMounts:
+            - name: media
+              mountPath: /media
+              readOnly: true
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "1000m"
+      volumes:
+        - name: media
+          persistentVolumeClaim:
+            claimName: stashpad-media
+        - name: data
+          persistentVolumeClaim:
+            claimName: stashpad-data
