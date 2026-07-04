@@ -12,14 +12,8 @@ data:
     workgroup = HOMELAB
     netbios name = k8s-samba
     security = user
-    passdb backend = ldapsam:ldap://openldap-ldap.openldap.svc.cluster.local:389
-    ldap suffix = dc=kojigenba-srv,dc=com
-    ldap user suffix = ou=people
-    ldap group suffix = ou=groups
-    ldap admin dn = cn=admin,dc=kojigenba-srv,dc=com
-    ldap passwd sync = yes
-    ldap timeout = 10
-    ldap ssl = off
+    server role = standalone server
+    passdb backend = tdbsam
 
     # DOS Attributes - Disable to avoid 0x80070032 errors on certain filesystems
     store dos attributes = no

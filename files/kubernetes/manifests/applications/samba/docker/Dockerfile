@@ -10,13 +10,10 @@ RUN apt-get update && apt-get install -y \
     samba-vfs-modules \
     samba-dsdb-modules \
     smbclient \
-    ldap-utils \
-    libpam-ldapd \
-    libnss-ldapd \
-    nslcd \
     tdb-tools \
     acl \
     xattr \
+    jq \
     supervisor \
     rsyslog \
     cron \

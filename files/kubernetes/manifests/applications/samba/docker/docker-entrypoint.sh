@@ -1,164 +1,192 @@
 #!/bin/bash
-set -e
-# Note: Some systems don't allow -x (xtrace) with bash shebangs, so we set it conditionally
-if [ -n "$DEBUG_ENTRYPOINT" ]; then
+set -euo pipefail
+
+if [ -n "${DEBUG_ENTRYPOINT:-}" ]; then
     set -x
 fi
 
-# Log configuration
-echo "[INFO] Starting Samba configuration..."
-
-# Configure NSS LDAP (nslcd)
-echo "[INFO] Configuring NSS LDAP..."
-cat > /etc/nslcd.conf <<'EOF'
-# nslcd configuration for Samba LDAP integration
-uid nslcd
-gid nslcd
-
-uri ldap://openldap-ldap.openldap.svc.cluster.local:389
-
-base dc=kojigenba-srv,dc=com
-base passwd ou=people,dc=kojigenba-srv,dc=com
-base group ou=groups,dc=kojigenba-srv,dc=com
-
-ldap_version 3
-binddn cn=admin,dc=kojigenba-srv,dc=com
-EOF
-
-# Add LDAP_BIND_PASSWORD to nslcd.conf (must be set before nslcd starts)
-if [ -n "$LDAP_BIND_PASSWORD" ]; then
-    echo "bindpw $LDAP_BIND_PASSWORD" >> /etc/nslcd.conf
-else
-    echo "[WARNING] LDAP_BIND_PASSWORD not set, nslcd may fail"
-fi
-
-chmod 600 /etc/nslcd.conf
-chown nslcd:nslcd /etc/nslcd.conf
-
-echo "[INFO] Configuring NSS to use LDAP..."
-cat > /etc/nsswitch.conf <<'EOF'
-passwd:         files ldap
-group:          files ldap
-shadow:         files ldap
-
-hosts:          files dns
-networks:       files
-
-protocols:      db files
-services:       db files
-ethers:         db files
-rpc:            db files
-
-netgroup:       nis
-EOF
-
-echo "[INFO] Starting nslcd daemon..."
-/usr/sbin/nslcd
-sleep 2
-
-# Verify nslcd is running
-if ! pgrep -x nslcd > /dev/null; then
-    echo "[ERROR] nslcd failed to start"
-    exit 1
-fi
-
-echo "[INFO] nslcd started successfully"
-
-# Verify smb.conf exists
-if [ ! -f /etc/samba/smb.conf ]; then
-    echo "[ERROR] smb.conf not found at /etc/samba/smb.conf"
-    exit 1
-fi
-
-# Check if LDAP is configured and configure password
 SMBD_CONFIG="/etc/samba/smb.conf"
-if grep -q "ldapsam" $SMBD_CONFIG; then
-    echo "[INFO] LDAP backend detected, configuring LDAP credentials..."
-    if [ -z "$LDAP_BIND_PASSWORD" ]; then
-        echo "[ERROR] LDAP_BIND_PASSWORD environment variable not set"
+USER_CONFIG="/etc/samba/users/users.json"
+SECRET_DIR="/run/samba-secrets"
+
+log_info() {
+    echo "[INFO] $*"
+}
+
+log_warn() {
+    echo "[WARNING] $*"
+}
+
+log_error() {
+    echo "[ERROR] $*" >&2
+}
+
+require_file() {
+    local path="$1"
+    if [ ! -f "$path" ]; then
+        log_error "Required file not found: $path"
+        exit 1
+    fi
+}
+
+ensure_group() {
+    local name="$1"
+    local gid="$2"
+    local existing
+
+    existing="$(getent group "$name" || true)"
+    if [ -n "$existing" ]; then
+        if [ "$(echo "$existing" | cut -d: -f3)" != "$gid" ]; then
+            log_error "Group $name exists with unexpected GID: $existing"
+            exit 1
+        fi
+        return
+    fi
+
+    existing="$(getent group "$gid" || true)"
+    if [ -n "$existing" ]; then
+        log_error "GID $gid is already used by another group: $existing"
         exit 1
     fi
 
-    # Create working smb.conf in /tmp (ConfigMap is read-only)
-    cat $SMBD_CONFIG > /tmp/smb.conf.tmp
+    groupadd --gid "$gid" "$name"
+}
 
-    # Add LDAP bind password to the working copy (Samba requires this parameter)
-    # Insert after 'ldap admin dn' line in the [global] section
-    sed -i '/ldap admin dn/a \    ldap admin password = '"${LDAP_BIND_PASSWORD}" /tmp/smb.conf.tmp
+ensure_user() {
+    local name="$1"
+    local uid="$2"
+    local gid="$3"
+    local groups="$4"
+    local home="$5"
+    local shell="$6"
+    local existing
 
-    # Use the modified config file for smbd
-    SMBD_CONFIG="/tmp/smb.conf.tmp"
+    existing="$(getent passwd "$name" || true)"
+    if [ -n "$existing" ]; then
+        if [ "$(echo "$existing" | cut -d: -f3)" != "$uid" ] ||
+           [ "$(echo "$existing" | cut -d: -f4)" != "$gid" ]; then
+            log_error "User $name exists with unexpected UID/GID: $existing"
+            exit 1
+        fi
+    else
+        existing="$(getent passwd "$uid" || true)"
+        if [ -n "$existing" ]; then
+            log_error "UID $uid is already used by another user: $existing"
+            exit 1
+        fi
+        useradd --uid "$uid" --gid "$gid" --no-create-home --home-dir "$home" --shell "$shell" "$name"
+    fi
 
-    echo "[INFO] LDAP credentials configured in temporary smb.conf"
+    if [ -n "$groups" ]; then
+        usermod --append --groups "$groups" "$name"
+    fi
+}
 
-    echo "[DEBUG] LDAP config:"
-    grep -E "ldap" $SMBD_CONFIG | sed 's/^/  [DEBUG] /'
-else
-    echo "[INFO] Local backend (tdbsam) configured, LDAP password not required"
-fi
+configure_samba_account() {
+    local name="$1"
+    local secret_key="$2"
+    local rid="$3"
+    local password_file="$SECRET_DIR/$secret_key"
+    local password
+    local xtrace_was_on=0
 
-# Test smb.conf syntax
-echo "[INFO] Validating smb.conf..."
-testparm -s > /dev/null 2>&1
-if [ $? -ne 0 ]; then
-    echo "[ERROR] smb.conf syntax error:"
-    testparm -s
+    require_file "$password_file"
+
+    case "$-" in
+        *x*)
+            xtrace_was_on=1
+            set +x
+            ;;
+    esac
+
+    password="$(cat "$password_file")"
+    if [ -z "$password" ]; then
+        log_error "Password secret is empty: $secret_key"
+        exit 1
+    fi
+
+    printf '%s\n%s\n' "$password" "$password" | smbpasswd -a -s "$name" >/dev/null
+    if [ -n "$rid" ]; then
+        pdbedit --modify --user "$name" -U "$rid" >/dev/null
+    fi
+    smbpasswd -e "$name" >/dev/null
+
+    if [ "$xtrace_was_on" -eq 1 ]; then
+        set -x
+    fi
+}
+
+log_info "Starting Samba configuration..."
+
+require_file "$SMBD_CONFIG"
+require_file "$USER_CONFIG"
+
+if ! jq empty "$USER_CONFIG" >/dev/null; then
+    log_error "Invalid Samba user configuration: $USER_CONFIG"
     exit 1
 fi
 
-echo "[INFO] smb.conf validation passed"
+log_info "Ensuring local groups..."
+while IFS= read -r group_json; do
+    group_name="$(jq -r '.name' <<<"$group_json")"
+    group_gid="$(jq -r '.gid' <<<"$group_json")"
+    ensure_group "$group_name" "$group_gid"
+done < <(jq -c '.groups[]' "$USER_CONFIG")
 
-# Ensure all required directories exist and have correct permissions
-mkdir -p /mnt/shared /mnt/archive
-chmod 755 /mnt/shared /mnt/archive
+log_info "Ensuring local users..."
+while IFS= read -r user_json; do
+    user_name="$(jq -r '.name' <<<"$user_json")"
+    user_uid="$(jq -r '.uid' <<<"$user_json")"
+    user_gid="$(jq -r '.gid' <<<"$user_json")"
+    user_groups="$(jq -r '(.groups // []) | join(",")' <<<"$user_json")"
+    user_home="$(jq -r '.home // "/nonexistent"' <<<"$user_json")"
+    user_shell="$(jq -r '.shell // "/usr/sbin/nologin"' <<<"$user_json")"
+    ensure_user "$user_name" "$user_uid" "$user_gid" "$user_groups" "$user_home" "$user_shell"
+done < <(jq -c '.users[]' "$USER_CONFIG")
 
-# Ensure Samba private directories exist (important for emptyDir mounts)
-mkdir -p /var/lib/samba/private
+log_info "Preparing Samba runtime directories..."
+mkdir -p /var/lib/samba/private /var/cache/samba /var/run/samba /var/log/samba
+chmod 755 /var/lib/samba /var/cache/samba /var/run/samba /var/log/samba
 chmod 700 /var/lib/samba/private
-mkdir -p /var/cache/samba
-chmod 755 /var/cache/samba
 
-# Clean up stale PID files
+log_info "Resetting generated Samba state..."
+rm -f /var/lib/samba/private/passdb.tdb
+rm -f /var/lib/samba/private/secrets.tdb
+rm -f /var/lib/samba/group_mapping.tdb
+rm -f /var/lib/samba/*.tdb
+rm -f /var/cache/samba/*.tdb
 rm -f /var/run/samba/*.pid 2>/dev/null || true
 
-# Note: Do NOT clear *.tdb files when using ldapsam
-# secrets.tdb contains the LDAP password and must be preserved
-
-# Store LDAP password in secrets.tdb after directories are created
-if grep -q "ldapsam" $SMBD_CONFIG; then
-    echo "[INFO] Storing LDAP password in secrets.tdb..."
-    smbpasswd -w "$LDAP_BIND_PASSWORD"
-    if [ $? -ne 0 ]; then
-        echo "[ERROR] Failed to store LDAP password in secrets.tdb"
-        exit 1
-    fi
-    echo "[INFO] LDAP password successfully stored in secrets.tdb"
-fi
-
-echo "[INFO] Samba initialization complete"
-echo "[INFO] Starting Samba daemon..."
-echo "[DEBUG] Command to execute: $@"
-echo "[DEBUG] Current working directory: $(pwd)"
-echo "[DEBUG] UID/GID: $(id)"
-echo "[DEBUG] smbd version: $(smbd --version 2>&1 || echo 'ERROR: smbd not found')"
-echo "[DEBUG] smbd path: $(which smbd 2>&1 || echo 'NOT FOUND')"
-echo "[DEBUG] /etc/samba/smb.conf exists: $(test -f /etc/samba/smb.conf && echo 'YES' || echo 'NO')"
-echo "[DEBUG] /etc/samba/smb.conf readable: $(test -r /etc/samba/smb.conf && echo 'YES' || echo 'NO')"
-echo "[DEBUG] /var/lib/samba writable: $(test -w /var/lib/samba && echo 'YES' || echo 'NO')"
-echo "[DEBUG] /var/log/samba writable: $(test -w /var/log/samba && echo 'YES' || echo 'NO')"
-echo "[DEBUG] /var/run/samba exists: $(test -d /var/run/samba && echo 'YES' || echo 'NO')"
-
-# Run smbd in foreground with debug logging
-echo "[INFO] Starting smbd daemon..."
-echo "[DEBUG] Configuration backend: $(grep 'passdb backend' $SMBD_CONFIG | head -1)"
-echo "[DEBUG] LDAP settings:"
-grep -E "ldap|LDAP" $SMBD_CONFIG | sed 's/^/  [DEBUG] /' || echo "  [DEBUG] No LDAP settings found"
-
-# Use higher debug level for LDAP debugging
-if grep -q "ldapsam" $SMBD_CONFIG; then
-    echo "[INFO] Running with high debug level (-d 10) for LDAP diagnostics..."
-    exec /usr/sbin/smbd --foreground --no-process-group -d 10 -s $SMBD_CONFIG 2>&1
+local_sid="$(jq -r '.localSid // empty' "$USER_CONFIG")"
+if [ -n "$local_sid" ]; then
+    log_info "Setting Samba local SID..."
+    net setlocalsid "$local_sid" >/dev/null
+    net getlocalsid
 else
-    echo "[INFO] Running with standard debug level (-d 3) for tdbsam..."
-    exec /usr/sbin/smbd --foreground --no-process-group -d 3 -s $SMBD_CONFIG 2>&1
+    log_warn "No localSid configured; Samba will generate one"
 fi
+
+log_info "Configuring Samba accounts..."
+while IFS= read -r user_json; do
+    user_name="$(jq -r '.name' <<<"$user_json")"
+    secret_key="$(jq -r '.passwordSecretKey // empty' <<<"$user_json")"
+    user_rid="$(jq -r '.rid // empty' <<<"$user_json")"
+    if [ -z "$secret_key" ]; then
+        log_warn "Skipping Samba account for $user_name because passwordSecretKey is not set"
+        continue
+    fi
+    configure_samba_account "$user_name" "$secret_key" "$user_rid"
+done < <(jq -c '.users[]' "$USER_CONFIG")
+
+log_info "Ensuring share mount points exist..."
+mkdir -p /mnt/shared /mnt/shared-hdd /mnt/archive
+
+log_info "Validating smb.conf..."
+testparm -s "$SMBD_CONFIG" >/dev/null
+
+log_info "Samba accounts:"
+pdbedit -L
+
+log_info "Samba initialization complete"
+log_info "Starting smbd daemon..."
+exec /usr/sbin/smbd --foreground --no-process-group -d 3 -s "$SMBD_CONFIG" 2>&1

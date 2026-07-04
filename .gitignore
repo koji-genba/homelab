@@ -50,8 +50,10 @@ crash.*.log
 **/secret.yaml
 **/cloudflare-secret.yaml
 **/cloudflare-token.txt
+files/kubernetes/manifests/applications/samba/config/secrets.json
 !**/secret.yaml.template
 !**/cloudflare-secret.yaml.template
+!files/kubernetes/manifests/applications/samba/config/secrets.json.template
 
 # OpenLDAP Bootstrap configuration files (contain default credentials)
 files/kubernetes/manifests/infrastructure/ldap/openldap/bootstrap-configmap.yaml
