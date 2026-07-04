@@ -27,6 +27,8 @@ ip ufs-cache max-entries 20000
 ip ufs-cache enable
 ip route default GigaEthernet0.0
 ip dhcp enable
+sflow agent ip 192.168.10.1
+sflow collector ip 192.168.10.40
 ip access-list default-out option optimize
 ip access-list default-out deny ip src 192.168.63.0/24 dest 192.168.10.0/24
 ip access-list default-out deny ip src 192.168.63.0/24 dest 192.168.11.0/25
@@ -158,6 +160,9 @@ device GigaEthernet1
 !
 ! vlan-groupと各ポートの対応付け (ポートvlan用)
 device GigaEthernet2
+  sflow sampling-rate 512 in
+  sflow sampling-rate 512 out
+  sflow polling-interval 30
   vlan-group 1 port 3
   vlan-group 2 port 2
   vlan-group 6 port 1 4 5 6 7

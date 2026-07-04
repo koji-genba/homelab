@@ -1,5 +1,5 @@
 output "elastiflow_ip" {
-  description = "ElastiFlow container IP address"
+  description = "ElastiFlow VM IP address"
   value       = split("/", var.ip_address)[0]
 }
 
@@ -16,8 +16,8 @@ output "sflow_collector_target" {
 output "next_steps" {
   description = "Next configuration steps"
   value = [
-    "1. SSH to container: ssh root@${split("/", var.ip_address)[0]}",
-    "2. Run the setup script: scp install.sh root@${split("/", var.ip_address)[0]}:/root/ && ssh root@${split("/", var.ip_address)[0]} bash /root/install.sh",
+    "1. SSH to VM: ssh ubuntu@${split("/", var.ip_address)[0]}",
+    "2. Run the setup script: scp install.sh ubuntu@${split("/", var.ip_address)[0]}:/tmp/ && ssh ubuntu@${split("/", var.ip_address)[0]} sudo bash /tmp/install.sh",
     "3. Configure sFlow export on IX2215 (see ../../network/README.md)",
     "4. Open Kibana at http://${split("/", var.ip_address)[0]}:5601 and import the ElastiFlow dashboards",
   ]

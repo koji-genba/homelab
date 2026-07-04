@@ -17,7 +17,7 @@ variable "proxmox_password" {
 }
 
 variable "ssh_public_key" {
-  description = "SSH public key for root access to the container"
+  description = "SSH public key for VM access"
   type        = string
   sensitive   = true
 }
@@ -29,7 +29,7 @@ variable "node_name" {
 }
 
 variable "datastore_id" {
-  description = "Storage datastore ID for the container disk"
+  description = "Storage datastore ID"
   type        = string
   default     = "vmpool"
 }
@@ -59,46 +59,37 @@ variable "domain" {
 }
 
 variable "vm_id" {
-  description = "Container ID (CTID)"
+  description = "VM ID"
   type        = number
   default     = 110
 }
 
 variable "ip_address" {
-  description = "Static IPv4 address (CIDR) for the container, on the management VLAN"
+  description = "Static IPv4 address (CIDR) for the VM, on the management VLAN"
   type        = string
   default     = "192.168.10.40/24"
 }
 
-variable "container_template_file_id" {
-  description = <<-EOT
-    LXC template file ID, as registered in Proxmox storage (e.g. via `pveam download local <template>`).
-    Check `pveam available | grep debian-12` on the Proxmox host for the current file name.
-  EOT
-  type        = string
-  default     = "local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst"
+variable "template_vm_id" {
+  description = "Template VM ID to clone from"
+  type        = number
+  default     = 9000
 }
 
 variable "cpu_cores" {
-  description = "Number of CPU cores allocated to the container"
+  description = "Number of CPU cores allocated to the VM"
   type        = number
-  default     = 2
+  default     = 4
 }
 
 variable "memory_mb" {
-  description = "Memory (MB) allocated to the container"
+  description = "Memory (MB) allocated to the VM"
   type        = number
-  default     = 4096
-}
-
-variable "swap_mb" {
-  description = "Swap (MB) allocated to the container"
-  type        = number
-  default     = 512
+  default     = 32768
 }
 
 variable "disk_size_gb" {
   description = "Root disk size (GB)"
   type        = number
-  default     = 32
+  default     = 128
 }

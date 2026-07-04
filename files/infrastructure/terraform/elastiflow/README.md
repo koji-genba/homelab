@@ -1,39 +1,52 @@
 # ElastiFlow構築
 
-TerraformでProxmox VE上にElastiFlow（ネットワークフロー分析）用のLXCコンテナを構築します。
+TerraformでProxmox VE上にElastiFlow（ネットワークフロー分析）用のVMを構築します。
 
 ## 概要
 
 - **ElastiFlow flow-collector**: sFlow/NetFlow/IPFIXを受信し、Elasticsearchに送信
 - **Elasticsearch + Kibana**: フローデータの保存・可視化
-- Docker は使わず、Debianのネイティブ.debパッケージで構築（unprivileged LXCでnesting不要）
+- Docker は使わず、Debian/Ubuntuのネイティブ.debパッケージで構築
 - ElastiFlowはCommunityライセンス（無料、500 flows/sec上限、ライセンスキー登録不要）で利用
 
-## 構築されるコンテナ
+## 構築されるVM
 
-- **elastiflow**: 192.168.10.40（管理VLAN10、CTID 110）
-  - CPU 2core / メモリ4GB / ディスク32GB（初期値、`variables.tf`で調整可）
+- **elastiflow**: 192.168.10.40（管理VLAN10、VMID 110）
+  - CPU 4core / メモリ32GB / ディスク128GB（初期値、`variables.tf`で調整可）
+  - root disk: Proxmox storage `vmpool` 上に作成（`variables.tf` の `datastore_id` / `disk_size_gb` で変更可）
+  - VM template: `template_vm_id`（初期値 9000）から full clone
+
+ElastiFlow公式のSingle "Lab" Server構成は、Elasticsearch/Kibana/NetObserv Flow同居で CPU 4 cores / メモリ32GB / SSD 2TB を目安としています。このTerraformの初期値は公式のメモリ目安に合わせつつ、ホームラボ向けにディスクを抑えた構成です。フロー量や保持期間を増やす場合は `disk_size_gb` を増やしてください。
+
+## データ永続化
+
+この構成では、ElastiFlowのフローデータはElasticsearchに保存されます。Elasticsearch / Kibana / flow-collector はすべてVMのroot disk上にインストールされ、追加の専用データディスクは作成しません。
+
+主な永続化先:
+
+- Elasticsearchデータ: `/var/lib/elasticsearch`
+- Elasticsearch設定: `/etc/elasticsearch`
+- Kibana設定: `/etc/kibana`
+- Kibanaデータ: `/var/lib/kibana`
+- ElastiFlow flow-collector設定: `/etc/elastiflow/flowcoll.yml`
+
+Proxmoxホスト側では、これらはVMID 110のdisk内に保存されます。root diskの実体パスはProxmox storage `vmpool` の種類に依存します。ホスト上で確認する場合:
+
+```bash
+qm config 110
+pvesm path <qm config 110 の scsi0 に表示された volume-id>
+```
+
+`vmpool` がZFS storageの場合は、`vm-110-disk-0` のようなZFS zvolとして管理されます。ディスクを削除するとElasticsearchの保存データも消えるため、長期保存したい場合は `disk_size_gb` の増量、Proxmox側のバックアップ、またはElasticsearchデータ用の専用ディスク追加を検討してください。
 
 ## 前提条件
 
 - Proxmox VE環境（192.168.10.11）
 - SSHキーペア（~/.ssh/k8s_ed25519 等）
-- Proxmoxホストに Debian 12 LXCテンプレートがダウンロード済みであること
+- Proxmox APIアクセス権限
+- Cloud-init対応のVMテンプレート（初期値: VMID 9000）
 
-```bash
-# Proxmoxホスト側
-pveam update
-pveam available | grep debian-12
-pveam download local debian-12-standard_12.7-1_amd64.tar.zst  # 実際のファイル名に置き換え
-```
-
-- Proxmoxホスト側で `vm.max_map_count` を設定済みであること（Elasticsearchの要件。カーネルパラメータのため名前空間分離されず、コンテナ内では設定できない）
-
-```bash
-# Proxmoxホスト側
-echo 'vm.max_map_count=262144' >> /etc/sysctl.conf
-sysctl -p
-```
+`template_vm_id` は、k8s-cluster / tailscale-gateway と同じ既存VMテンプレートを使う想定です。別のテンプレートIDを使う場合は `terraform.tfvars` または `variables.tf` で変更してください。
 
 ## 構築手順
 
@@ -45,7 +58,9 @@ cp terraform.tfvars.example terraform.tfvars
 vim terraform.tfvars
 ```
 
-`variables.tf` の `container_template_file_id` は、実際にダウンロードしたテンプレートのファイル名に合わせて調整してください。
+`terraform.tfvars` の `proxmox_password` は、Terraform が Proxmox API に接続するための認証情報です。サンプル値のままだと `terraform apply` 時に `HTTP 401 authentication failure` になります。実際に Proxmox Web UI へログインできる `root@pam` のパスワードに変更してください。
+
+`ssh_public_key` は、作成されるVMの `ubuntu` ユーザーへ登録される公開鍵です。VMへSSH接続するときは、この公開鍵に対応する秘密鍵を使います。
 
 ### 2. Terraform実行
 
@@ -57,23 +72,31 @@ terraform apply
 
 ### 3. アプリケーションのセットアップ
 
-コンテナ作成後、`install.sh` をコンテナ内で実行してElasticsearch/Kibana/flow-collectorをインストールします。
+VM作成後、`install.sh` をVM内で実行してElasticsearch/Kibana/flow-collectorをインストールします。
 
 ```bash
-scp install.sh root@192.168.10.40:/root/
-ssh root@192.168.10.40 bash /root/install.sh
+scp install.sh ubuntu@192.168.10.40:/tmp/
+ssh ubuntu@192.168.10.40 sudo bash /tmp/install.sh
+```
+
+SSH秘密鍵を明示する場合:
+
+```bash
+scp -i ~/.ssh/k8s_ed25519 install.sh ubuntu@192.168.10.40:/tmp/
+ssh -i ~/.ssh/k8s_ed25519 ubuntu@192.168.10.40 sudo bash /tmp/install.sh
 ```
 
 スクリプトの内容:
-- Elasticsearch/Kibana（Elastic 8.x apt repo）をインストールし、単一ノード構成・ヒープ1GBに設定
-- ElastiFlow flow-collectorの.debをダウンロード・インストールし、Elasticsearch出力を有効化
+- Elasticsearch/Kibana（Elastic 8.x apt repo）をインストールし、単一ノード構成・ヒープ12GBに設定
+- ElastiFlow flow-collectorの.debをダウンロード・インストールし、Elasticsearch出力を有効化（単一ノード向けに shards=1 / replicas=0）
+- Elasticsearch向けに `vm.max_map_count=262144` をVM内で永続化
 - 受信ポートはデフォルトのまま（UDP 2055/4739/6343/9995 = NetFlow/IPFIX/sFlow/NetFlow(alt)）
 
 `install.sh` 冒頭の `FLOWCOLL_VERSION` は最新版に随時更新してください（[Linux install docs](https://docs.elastiflow.com/flowcoll/installation/install_linux)参照）。
 
 ### 4. ルーター側（IX2215）でsFlowエクスポートを設定
 
-[../../network/README.md](../../network/README.md) の「フローエクスポート（sFlow）設定案」を参照し、IX2215からこのコンテナ（192.168.10.40:6343）へsFlowを送信するよう設定します。
+[../../network/README.md](../../network/README.md) の「フローエクスポート（sFlow）設定案」を参照し、IX2215からこのVM（192.168.10.40:6343）へsFlowを送信するよう設定します。
 
 ### 5. Kibanaダッシュボードのインポート
 
@@ -84,7 +107,7 @@ ssh root@192.168.10.40 bash /root/install.sh
 ### 6. 動作確認
 
 ```bash
-ssh root@192.168.10.40
+ssh ubuntu@192.168.10.40
 systemctl status elasticsearch kibana flowcoll
 curl -s http://127.0.0.1:9200/_cat/indices?v | grep elastiflow
 ```

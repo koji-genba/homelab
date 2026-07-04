@@ -121,23 +121,41 @@ GigaEthernet2.1-2.5のサブインターフェース設定により、**全ポ�
 
 ネットワークトラフィック可視化のため、[ElastiFlow](../terraform/elastiflow/README.md)（VLAN10上のLXCコンテナ、192.168.10.40）にsFlowをエクスポートする案。
 
-**注意**: 以下はNEC UNIVERGE IX2000/IX3000シリーズの公式sFlow設定例を参考にしたコマンド案であり、`config.txt`（実機のrunning-config）にはまだ反映していない。適用前に実機で`show sflow information`等により構文を確認し、影響の小さいインターフェースから段階的に試すこと。IX2215はNetFlow/IPFIXの設定例が確認できなかったため、sFlow前提とする。
+**反映状況**: `config.txt`（実機のrunning-config控え）へ、LAN側 `GigaEthernet2` のsFlow送信設定を反映済み。NEC UNIVERGE IX2000/IX3000シリーズのコマンドリファレンスでは、agent/collectorはグローバルコンフィグモード、sampling-rate/polling-intervalはデバイスコンフィグモードのコマンドとして定義されているため、IXの構文に合わせて物理デバイス `GigaEthernet2` に設定している。IX2215はNetFlow/IPFIXの設定例が確認できなかったため、sFlow前提とする。
+
+WAN側 `GigaEthernet0` でサンプリングすると、インターネット向け通信はNAPT後のGE0アドレス（例: 172.16.0.26）が送信元として見えやすい。宅内クライアント/サーバ単位で「どこへ通信しているか」を見る目的では、NAPT前のLAN側である `GigaEthernet2` をサンプリング対象にする。
 
 ```text
 ! グローバル設定
 sflow agent ip 192.168.10.1        ! BVI10（管理VLANの自IP）をagentアドレスに
 sflow collector ip 192.168.10.40   ! ElastiFlowコンテナ（デフォルトUDP 6343）
 
-! インターフェース単位でサンプリングを有効化（まずはWAN側から）
-device GigaEthernet0.0
+! デバイス単位でサンプリングを有効化（LAN側）
+device GigaEthernet2
   sflow sampling-rate 512 in
   sflow sampling-rate 512 out
   sflow polling-interval 30
 ```
 
-- WAN側（GigaEthernet0.0）から始めて動作確認し、必要であればLAN側（VLAN間トラフィックの可視化）も検討する。ただしBVI/ブリッジインターフェース側でのsFlow対応可否は未確認のため、対応していなければWAN側のみの可視化に留める。
+すでに `GigaEthernet0` 側のsFlow設定を実機へ反映済みの場合は、GE0側を無効化してからGE2側を有効化する。
+
+```text
+device GigaEthernet0
+  no sflow sampling-rate 512 in
+  no sflow sampling-rate 512 out
+  no sflow polling-interval
+
+device GigaEthernet2
+  sflow sampling-rate 512 in
+  sflow sampling-rate 512 out
+  sflow polling-interval 30
+```
+
+- LAN側（デバイス: `GigaEthernet2`、配下にVLAN 10/11/20/30/40/63）をサンプリング対象にする。これにより、GE2配下の各クライアント/サーバから、GE2配下の別VLANまたはGE0先の外部宛てへの通信をNAPT前のアドレスで見やすくする。
+- `GigaEthernet0` 側にもsFlowを残すと、同じインターネット向け通信がNAPT後のWANアドレスでも観測され、ElastiFlow上で送信元がGE0アドレスに見えるデータが混ざる。そのため、クライアント単位の可視化を優先する場合はGE0側のsFlow sampling設定は外す。
 - sFlowはUDPの片方向送信（ルーター→コレクタ）のみで、既存の通信に影響しない設定変更。
-- ACL上は management VLAN(10) → server_app VLAN(11) の通信は`server-out`で許可済みのため、コレクタへの到達性は問題ない想定。
+- コレクタは管理VLAN10上の `192.168.10.40` で、agentアドレスにしているBVI10 (`192.168.10.1`) と同一セグメントのため、VLAN間ACLの追加は不要想定。
+- 実機反映後は `show sflow information` でagent/collectorと対象デバイスを確認し、必要に応じて `clear sflow statistics` 後にElastiFlow側の受信状況を見る。
 
 ## UFSキャッシュタイムアウト
 

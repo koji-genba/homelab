@@ -1,39 +1,100 @@
-# ElastiFlow用LXCコンテナ（unprivileged）
-# Elasticsearch / Kibana / ElastiFlow flow-collector は Docker を使わず
-# ネイティブ.debパッケージでインストールする（詳細は install.sh 参照）。
-# そのため nesting/keyctl などの特権系featureは不要。
-
-resource "proxmox_virtual_environment_container" "elastiflow" {
+# Cloud-init用ユーザーデータ
+resource "proxmox_virtual_environment_file" "cloud_config" {
+  content_type = "snippets"
+  datastore_id = "local"
   node_name    = var.node_name
-  vm_id        = var.vm_id
-  description  = "ElastiFlow (flow-collector + Elasticsearch + Kibana) - network flow analytics"
-  tags         = ["infrastructure", "network", "monitoring"]
-  unprivileged = true
 
-  started       = true
-  start_on_boot = true
+  source_raw {
+    data = <<-EOF
+    #cloud-config
+    users:
+      - default
+      - name: ubuntu
+        groups:
+          - sudo
+        shell: /bin/bash
+        ssh_authorized_keys:
+          - ${var.ssh_public_key}
+        sudo: ALL=(ALL) NOPASSWD:ALL
 
-  operating_system {
-    template_file_id = var.container_template_file_id
-    type             = "debian"
+    packages:
+      - qemu-guest-agent
+      - net-tools
+      - curl
+      - wget
+      - vim
+      - htop
+      - tmux
+      - jq
+      - dnsutils
+      - tcpdump
+      - ca-certificates
+      - gnupg
+      - apt-transport-https
+      - libpcap-dev
+
+    package_update: true
+    package_upgrade: false
+    timezone: Asia/Tokyo
+
+    runcmd:
+      - systemctl enable --now qemu-guest-agent
+      - echo "ElastiFlow VM initialized at $(date)" > /var/log/cloud-init-custom.log
+      - hostnamectl set-hostname elastiflow
+
+    final_message: "Cloud-init completed at $TIMESTAMP"
+    EOF
+
+    file_name = "elastiflow-cloud-init.yaml"
+  }
+}
+
+# VM定義（k8s実績ベース）
+resource "proxmox_virtual_environment_vm" "elastiflow" {
+  name        = "elastiflow"
+  node_name   = var.node_name
+  vm_id       = var.vm_id
+  description = "ElastiFlow (flow-collector + Elasticsearch + Kibana) - network flow analytics"
+  tags        = ["infrastructure", "network", "monitoring"]
+
+  started = true
+  on_boot = true
+
+  agent {
+    enabled = true
+    trim    = true
+    type    = "virtio"
+  }
+
+  clone {
+    vm_id        = var.template_vm_id
+    full         = true
+    datastore_id = var.datastore_id
+  }
+
+  cpu {
+    cores   = var.cpu_cores
+    sockets = 1
+    type    = "host"
+    units   = 1024
+  }
+
+  memory {
+    dedicated = var.memory_mb
+    floating  = 0
   }
 
   disk {
     datastore_id = var.datastore_id
     size         = var.disk_size_gb
-  }
-
-  cpu {
-    cores = var.cpu_cores
-  }
-
-  memory {
-    dedicated = var.memory_mb
-    swap      = var.swap_mb
+    interface    = "scsi0"
+    iothread     = true
+    ssd          = true
+    discard      = "on"
   }
 
   initialization {
-    hostname = "elastiflow"
+    datastore_id = var.datastore_id
 
     ip_config {
       ipv4 {
@@ -48,22 +109,30 @@ resource "proxmox_virtual_environment_container" "elastiflow" {
     }
 
     user_account {
-      keys = [var.ssh_public_key]
+      username = "ubuntu"
+      keys     = [var.ssh_public_key]
     }
+
+    user_data_file_id = proxmox_virtual_environment_file.cloud_config.id
   }
 
-  network_interface {
-    name    = "eth0"
+  network_device {
     bridge  = var.network_bridge
-    vlan_id = 10 # 管理VLAN（Tailscale Gatewayと同様、インフラ監視系として配置）
+    model   = "virtio"
+    vlan_id = 10
+    queues  = var.cpu_cores
   }
 
-  features {
-    nesting = false
+  operating_system {
+    type = "l26"
   }
+
+  serial_device {}
 
   lifecycle {
     ignore_changes = [
+      initialization[0].user_data_file_id,
+      clone[0].vm_id,
       tags,
     ]
   }
