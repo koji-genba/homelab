@@ -4,3 +4,4 @@ kind: Kustomization
 resources:
   - flux-system
   - ../manifests/applications/stashpad/flux
+  - ../manifests/applications/sillytavern/flux

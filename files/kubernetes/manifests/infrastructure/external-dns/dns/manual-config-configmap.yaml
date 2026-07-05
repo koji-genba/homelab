@@ -69,7 +69,7 @@ data:
     #     name: "corp.example.com."
     #     forward-addr: 10.0.0.1
     #
-    # Current manual DNS records: 8
+    # Current manual DNS records: 10
     local-data: "dnsTestRecord.kojigenba-srv.com. A 192.168.63.254"
     local-data: "staging.kojigenba-srv.com. A 192.168.11.100"
     local-data: "prod.kojigenba-srv.com. A 192.168.11.100"
@@ -79,3 +79,4 @@ data:
     local-data: "samba.kojigenba-srv.com. A 192.168.11.103"
     local-data: "staging.stashpad.kojigenba-srv.com. A 192.168.11.100"
     local-data: "prod.stashpad.kojigenba-srv.com. A 192.168.11.100"
+    local-data: "sillytavern.kojigenba-srv.com. A 192.168.11.100"
