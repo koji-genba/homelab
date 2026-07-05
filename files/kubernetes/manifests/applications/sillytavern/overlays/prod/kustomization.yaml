@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: sillytavern
+resources:
+  - ../../base
+  - namespace.yaml
+  - ingress.yaml
+images:
+  - name: ghcr.io/sillytavern/sillytavern
+    # third-party public image のため Flux Image Automation は使わず手動で固定する
+    newTag: 1.18.0

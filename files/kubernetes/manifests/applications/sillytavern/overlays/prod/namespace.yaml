@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sillytavern
+  labels:
+    app.kubernetes.io/name: sillytavern
+    app.kubernetes.io/environment: prod
