@@ -616,4 +616,5 @@ mokutil --list-enrolled | grep -A5 "Proxmox"
 | k8s-worker01    | 192.168.10.22  | 192.168.11.22  |
 | k8s-worker02    | 192.168.10.23  | 192.168.11.23  |
 | tailscale-gw    | 192.168.10.30  | —              |
+| stashPadDev     | 192.168.10.41  | —              |
 | Gateway/Router  | 192.168.10.1   | —              |
