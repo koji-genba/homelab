@@ -4,7 +4,6 @@ metadata:
   name: stashpad-staging
   namespace: flux-system
 spec:
-  suspend: true
   interval: 1m
   sourceRef:
     kind: GitRepository

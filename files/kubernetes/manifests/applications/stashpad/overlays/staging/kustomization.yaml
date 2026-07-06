@@ -7,9 +7,7 @@ resources:
   - pv-media.yaml
   - pvc-media.yaml
   - ingress.yaml
-patches:
-  - path: patch-disable-scan-on-start.yaml
 images:
   - name: ghcr.io/koji-genba/stashpad
     # Flux Image Update Automation がこの行を自動で書き換える(main pushのたびに追従)
-    newTag: main-10-50386fd # {"$imagepolicy": "flux-system:stashpad-staging:tag"}
+    newTag: main-24-bb42e1b # {"$imagepolicy": "flux-system:stashpad-staging:tag"}
