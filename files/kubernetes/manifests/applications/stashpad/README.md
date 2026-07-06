@@ -80,6 +80,13 @@ flux get sources git
 flux get kustomizations
 flux get images all
 
+# 即時反映
+flux reconcile image repository stashpad -n flux-system
+flux reconcile image update stashpad-staging -n flux-system
+flux reconcile source git flux-system -n flux-system
+flux reconcile kustomization stashpad-staging -n flux-system
+kubectl -n stashpad-staging rollout status deployment/stashpad
+
 # staging
 kubectl -n stashpad-staging rollout status deployment/stashpad
 curl -I https://staging.stashpad.kojigenba-srv.com
