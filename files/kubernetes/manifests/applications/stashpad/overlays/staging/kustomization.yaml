@@ -10,4 +10,4 @@ resources:
 images:
   - name: ghcr.io/koji-genba/stashpad
     # Flux Image Update Automation がこの行を自動で書き換える(main pushのたびに追従)
-    newTag: main-24-bb42e1b # {"$imagepolicy": "flux-system:stashpad-staging:tag"}
+    newTag: main-27-41c6081 # {"$imagepolicy": "flux-system:stashpad-staging:tag"}
