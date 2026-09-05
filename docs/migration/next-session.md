@@ -2,7 +2,7 @@
 
 - 更新日: 2026-09-05
 - 対象リポジトリ: `/home/s-sato/homelab`
-- 作業ブランチ: `k8s-decommission`（`origin/main` = `4e28a08`）
+- 作業ブランチ: `k8s-decommission`（`origin/main` = `c44170d`）
 - 現在地: **Phase 2B application cutover実施済み。Apps VMが唯一のwriterで、7 Compose projectが稼働中**
 
 この文書は、会話履歴がない次セッションが安全に作業を再開するための指示書である。
@@ -56,7 +56,7 @@
 - secret、API token、age秘密鍵、復号済み設定、Terraform stateの実値を会話、ログ、Git、tfvarsへ出力しない。
 - ZFS snapshot `@pre-compose-cutover-20260905`（4 dataset）を、Phase 3の再構築試験に合格するまで削除しない。
 
-## 現在のシステム状態（2026-09-05 20:54 再確認）
+## 現在のシステム状態（2026-09-05 21:09 再確認）
 
 ### Apps VM（VMID 112、`192.168.10.42`）
 
@@ -75,8 +75,11 @@
 - `ens19`に`192.168.11.100/24`、`192.168.11.101/24`、`192.168.11.103/24`を保持。
   `eth0`は管理用`192.168.10.42/24`のまま。
 - NFS 7 mountのうち`stashpad-media`だけが`ro`、他6つが`rw`。これが正しい状態である。
-- `/opt/homelab`は`origin/main` `4e28a08`のcleanなcheckout。`homelab-app-reconcile.timer`はenabled/active。
+- `/opt/homelab`は`origin/main` `c44170d`のcleanなcheckout。`homelab-app-reconcile.timer`はenabled/active。
 - 稼働中imageのdigestはGit宣言と一致している。
+- GatusのCaddy probeは`HTTP 308`を成功として観測している。PR #20の設定変更は、旧bind mount inodeを
+  保持したcontainerを手動でforce-recreateして反映した。PR #21のreconcile/rollback修正もAnsibleで
+  Apps VMへ反映済みである。
 - NFS server側のopen stateは、Apps VMがstashPad prod/staging DBのrw openを保持する一方、
   Kubernetes worker 2台に残るのは旧Unboundの`hagezi-pro.txt`に対するread-only openだけである。
   想定外のwriterは観測されていない。
@@ -249,8 +252,9 @@ Kubernetes VMの14日保持期間を開始する前に実施する。手順は
 
 ```sh
 make ansible-lint ansible-check ansible-bootstrap-paths-test \
-  toolbox-uid-test cloud-init-test terraform-apps-vm-lifecycle-test \
-  compose-config adguard-config-check shellcheck secrets-scan \
+  compose-reconcile-fixture toolbox-uid-test cloud-init-test \
+  terraform-apps-vm-lifecycle-test compose-config adguard-config-check \
+  gatus-config-check shellcheck secrets-scan \
   state-backup-test state-restore-test state-backup-preflight-test \
   tailscale-acl-path-test terraform-fmt terraform-validate \
   terraform-validate-tailscale
@@ -258,13 +262,13 @@ make ansible-lint ansible-check ansible-bootstrap-paths-test \
 
 ## 完了済みのGit delivery
 
-- PR #7、#9、#14、#15、#16、#17、#18、#19はmainへmerge済みで、各CIは成功済み。
-- `origin/main`は`4e28a08`。
+- PR #7、#9、#14、#15、#16、#17、#18、#19、#20、#21はmainへmerge済みで、各CIは成功済み。
+- `origin/main`は`c44170d`。
 - toolbox `ghcr.io/koji-genba/homelab-toolbox:1.0.1`は公開済み。
   digestは`sha256:7607f2c74300504e045b2649ce4032920885c1902dd22c01b4c220fc7067dad0`。
 - Caddy custom imageを含む7 projectのimageはdigest固定済み。
 
-## cutoverで判明した実装バグ（PR #19で修正済み）
+## cutover以降の実機確認で判明した実装バグ（PR #19、#20、#21で修正済み）
 
 いずれもoffline検証では検出できず、実機適用で初めて顕在化した。同種の不具合を疑う際の参考にする。
 
@@ -283,6 +287,13 @@ make ansible-lint ansible-check ansible-bootstrap-paths-test \
    server一覧テーブルが出力されず`Server`に永久にマッチしない。この誤検知で
    `docker compose up --wait`がtimeoutし、後続4 projectが起動しなかった。
    `compose.yaml`側で終了コード判定のhealthcheckを明示して解決した。
+4. **GatusのCaddy probeが恒常的に失敗していた。** `http://caddy:80`の308をGatusが追跡し、
+   証明書に含まれないDocker内部名`https://caddy/`へ接続してTLS errorになっていた。PR #20で
+   `client.ignore-redirect: true`を追加し、最初の308を成功として評価するよう修正した。
+5. **application reconcileがbind-mounted fileだけの変更をcontainerへ反映しなかった。** Gitの
+   fast-forwardとprojectのsuccess記録は完了しても、Compose定義自体に差分がなければcontainerは
+   再作成されず、Gitが置換した`config.yaml`等の旧inodeをbind mountし続けた。PR #21で、reconcileと
+   rollbackが選択projectをforce-recreateするよう修正した。
 
 あわせて、Phase 2Aの調査でも次の乖離が判明している。
 
