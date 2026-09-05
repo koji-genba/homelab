@@ -166,13 +166,15 @@ preflight:
 	./scripts/preflight-apps.sh
 
 state-backup:
-	$(TOOLBOX_RUN) ./scripts/state-backup.sh
+	$(TOOLBOX_RUN) ./scripts/state-backup.sh --no-push
+	git push origin refs/heads/state-backup:refs/heads/state-backup
 
-state-backup-push:
-	$(TOOLBOX_RUN) ./scripts/state-backup.sh --push
+state-backup-push: state-backup
 
 state-backup-preflight:
 	$(TOOLBOX_RUN) ./scripts/state-backup-preflight.sh
+	git push --dry-run origin HEAD:refs/heads/state-backup-preflight >/dev/null
+	@echo "state-backup host SSH push dry-run: ready"
 
 state-restore:
 	$(TOOLBOX_RUN) ./scripts/state-restore.sh

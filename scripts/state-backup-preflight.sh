@@ -48,4 +48,4 @@ cmp -s "$plaintext" "$decrypted" || {
   echo "AGE_RECIPIENT and AGE_IDENTITY_FILE failed the age roundtrip" >&2
   exit 1
 }
-echo "state-backup preflight: ready (SSH pushurl, age roundtrip, and plaintext-state scan passed)"
+echo "state-backup container preflight: ready (SSH push URL, agent socket, age roundtrip, and plaintext-state scan passed)"
