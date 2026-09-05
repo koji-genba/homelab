@@ -111,8 +111,8 @@
 - 管理端末のTailscaleは、Apps VM停止中にtailnet DNSへ依存しないようユーザーが切断済み。
   作業はApps VM `192.168.10.42`とPVE `192.168.10.11`へのLAN直指定で実施した。
 - IX2215のBVI11は`192.168.11.1/25`。**この`/25`は誤りで、期待値は`/24`である。修正はPhase 4で行う。**
-- `interface BVI11`の`ip dhcp binding server_app-dhcp`を解除済み。**running-configのみで
-  `write memory`は未実行。** ルータを再起動すると解除が失われる。
+- `interface BVI11`の`ip dhcp binding server_app-dhcp`を解除済み。2026-09-05にユーザーが
+  `write memory`を実行し、解除後のrunning-configをstartup-configへ保存した。
 - VLAN 11のDHCP leaseは解除前から0件で、影響を受けるclientはない。
 - `vmbr0.11`は`192.18.11.11/24`のまま（記録のみ、修正しない）。
 
@@ -130,7 +130,7 @@ pve1のroot crontabにある`/usr/local/bin/mover.sh`（05:00）は`tank-gen2/da
 
 ## 次に行う作業
 
-### 1. 受入試験の残項目
+### 1. 受入試験の結果
 
 自動確認できる範囲は合格済みである（7 FQDNのTLS、DNSの通常応答・内部record・ブロック、
 stashPad prod/stagingの`200`、SillyTavernの`401`、SMB 445の到達性、image digestの一致）。
@@ -162,7 +162,7 @@ stashPad prod/stagingの`200`、SillyTavernの`401`、SMB 445の到達性、imag
 
 ### 2. 受入試験の合格後
 
-- [ ] IX2215で`write memory`を実行し、DHCP binding解除を保存する
+- [x] IX2215で`write memory`を実行し、DHCP binding解除を保存する（2026-09-05、ユーザー実行確認）
 - [ ] Kubernetes VMを停止する（削除はしない）。安定を確認してからでよい
 
 ### 3. Phase 3: 再構築性の証明
