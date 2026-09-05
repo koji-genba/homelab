@@ -1,0 +1,13 @@
+---
+- name: Restart Docker
+  ansible.builtin.systemd:
+    name: docker
+    state: restarted
+  notify: Restart homelab applications after Docker
+
+- name: Restart homelab applications after Docker
+  ansible.builtin.systemd:
+    name: homelab-apps.service
+    daemon_reload: true
+    state: restarted
+  when: application_cutover_confirmed | default(false) | bool

@@ -1,0 +1,15 @@
+[Unit]
+Description=Validate homelab NFS mounts and export markers
+Wants=network-online.target
+After=network-online.target remote-fs.target
+Before=homelab-apps.service
+{% for mount in nfs_mounts %}RequiresMountsFor={{ mount.local_path }}
+{% endfor %}
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/homelab-mount-guard
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

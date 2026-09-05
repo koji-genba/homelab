@@ -1,0 +1,22 @@
+services:
+  sillytavern:
+    # Tags are review-only; pin this literal to a full digest before cutover.
+    image: ghcr.io/sillytavern/sillytavern@sha256:7b30a1698b605d01dbd01a20459600c035f0d2c866912b69d7eee98065dcedd3
+    env_file:
+      - path: "${SECRETS_DIR:?set SECRETS_DIR}/sillytavern.env"
+        format: raw
+    environment:
+      SILLYTAVERN_LISTEN: "true"
+      SILLYTAVERN_WHITELISTMODE: "false"
+      SILLYTAVERN_BASICAUTHMODE: "true"
+    volumes:
+      - "${SILLYTAVERN_DATA_PATH:?set SILLYTAVERN_DATA_PATH}:/home/node/app/data"
+    networks:
+      - frontend
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  frontend:
+    name: homelab_frontend
+    external: true

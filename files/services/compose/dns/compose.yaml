@@ -1,0 +1,22 @@
+services:
+  adguard:
+    # Tags are review-only; pin this literal to a full digest before cutover.
+    image: adguard/adguardhome@sha256:abadc6ec47f8ca385cb38f2abfeb11ca6a2b0277964967b1954c63e11b517f4f
+    ports:
+      - "${DNS_BIND_IP:-0.0.0.0}:53:53/tcp"
+      - "${DNS_BIND_IP:-0.0.0.0}:53:53/udp"
+    volumes:
+      - adguard-work:/opt/adguardhome/work
+      - "${ADGUARD_CONFIG_DIR:?set ADGUARD_CONFIG_DIR}:/opt/adguardhome/conf:rw"
+    networks:
+      - frontend
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  adguard-work:
+
+networks:
+  frontend:
+    name: homelab_frontend
+    external: true

@@ -1,0 +1,29 @@
+# Copy to terraform.tfvars outside Git, or use environment variables.
+# Credentials are never placed here. Use TAILSCALE_OAUTH_CLIENT_ID and
+# TAILSCALE_OAUTH_CLIENT_SECRET (or TAILSCALE_API_KEY) in the toolbox shell.
+tailnet               = "example.com"
+manage_tailnet        = false
+# Enable only after importing the existing ACL and reviewing a fresh export.
+# The recommended import order is tailscale-import-core, a plan, then the
+# gated tailscale-import-dns and tailscale-import-router targets.
+# The ignored local export is supplied to Make from the repository root; do
+# not commit this file or place a symlink here.
+# acl_policy_file      = "./acl-policy.live.json"
+manage_subnet_router  = false
+# The live device is currently user-owned and untagged. Add tags only after
+# confirming the desired ownership and ACL impact in a reviewed live export.
+subnet_router_tags    = []
+enable_adguard_dns    = false
+adguard_ready         = false
+final_apps_ip         = "192.168.10.101"
+# Tailnet device hostname. The corresponding PVE VM name is tailscale-gateway.
+subnet_router_hostname = "home-gateway"
+
+# Preserve the live router's exit-node and subnet routes when management is
+# enabled. Remove a route only after explicitly approving that deprecation.
+advertised_routes = [
+  "0.0.0.0/0",
+  "::/0",
+  "192.168.10.0/24",
+  "192.168.11.0/24",
+]

@@ -1,0 +1,33 @@
+---
+- name: Install nftables
+  ansible.builtin.apt:
+    name: nftables
+    state: present
+    update_cache: true
+
+- name: Install idempotent managed-table reload helper
+  ansible.builtin.template:
+    src: homelab-nft-reload.sh.j2
+    dest: /usr/local/sbin/homelab-nft-reload
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install the Apps VM firewall policy
+  ansible.builtin.template:
+    src: homelab.nft.j2
+    dest: /etc/nftables.conf
+    owner: root
+    group: root
+    mode: '0644'
+    # The helper deletes/recreates only our managed table in the candidate
+    # transaction, so re-rendering validates cleanly when the live table exists
+    # and never flushes Docker's tables.
+    validate: /usr/local/sbin/homelab-nft-reload %s
+  notify: Reload nftables
+
+- name: Enable nftables
+  ansible.builtin.systemd:
+    name: nftables
+    enabled: true
+    state: started

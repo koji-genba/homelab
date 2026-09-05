@@ -1,0 +1,4 @@
+---
+- name: Reload nftables
+  ansible.builtin.command: /usr/local/sbin/homelab-nft-reload /etc/nftables.conf apply
+  changed_when: true

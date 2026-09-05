@@ -1,0 +1,3 @@
+この2つのlistはlocal exceptionを記録した、review済みGit sourceである。変更はreview後にAdGuard Home
+UI/APIを通して適用する。credentialや生成済みAdGuard databaseはcommitしない。統合HaGeZi listは
+`config/AdGuardHome.yaml`で固定しており、review済みcommitで意図的に更新できる。

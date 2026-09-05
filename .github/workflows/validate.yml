@@ -1,0 +1,43 @@
+name: Validate infrastructure and applications
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Build pinned management toolbox
+        run: make toolbox-build
+      - name: Terraform formatting
+        run: make terraform-fmt
+      - name: Terraform Apps VM validation
+        run: make terraform-validate
+      - name: Terraform Tailscale validation
+        run: make terraform-validate-tailscale
+      - name: Ansible lint and syntax check
+        run: |
+          make ansible-lint
+          make ansible-check
+      - name: Compose configuration
+        run: make compose-config
+      - name: AdGuard schema-34 configuration check
+        run: make adguard-config-check
+      - name: Shell lint
+        run: make shellcheck
+      - name: Plaintext secret and state scan
+        run: make secrets-scan
+      - name: State backup worktree fixture
+        run: make state-backup-test
+      - name: State restore fixture
+        run: make state-restore-test
+      - name: State backup preflight fixture
+        run: make state-backup-preflight-test
+      - name: Tailscale ACL path fixture
+        run: make tailscale-acl-path-test

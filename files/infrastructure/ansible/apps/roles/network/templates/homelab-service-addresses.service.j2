@@ -1,0 +1,13 @@
+[Unit]
+Description=Attach legacy VLAN 11 service addresses after ARP fencing
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/homelab-service-addresses start
+ExecStop=/usr/local/sbin/homelab-service-addresses stop
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

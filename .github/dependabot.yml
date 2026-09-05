@@ -1,0 +1,38 @@
+version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /files/services/compose/edge
+    schedule: {interval: weekly}
+  - package-ecosystem: docker
+    directory: /files/services/compose/dns
+    schedule: {interval: weekly}
+  - package-ecosystem: docker
+    directory: /files/services/compose/samba
+    schedule: {interval: weekly}
+  - package-ecosystem: docker
+    directory: /files/services/compose/stashpad-prod
+    schedule: {interval: weekly}
+  - package-ecosystem: docker
+    directory: /files/services/compose/stashpad-staging
+    schedule: {interval: weekly}
+  - package-ecosystem: docker
+    directory: /files/services/compose/sillytavern
+    schedule: {interval: weekly}
+  - package-ecosystem: docker
+    directory: /files/services/compose/monitoring
+    schedule: {interval: weekly}
+  - package-ecosystem: docker
+    directory: /files/services/images/caddy-cloudflare
+    schedule: {interval: weekly}
+  - package-ecosystem: docker
+    directory: /files/tools/homelab-toolbox
+    schedule: {interval: weekly}
+  - package-ecosystem: terraform
+    directory: /files/infrastructure/terraform/apps-vm
+    schedule: {interval: weekly}
+  - package-ecosystem: terraform
+    directory: /files/infrastructure/terraform/tailscale
+    schedule: {interval: weekly}
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: weekly}

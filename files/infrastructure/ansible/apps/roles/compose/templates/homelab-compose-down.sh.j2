@@ -1,0 +1,36 @@
+#!/bin/sh
+set -u
+
+repo={{ compose_install_dir | quote }}
+compose_root="${HOMELAB_COMPOSE_ROOT:-$repo/files/services/compose}"
+env_file={{ compose_env_file | quote }}
+
+case "${1:-}" in
+  all)
+    # Stop dependants before shared infrastructure. This is deliberately the
+    # reverse of homelab-compose-up's order.
+    projects="monitoring sillytavern stashpad-staging stashpad-prod samba dns edge"
+    ;;
+  *)
+    echo "usage: $0 all" >&2
+    exit 2
+    ;;
+esac
+
+status=0
+for project in $projects; do
+  file="$compose_root/$project/compose.yaml"
+  if ! test -r "$file"; then
+    echo "missing Compose project while stopping: $project" >&2
+    status=1
+    continue
+  fi
+  # Do not call homelab-mount-guard or inspect the cutover flag here. A stop
+  # path must remain usable when NFS is degraded or a service is being fenced.
+  if ! docker compose --project-name "homelab-$project" --env-file "$env_file" \
+    --file "$file" down --remove-orphans; then
+    echo "failed to stop Compose project: $project" >&2
+    status=1
+  fi
+done
+exit "$status"

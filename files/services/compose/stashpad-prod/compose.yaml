@@ -1,0 +1,20 @@
+services:
+  stashpad-prod:
+    # Production is promoted manually; keep this independent from staging.
+    image: ghcr.io/koji-genba/stashpad@sha256:b2218a610f91632758a2811e2bb23b8850c7dec87481f26d9abc95cf8c0a33f1
+    environment:
+      STASHPAD_ADDR: ":8080"
+      STASHPAD_DATA_DIR: /data
+      STASHPAD_SCAN_ON_START: "true"
+      STASHPAD_LIBRARY_ROOTS: /media
+    volumes:
+      - "${STASHPAD_MEDIA_MOUNT_PATH:?set STASHPAD_MEDIA_MOUNT_PATH}:/media:ro"
+      - "${STASHPAD_DATA_PATH:?set STASHPAD_DATA_PATH}:/data"
+    networks:
+      frontend:
+        aliases: [stashpad-prod]
+
+networks:
+  frontend:
+    name: homelab_frontend
+    external: true

@@ -1,0 +1,38 @@
+name: Build public Caddy Cloudflare image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - files/services/images/caddy-cloudflare/**
+      - .github/workflows/caddy-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Build and publish Caddy image
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker buildx build --platform linux/amd64 --push \
+            --tag ghcr.io/koji-genba/caddy-cloudflare:2.11.4 \
+            --file files/services/images/caddy-cloudflare/Dockerfile \
+            files/services/images/caddy-cloudflare
+          digest="$(docker buildx imagetools inspect ghcr.io/koji-genba/caddy-cloudflare:2.11.4 | awk '/^Digest:/ {print $2; exit}')"
+          printf '%s\n' "$digest" | grep -Eq '^sha256:[0-9a-fA-F]{64}$'
+          {
+            echo '## Caddy image'
+            echo
+            echo 'The deployment Compose file can use this immutable digest:'
+            echo
+            echo "\`ghcr.io/koji-genba/caddy-cloudflare@$digest\`"
+          } >> "$GITHUB_STEP_SUMMARY"

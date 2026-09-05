@@ -1,0 +1,70 @@
+#!/bin/sh
+set -eu
+
+env_file=/etc/homelab/secrets/healthchecks.env
+test -r "$env_file" || { echo "missing Healthchecks secret file" >&2; exit 1; }
+# RemainAfterExit on the guard service only proves that it ran once. Re-run
+# the actual marker/NFS checks immediately before every dead-man ping so a
+# later export failure cannot produce a false healthy signal.
+/usr/local/sbin/homelab-mount-guard
+systemctl is-active --quiet homelab-mount-guard.service
+systemctl is-active --quiet homelab-apps.service
+
+fail() {
+  echo "homelab healthcheck: $*" >&2
+  exit 1
+}
+
+rootfs_max_percent={{ healthchecks_rootfs_max_percent | default(90) | int }}
+rootfs_usage=$(df -P / | awk 'NR == 2 { sub(/%$/, "", $5); print $5 }')
+case "$rootfs_usage" in
+  ''|*[!0-9]*) fail "unable to read root filesystem usage" ;;
+esac
+test "$rootfs_max_percent" -ge 1 && test "$rootfs_max_percent" -le 100 \
+  || fail "invalid root filesystem threshold: $rootfs_max_percent"
+test "$rootfs_usage" -lt "$rootfs_max_percent" \
+  || fail "root filesystem usage is ${rootfs_usage}% (threshold ${rootfs_max_percent}%)"
+
+repo={{ compose_install_dir | quote }}
+compose_env={{ compose_env_file | quote }}
+test -d "$repo/.git" || fail "Compose checkout is missing its .git directory"
+git_status=$(git -C "$repo" status --porcelain)
+test -z "$git_status" || fail "Compose checkout is dirty"
+git -C "$repo" diff --quiet HEAD -- || fail "Compose checkout has working-tree drift"
+git -C "$repo" diff --cached --quiet || fail "Compose checkout has staged drift"
+
+# Samba's shared export is intentionally the only write probe. The marker and
+# other NFS checks above remain read-only; this short-lived file verifies that
+# the writable share is usable without leaving test data behind.
+samba_probe_dir={{ shared_mount_path | quote }}
+test -d "$samba_probe_dir" || fail "Samba writable mount is missing"
+samba_probe_file=$(mktemp "$samba_probe_dir/.homelab-healthcheck.XXXXXX") \
+  || fail "Samba writable mount cannot create a probe file"
+cleanup_probe() { rm -f "$samba_probe_file"; }
+trap cleanup_probe EXIT INT TERM
+printf '%s\n' homelab-healthcheck >"$samba_probe_file" \
+  || fail "Samba writable mount cannot write a probe file"
+rm -f "$samba_probe_file" \
+  || fail "Samba writable mount cannot delete a probe file"
+trap - EXIT INT TERM
+
+for project in edge dns samba stashpad-prod stashpad-staging sillytavern monitoring; do
+  running=$(docker compose --project-name "homelab-$project" --env-file "$compose_env" \
+    --file "$repo/files/services/compose/$project/compose.yaml" ps --status running --services)
+  test -n "$running" || { echo "required project is not running: $project" >&2; exit 1; }
+done
+# Verify at least one host-facing endpoint before sending the dead-man ping.
+# The accepted status set includes Caddy's protected 403/401 response; 000
+# still fails when the published listener is unavailable.
+endpoint_ip={{ '192.168.10.101' if (network_migration_complete | default(false) | bool) else (legacy_edge_ip | default('192.168.11.100') if (legacy_service_addresses_enabled | default(false) | bool) else '127.0.0.1') | quote }}
+endpoint_status=$(curl --silent --show-error --max-time 10 --output /dev/null \
+  --write-out '%{http_code}' --resolve status.kojigenba-srv.com:80:$endpoint_ip \
+  http://status.kojigenba-srv.com/ || true)
+case "$endpoint_status" in
+  2??|3??|401|403) ;;
+  *) echo "Caddy endpoint probe failed with HTTP $endpoint_status" >&2; exit 1 ;;
+esac
+# shellcheck disable=SC1090
+. "$env_file"
+test -n "${HEALTHCHECKS_PING_URL:-}" || exit 1
+curl --fail --silent --show-error --max-time 15 "$HEALTHCHECKS_PING_URL" >/dev/null

@@ -1,0 +1,35 @@
+#cloud-config
+package_update: true
+package_upgrade: false
+timezone: Asia/Tokyo
+
+users:
+  - default
+  - name: ${deploy_user}
+    shell: /bin/bash
+    groups: [sudo]
+    # Bootstrap needs full become. SSH keys are the only authentication path;
+    # this root-equivalent rule is the operator's security boundary.
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+
+packages:
+  - ca-certificates
+  - curl
+  - git
+  - nfs-common
+  - openssh-server
+  - qemu-guest-agent
+  - sudo
+
+ssh_pwauth: false
+disable_root: true
+lock_passwd: true
+
+runcmd:
+  - systemctl enable --now qemu-guest-agent
+  - install -d -m 0750 -o ${deploy_user} -g ${deploy_user} /opt/homelab
+  - install -d -m 0700 /etc/homelab/secrets
+
+final_message: "Apps VM cloud-init completed at $TIMESTAMP; continue with Ansible."

@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodic homelab dead-man ping
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec={{ healthchecks_ping_period | default(60) }}s
+Persistent=true
+Unit=homelab-healthchecks-ping.service
+
+[Install]
+WantedBy=timers.target

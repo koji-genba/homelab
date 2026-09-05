@@ -1,0 +1,57 @@
+---
+- name: Disable unused IPv6 forwarding and autoconfiguration
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-homelab-ipv6.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      net.ipv6.conf.all.disable_ipv6 = 1
+      net.ipv6.conf.default.disable_ipv6 = 1
+      net.ipv6.conf.all.forwarding = 0
+  notify: Apply sysctl
+
+- name: Require an explicit acknowledgement before adding legacy service IPs
+  ansible.builtin.assert:
+    that:
+      - legacy_service_addresses_enabled | bool
+      - legacy_service_cutover_confirmed | default(false) | bool
+      - legacy_service_addresses | length == 3
+    fail_msg: >-
+      Legacy VLAN 11 addresses are disabled by default. Set both
+      legacy_service_addresses_enabled and legacy_service_cutover_confirmed
+      only after stopping the old MetalLB/DHCP owners, checking leases, and
+      confirming ARP absence.
+  when: legacy_service_addresses_enabled | bool
+
+- name: Confirm that the intended VLAN 11 interface exists
+  ansible.builtin.assert:
+    that: legacy_service_interface_name in ansible_facts.interfaces
+    fail_msg: >-
+      The expected address-less service NIC was not found. Check the VM
+      hardware and set legacy_service_interface_name from gathered facts.
+  when: legacy_service_addresses_enabled | bool
+
+- name: Install reversible legacy address helper
+  ansible.builtin.template:
+    src: homelab-service-addresses.sh.j2
+    dest: /usr/local/sbin/homelab-service-addresses
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install legacy address oneshot unit
+  ansible.builtin.template:
+    src: homelab-service-addresses.service.j2
+    dest: /etc/systemd/system/homelab-service-addresses.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload systemd
+
+- name: Disable legacy addresses unless cutover was explicitly confirmed
+  ansible.builtin.systemd:
+    name: homelab-service-addresses.service
+    daemon_reload: true
+    enabled: "{{ legacy_service_addresses_enabled | bool }}"
+    state: "{{ 'started' if legacy_service_addresses_enabled | bool else 'stopped' }}"

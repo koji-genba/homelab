@@ -1,0 +1,49 @@
+{
+	# Cloudflare DNS-01 is used for the existing public FQDNs. The token is
+	# supplied only by the edge.env runtime file.
+	email {$ACME_EMAIL}
+	acme_dns cloudflare {$CF_API_TOKEN}
+}
+
+(admin_networks) {
+	@trusted remote_ip {$CADDY_TRUSTED_NETWORKS}
+	handle @trusted {
+		reverse_proxy {args[0]}
+	}
+	respond "Forbidden" 403
+}
+
+dns.kojigenba-srv.com {
+	import admin_networks adguard:3000
+}
+
+prod.kojigenba-srv.com {
+	reverse_proxy stashpad-prod:8080
+}
+
+staging.kojigenba-srv.com {
+	reverse_proxy stashpad-staging:8080
+}
+
+status.kojigenba-srv.com {
+	@trusted remote_ip {$CADDY_TRUSTED_NETWORKS}
+	handle @trusted {
+		basic_auth {
+			{$GATUS_BASIC_AUTH_USER} {$GATUS_BASIC_AUTH_HASH}
+		}
+		reverse_proxy gatus:8080
+	}
+	respond "Forbidden" 403
+}
+
+prod.stashpad.kojigenba-srv.com {
+	reverse_proxy stashpad-prod:8080
+}
+
+staging.stashpad.kojigenba-srv.com {
+	reverse_proxy stashpad-staging:8080
+}
+
+sillytavern.kojigenba-srv.com {
+	reverse_proxy sillytavern:8000
+}

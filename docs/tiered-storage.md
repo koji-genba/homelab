@@ -59,11 +59,12 @@ mergerfsを通さない直接経路として維持。大事なデータのコピ
 ```
 /mnt/tank-gen2/data/k8s-volumes  192.168.10.0/24(rw,sync,no_subtree_check,no_root_squash)
 /mnt/tank-gen1/data/archive      192.168.10.0/24(rw,sync,no_subtree_check,no_root_squash)
-/mnt/tank-gen2/data/shared       192.168.10.0/24(rw,sync,no_subtree_check,no_root_squash)
+/mnt/tank-gen2/data/shared       192.168.10.0/24(rw,sync,no_subtree_check,no_root_squash,fsid=101)
 /mnt/shared                      192.168.10.0/24(rw,sync,no_subtree_check,no_root_squash,fsid=100)
 ```
 
-FUSEファイルシステムはカーネルがfsidを自動取得できないため`fsid=100`を明示。
+FUSEファイルシステムはカーネルがfsidを自動取得できないため`/mnt/shared`に`fsid=100`を明示。
+`/mnt/tank-gen2/data/shared`にも`fsid=101`を明示して、NFS再起動・mergerfs再マウント後のstale file handleを避ける。
 
 ## moverスクリプト
 

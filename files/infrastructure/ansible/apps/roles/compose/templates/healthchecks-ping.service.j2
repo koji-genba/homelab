@@ -1,0 +1,6 @@
+[Unit]
+Description=Send homelab dead-man ping to Healthchecks.io
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/homelab-healthchecks-ping

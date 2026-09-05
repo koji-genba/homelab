@@ -1,0 +1,81 @@
+---
+- name: Configure the homelab Apps VM
+  hosts: apps
+  become: true
+  gather_facts: true
+  pre_tasks:
+    - name: Validate application and legacy address cutover gates
+      ansible.builtin.assert:
+        that:
+          # A legacy service address can never be attached without the
+          # explicit fencing acknowledgement, and vice versa.
+          - >-
+            (legacy_service_addresses_enabled | default(false) | bool)
+            == (legacy_service_cutover_confirmed | default(false) | bool)
+          # Any application cutover before the final network migration must
+          # retain the old service addresses so DNS/FQDNs do not move early.
+          - >-
+            (not (application_cutover_confirmed | default(false) | bool))
+            or (network_migration_complete | default(false) | bool)
+            or (
+              (legacy_service_addresses_enabled | default(false) | bool)
+              and (legacy_service_cutover_confirmed | default(false) | bool)
+            )
+          # Legacy addresses are only a cutover bridge. Do not let a normal
+          # preflight accidentally claim their IPs while the old writers run.
+          - >-
+            (not (legacy_service_addresses_enabled | default(false) | bool))
+            or (application_cutover_confirmed | default(false) | bool)
+          # Once the final network is active, the legacy VLAN must never be
+          # reclaimed by a later apply, even if an operator toggles flags.
+          - >-
+            (not (network_migration_complete | default(false) | bool))
+            or (not (legacy_service_addresses_enabled | default(false) | bool))
+          - >-
+            (not (network_migration_complete | default(false) | bool))
+            or (not (legacy_service_cutover_confirmed | default(false) | bool))
+        fail_msg: >-
+          Refusing to continue: invalid cutover gate combination. Before
+          application_cutover_confirmed=true, both legacy service flags must
+          remain false. For a pre-network-migration cutover, both legacy flags
+          must be true only after Kubernetes/MetalLB/DHCP writers are fenced
+          and ARP ownership is checked. NFS mounts must remain read-only until
+          this gate is satisfied.
+
+    - name: Gather service facts before changing NFS access mode
+      ansible.builtin.service_facts:
+
+    - name: Stop an existing Compose writer before read-only remount
+      ansible.builtin.systemd:
+        name: homelab-apps.service
+        state: stopped
+      when:
+        - not (application_cutover_confirmed | default(false) | bool)
+        - "'homelab-apps.service' in ansible_facts.services"
+
+    - name: Refresh service facts after stopping the Compose writer
+      ansible.builtin.service_facts:
+      when:
+        - not (application_cutover_confirmed | default(false) | bool)
+        - "'homelab-apps.service' in ansible_facts.services"
+
+    - name: Confirm the Compose writer is no longer running
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services['homelab-apps.service'].state != 'running'
+        fail_msg: >-
+          Refusing to continue: homelab-apps.service is still running after
+          the stop request; NFS must not be remounted read-only yet.
+      when:
+        - not (application_cutover_confirmed | default(false) | bool)
+        - "'homelab-apps.service' in ansible_facts.services"
+
+  roles:
+    - base
+    - docker
+    - storage
+    - network
+    - firewall
+    - role: secrets
+      when: application_cutover_confirmed | default(false) | bool
+    - compose

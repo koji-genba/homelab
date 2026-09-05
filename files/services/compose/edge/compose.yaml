@@ -1,0 +1,43 @@
+services:
+  caddy:
+    # Tags are review-only; pin this literal to repo@sha256:<64 hex chars>
+    # before application_cutover_confirmed is enabled.
+    image: ghcr.io/koji-genba/caddy-cloudflare:2.11.4
+    env_file:
+      - path: "${SECRETS_DIR:?set SECRETS_DIR}/edge.env"
+        format: raw
+    environment:
+      ACME_EMAIL: "${ACME_EMAIL:?set ACME_EMAIL}"
+      CADDY_TRUSTED_NETWORKS: "${CADDY_TRUSTED_NETWORKS:?set CADDY_TRUSTED_NETWORKS}"
+    ports:
+      - "${EDGE_BIND_IP:-0.0.0.0}:80:80/tcp"
+      - "${EDGE_BIND_IP:-0.0.0.0}:443:443/tcp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    # Keep the monitoring TLS probe on the Docker network while preserving
+    # the public hostname/SNI used by Caddy's virtual host and certificate.
+    networks:
+      frontend:
+        aliases:
+          - dns.kojigenba-srv.com
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: [CMD, caddy, validate, --config, /etc/caddy/Caddyfile]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  caddy-data:
+  caddy-config:
+
+networks:
+  frontend:
+    name: homelab_frontend
+    external: true

@@ -36,6 +36,8 @@ resource "proxmox_virtual_environment_file" "tailscale_cloud_config" {
     runcmd:
       - systemctl enable --now qemu-guest-agent  # ← k8s実績設定（重要）
       - echo "VM initialized at $(date)" > /var/log/cloud-init-custom.log
+      # Keep the guest/PVE identity distinct from the existing Tailnet device
+      # hostname (home-gateway); the latter is set by `tailscale up` below.
       - hostnamectl set-hostname tailscale-gateway
 
       # IP転送有効化（Subnet Router必須）
@@ -85,7 +87,7 @@ resource "proxmox_virtual_environment_vm" "tailscale_gateway" {
   clone {
     vm_id        = var.template_vm_id
     full         = true
-    datastore_id = "vmpool"  # k8s実績設定
+    datastore_id = "vmpool" # k8s実績設定
   }
 
   # CPU設定
@@ -98,23 +100,23 @@ resource "proxmox_virtual_environment_vm" "tailscale_gateway" {
 
   # メモリ設定
   memory {
-    dedicated = 4096  # k8s: 4-6GB
-    floating  = 0     # k8s実績設定
+    dedicated = 4096 # k8s: 4-6GB
+    floating  = 0    # k8s実績設定
   }
 
   # ディスク設定（k8s実績ベース、テンプレートサイズ維持）
   disk {
-    datastore_id = "vmpool"  # k8s実績設定
-    size         = 20        # テンプレートサイズ（リサイズ制限回避）
+    datastore_id = "vmpool" # k8s実績設定
+    size         = 20       # テンプレートサイズ（リサイズ制限回避）
     interface    = "scsi0"
-    iothread     = true      # k8s実績設定
-    ssd          = true      # k8s実績設定
-    discard      = "on"      # k8s実績設定
+    iothread     = true # k8s実績設定
+    ssd          = true # k8s実績設定
+    discard      = "on" # k8s実績設定
   }
 
   # 初期化設定（k8s実績ベース）
   initialization {
-    datastore_id = "vmpool"  # k8s実績設定
+    datastore_id = "vmpool" # k8s実績設定
 
     ip_config {
       ipv4 {
@@ -140,7 +142,7 @@ resource "proxmox_virtual_environment_vm" "tailscale_gateway" {
   network_device {
     bridge  = var.network_bridge
     model   = "virtio"
-    vlan_id = 10  # 管理VLAN（k8s実績）
+    vlan_id = 10 # 管理VLAN（k8s実績）
   }
 
   # OS設定（k8s実績）

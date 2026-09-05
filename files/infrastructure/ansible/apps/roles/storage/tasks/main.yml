@@ -1,0 +1,149 @@
+---
+- name: Probe whether each NFS mount root is already mounted
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --raw
+      - --noheadings
+      - --mountpoint
+      - "{{ item.local_path }}"
+      - --output
+      - TARGET
+  loop: "{{ nfs_mounts }}"
+  register: storage_mountpoint_probes
+  changed_when: false
+  failed_when: false
+
+- name: Create only unmounted NFS mount points
+  ansible.builtin.file:
+    path: "{{ item.local_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+  loop: "{{ nfs_mounts }}"
+  loop_control:
+    index_var: storage_mount_index
+  when: storage_mountpoint_probes.results[storage_mount_index].rc != 0
+
+- name: Build effective NFS options and expected access mode
+  ansible.builtin.set_fact:
+    storage_nfs_mounts: >-
+      {{ storage_nfs_mounts | default([]) + [storage_mount_entry] }}
+  loop: "{{ nfs_mounts }}"
+  vars:
+    storage_base_options: >-
+      {{ item.options.split(',') | reject('equalto', 'ro') | reject('equalto', 'rw') | list | join(',') }}
+    storage_expected_mode: >-
+      {{ 'ro' if (not (application_cutover_confirmed | default(false) | bool) or 'ro' in item.options.split(',')) else 'rw' }}
+    storage_mount_options: >-
+      {{ (storage_base_options ~ ',' if storage_base_options else '') ~ storage_expected_mode }}
+    storage_mount_entry: >-
+      {{ item | combine({'mount_options': storage_mount_options,
+      'expected_mount_mode': storage_expected_mode}) }}
+
+- name: Mount the restored NFS exports
+  ansible.posix.mount:
+    path: "{{ item.local_path }}"
+    src: "{{ item.server }}:{{ item.export }}"
+    fstype: nfs4
+    opts: "{{ item.mount_options }}"
+    state: mounted
+  loop: "{{ storage_nfs_mounts }}"
+
+- name: Verify active NFS source and filesystem type before remount
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --raw
+      - --noheadings
+      - --mountpoint
+      - "{{ item.local_path }}"
+      - --output
+      - SOURCE,FSTYPE
+  loop: "{{ storage_nfs_mounts }}"
+  register: storage_nfs_mount_identity
+  changed_when: false
+
+- name: Refuse an unexpected NFS source or filesystem type
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - item.stdout | trim == (item.item.server ~ ':' ~ item.item.export ~ ' nfs4')
+    fail_msg: >-
+      Refusing to continue: {{ item.item.local_path }} is not mounted from
+      {{ item.item.server }}:{{ item.item.export }} as nfs4. Actual findmnt
+      output was {{ item.stdout | trim | default('(none)') }}.
+  loop: "{{ storage_nfs_mount_identity.results }}"
+
+- name: Read active NFS access modes
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --raw
+      - --noheadings
+      - --mountpoint
+      - "{{ item.local_path }}"
+      - --output
+      - OPTIONS
+  loop: "{{ storage_nfs_mounts }}"
+  register: storage_nfs_mount_options
+  changed_when: false
+
+- name: Remount NFS exports when the desired ro/rw mode is not active
+  ansible.posix.mount:
+    path: "{{ item.item.local_path }}"
+    src: "{{ item.item.server }}:{{ item.item.export }}"
+    fstype: nfs4
+    opts: "{{ item.item.mount_options }}"
+    state: remounted
+  loop: "{{ storage_nfs_mount_options.results }}"
+  when:
+    - item.rc == 0
+    - item.item.expected_mount_mode not in (item.stdout | trim).split(',')
+
+- name: Validate final NFS source, type, and access mode
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --raw
+      - --noheadings
+      - --mountpoint
+      - "{{ item.local_path }}"
+      - --output
+      - SOURCE,FSTYPE,OPTIONS
+  loop: "{{ storage_nfs_mounts }}"
+  register: storage_nfs_mount_final
+  changed_when: false
+
+- name: Refuse NFS mounts with unexpected source, type, or ro/rw mode
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - (item.stdout | trim).split() | length >= 3
+      - (item.stdout | trim).split()[0] == (item.item.server ~ ':' ~ item.item.export)
+      - (item.stdout | trim).split()[1] == 'nfs4'
+      - item.item.expected_mount_mode in (item.stdout | trim).split()[2].split(',')
+    fail_msg: >-
+      NFS validation failed for {{ item.item.local_path }}. Expected source
+      {{ item.item.server }}:{{ item.item.export }}, fstype nfs4, and
+      {{ item.item.expected_mount_mode }}; actual output was
+      {{ item.stdout | trim | default('(none)') }}.
+  loop: "{{ storage_nfs_mount_final.results }}"
+
+- name: Install the mount guard
+  ansible.builtin.template:
+    src: mount-guard.sh.j2
+    dest: /usr/local/sbin/homelab-mount-guard
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install mount guard service
+  ansible.builtin.template:
+    src: homelab-mount-guard.service.j2
+    dest: /etc/systemd/system/homelab-mount-guard.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload systemd
