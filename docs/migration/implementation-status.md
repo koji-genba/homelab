@@ -103,7 +103,10 @@ legacy service IPには変更を反映していない。NFS serverにはmount gu
 
 ## フェーズ1後の残作業
 
-- merge後にGHCRへ`ghcr.io/koji-genba/homelab-toolbox:1.0.1`をpublishする。現在はlocal buildのみである
+- PR #14はmain commit `aba90039b121387f647efb96732087eb73a84ffb`としてmerge済み。main validation run
+  `33952336848`とtoolbox publish run `33952336833`が成功し、GHCRの
+  `ghcr.io/koji-genba/homelab-toolbox:1.0.1`はdigest
+  `sha256:7607f2c74300504e045b2649ce4032920885c1902dd22c01b4c220fc7067dad0`で公開済み
 - cloud-init templateの`lock_passwd`/hostname修正を、credential付きsaved Terraform planでreviewし、snippet driftだけで
   あることを確認してapplyする。現在のVMへcloud-init clean/reinitは行わない（host key risk）。
 - 実serviceのFQDN/TLS、Discord/Healthchecks通知、stateful application probeはwriter fencing後に検証する
