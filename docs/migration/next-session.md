@@ -177,9 +177,16 @@ stashPad prod/stagingの`200`、SillyTavernの`401`、SMB 445の到達性、imag
 4. あわせてrunning-configをソフトウェアバージョン10.11.6（`Compiled May 22-Thu-2025`）と照合し、
    `config.txt`・`README.md`を記録上の10.7.18から更新した。実機にある`system interfaces bvi 64`を
    `config.txt`へ追加し、`sflow`設定2行は実機にも存在したため記録上の位置を実機の順序へ移動した。
-   実機から取得できた範囲（running-configの先頭から`sflow collector`まで、`!`区切り行を除く73行）は
-   `config.txt`と完全一致することを確認済みである。dhcp profile、class-map/policy-map、
-   BVI11/BVI40/BVI63以外のインターフェース定義は未照合のまま残る。
+   さらに実機の`show running-config`全文を`config.txt`と照合し、注釈コメントと`!`の区切り行を
+   除く293行が行の集合として完全に一致することを確認した。
+5. 照合の過程で、`config.txt`に実機へ存在しない`interface GigaEthernet2.0`の重複定義
+   （`no ip address`と`shutdown`のみを持つblock）が残っていたため削除した。実機の
+   GigaEthernet2.0は`bridge-group 63`かつ`no shutdown`である。**この重複を残したまま
+   `config.txt`を実機へ投入すると、untaggedポートを`shutdown`する危険があった。**
+6. `config.txt`は注釈付きの記録であり、`show running-config`の逐語dumpではない。内容は一致するが
+   blockの並び順が3箇所で異なる。`device GigaEthernet2`内のsflowとvlan-groupの順、
+   `interface GigaEthernet2.0`の位置、`interface GigaEthernet2:1.0`から`2:6.0`までの位置である。
+   次回照合する際は行の並びではなく行の集合として比較すること。
 
 **再発防止のため、IX2215のACL編集手順として次を必ず守ること。**
 

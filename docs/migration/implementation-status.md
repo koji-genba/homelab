@@ -242,12 +242,19 @@ mainへmergeし、Apps VMのcheckoutは`origin/main` `e272c75`と一致してい
    10.7.18とドリフトしていた。`config.txt`と`README.md`を10.11.6へ更新済みである。
 7. 実機にある`system interfaces bvi 64`が記録に無かったため`config.txt`へ追加した。`sflow`の
    2行は実機にも存在し、記録上の位置だけがずれていたので実機の順序へ移動した。
-8. 実機から取得できた範囲（running-configの先頭から`sflow collector`まで、`!`の区切り行を
-   除く73行）は`config.txt`と完全一致することを確認した。dhcp profile、class-map/policy-map、
-   BVI11/BVI40/BVI63以外のインターフェース定義は未照合のまま残る。
-9. `interface BVI11`の`ip dhcp binding server_app-dhcp`は解除済みのまま（今回変更していない）。
-   `ip dhcp profile server_app-dhcp`の定義自体は残してある。
-10. BVI11が`/24`になったことで、MetalLB pool（`.100-.200`）が`/25`を超えているという既知の
+8. 実機の`show running-config`全文を`config.txt`と照合した。注釈コメントと`!`の区切り行を
+   除く293行は、両者で行の集合が完全に一致する。
+9. 照合の過程で、`config.txt`に実機へ存在しない`interface GigaEthernet2.0`の重複定義
+   （`no ip address`と`shutdown`のみを持つblock）が残っていることが判明したため削除した。
+   実機のGigaEthernet2.0は`bridge-group 63`かつ`no shutdown`である。**この重複を残したまま
+   `config.txt`を実機へ投入すると、untaggedポートを`shutdown`する危険があった。**
+10. `config.txt`は注釈付きの記録であり、`show running-config`の逐語dumpではない。内容は一致するが
+    blockの並び順が3箇所で異なる。`device GigaEthernet2`内のsflowとvlan-groupの順、
+    `interface GigaEthernet2.0`の位置、`interface GigaEthernet2:1.0`から`2:6.0`までの位置である。
+    次回照合する際は行の並びではなく行の集合として比較すること。
+11. `interface BVI11`の`ip dhcp binding server_app-dhcp`は解除済みのまま（今回変更していない）。
+    `ip dhcp profile server_app-dhcp`の定義自体は残してある。
+12. BVI11が`/24`になったことで、MetalLB pool（`.100-.200`）が`/25`を超えているという既知の
     不整合は解消した。
 
 ## 今後の残作業

@@ -193,10 +193,6 @@ interface GigaEthernet1.0
   no ip address
   shutdown
 !
-interface GigaEthernet2.0
-  no ip address
-  shutdown
-!
 interface BRI0.0
   encapsulation ppp
   no auto-connect
