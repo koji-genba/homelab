@@ -1,11 +1,12 @@
 # 実装状況
 
-- 状態: フェーズ0/1の基盤と認証・secret準備が完了、NFS marker未作成、Apps VM未適用
+- 状態: フェーズ0/1の基盤、認証・secret、NFS marker準備が完了、Apps VM未適用
 - 更新日: 2026-09-05
 - 手順書: [KubernetesからComposeへの移行](k8s-to-compose.md)
 
 この文書は設計、ローカル実装、実機反映を区別する。現在も旧Kubernetesが本番サービスを
-提供しており、Apps VM、Tailscale、IX2215、ECW5211には変更を反映していない。Proxmoxの
+提供しており、Apps VM、Tailscale、IX2215、ECW5211には変更を反映していない。NFS serverには
+mount guard用markerだけを追加し、export設定と既存dataは変更していない。Proxmoxの
 Terraform認証、SOPS/age、Discord webhook、Healthchecks.io checkは準備済みだが、実serviceからの通知は未検証である。
 
 ## Gitに実装済み
@@ -53,7 +54,7 @@ Terraform認証、SOPS/age、Discord webhook、Healthchecks.io checkは準備済
   9000はUbuntu template。`.10.42`はVM定義がなくping無応答
 - `vmbr0`は`nic0`接続、VLAN-aware `2-4094`。`vmbr0.11`の`192.18.11.11/24`とKubernetes側
   `192.168.11.21-.23`の不一致は要確認
-- NFS親export 4つ、利用path 7つは存在、marker 7つは未作成、ZFS poolはすべて`ONLINE`
+- NFS親export 4つ、利用path 7つは存在し、2026-09-05にmarker 7つを作成済み。ZFS poolはすべて`ONLINE`
   （PVC実使用量はSillyTavern 148 MiB、stashPad prod 56 MiB、staging 57 MiB。mediaは`du` timeoutで未計測）
 - Kubernetes `v1.36.1`の3 nodeはすべて`Ready`。LoadBalancerはingress `.11.100`、Unbound `.11.101`、
   Samba `.11.103`
@@ -68,6 +69,14 @@ Terraform認証、SOPS/age、Discord webhook、Healthchecks.io checkは準備済
   tokenの有効期限は2026-12-04 23:59 JST
 - Discord webhookとHealthchecks.ioの`homelab-apps` check/Discord integrationを手動作成済み。
   endpointはSOPS bundleへ格納したが、Apps VMからの通知は未検証
+- NFS利用pathのmount、数値UID/GID、mode、ACL/xattr、snapshot、現行clientを再確認した。ZFSは
+  `noacl`でmarker作成前のxattrはなく、Kubernetes worker 2台を現行NFS clientとして確認した。
+  markerは`root:root`、`0644`で作成し、両workerからNFS越しに全内容を検証済み
+- mergerfs `/mnt/shared`と直接HDD exportが同じ`tank-gen2/data/shared` rootを見せるため、両者の
+  marker名を分離した。markerはcache側ではなくHDD側へ置き、mergerfs越しの可視性も確認済み
+- `tank-gen2/data/shared`には2026-09-05時点で26 snapshotがある。一方、
+  `tank-gen1/data/archive`と`tank-gen2/data/k8s-volumes`はsnapshot 0件で自動snapshotもないため、
+  フェーズ2のwriter停止後、切替前snapshotを必須とする
 
 ## 初回apply向けに準備済み
 
@@ -76,12 +85,12 @@ Terraform認証、SOPS/age、Discord webhook、Healthchecks.io checkは準備済
   `origin`はfetchをHTTPS、pushをSSHに設定
 - age identity/recipientとProxmox tokenをKeePassXCへ保存し、実値の`runtime.sops.yaml`を作成済み
 - `make state-backup-preflight`は2026-09-05に成功
+- NFS marker 7つをserver側へ作成し、Kubernetes clientから検証済み
 
 ## 初回apply前に必要な残作業
 
 - `vmbr0.11`のサブネット不一致の原因と、VMID 112、`.10.42`、NIC名、bridge/VLAN tag、storage IDを確定する
 - IX2215のDHCP leaseとARP、旧`.11.100/.101/.103`所有者、ECW5211のport/SSID mappingを記録する
-- NFS server側でexportと7つのmarkerを作成し、path、UID/GID、ACL/xattr、snapshotを確認する
 - Proxmox API tokenとSSH公開鍵を管理端末から渡し、Terraform planをレビューする
 - Tailscaleのlive ACL/DNS/route/deviceをexportし、Terraform import先と完全なpolicy差分を確認する
 
