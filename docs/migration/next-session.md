@@ -3,7 +3,11 @@
 - 更新日: 2026-09-05
 - 対象リポジトリ: `/home/s-sato/homelab`
 - 作業ブランチ: `k8s-decommission`（`origin/main` = `e272c75`）
-- 現在地: **Phase 2B application cutover実施済み。Apps VMが唯一のwriterで、7 Compose projectが稼働中**
+- 未pushのcommit: `k8s-decommission`は`origin/k8s-decommission`より6 commit先行している。
+  内容は文書と`files/infrastructure/network/`の記録のみで、実機の挙動を変えるコードは含まない。
+  pushとPRはユーザーの指示を受けてから行う。
+- 現在地: **Phase 2B application cutover実施済み。Apps VMが唯一のwriterで、7 Compose projectが稼働中。
+  IX2215の構成ドリフトは2026-09-05に解消済み。次の作業はKubernetes VMの停止**
 
 この文書は、会話履歴がない次セッションが安全に作業を再開するための指示書である。
 進捗の羅列ではなく、ここに記載した順序、ゲート、停止条件に従うこと。
@@ -161,32 +165,13 @@ stashPad prod/stagingの`200`、SillyTavernの`401`、SMB 445の到達性、imag
 - [x] Gatusが障害と復旧をDiscordへ通知する（2026-09-05、Caddy/Public TLS certificateの障害・resolved通知をDiscordで受信確認）
 - [x] Healthchecks.ioがdead-man停止を通知する（2026-09-05、DOWN/UP通知をDiscordで受信確認）
 
-### 2. IX2215構成ドリフトの解消（完了）
+### 2. IX2215構成ドリフトの解消（完了、2026-09-05）
 
-2026-09-05にユーザーがIX2215のCLIで次を実施し、`write memory`まで完了した。
-
-1. `interface BVI11`の`ip address`を`192.168.11.1/25`から`/24`へ変更した。新しい`ip address`の
-   投入で上書きされ、`no ip address`は不要だった。`show ip route`で
-   `C 192.168.11.0/24 ... BVI11`を確認した。
-2. ACL 3本の`192.168.11.0/25`を`/24`へ更新した。`server_app-out`（srcの5エントリ）、
-   `default-out`（destの1エントリ）、`guest-out`（destの1エントリ）。`iot-out`、`main-out`、
-   `server-out`は元から`/24`で無変更だった。
-3. 事後確認として、BVI63に`ip filter default-out 10 in`、BVI40に`ip filter guest-out 10 in`が
-   戻っていることと、Guest VLAN 40の端末から`192.168.11.100`へ到達できないことを実測した。
-   そのうえで`write memory`を実行し、running-configをstartup-configへ保存した。
-4. あわせてrunning-configをソフトウェアバージョン10.11.6（`Compiled May 22-Thu-2025`）と照合し、
-   `config.txt`・`README.md`を記録上の10.7.18から更新した。実機にある`system interfaces bvi 64`を
-   `config.txt`へ追加し、`sflow`設定2行は実機にも存在したため記録上の位置を実機の順序へ移動した。
-   さらに実機の`show running-config`全文を`config.txt`と照合し、注釈コメントと`!`の区切り行を
-   除く293行が行の集合として完全に一致することを確認した。
-5. 照合の過程で、`config.txt`に実機へ存在しない`interface GigaEthernet2.0`の重複定義
-   （`no ip address`と`shutdown`のみを持つblock）が残っていたため削除した。実機の
-   GigaEthernet2.0は`bridge-group 63`かつ`no shutdown`である。**この重複を残したまま
-   `config.txt`を実機へ投入すると、untaggedポートを`shutdown`する危険があった。**
-6. `config.txt`は注釈付きの記録であり、`show running-config`の逐語dumpではない。内容は一致するが
-   blockの並び順が3箇所で異なる。`device GigaEthernet2`内のsflowとvlan-groupの順、
-   `interface GigaEthernet2.0`の位置、`interface GigaEthernet2:1.0`から`2:6.0`までの位置である。
-   次回照合する際は行の並びではなく行の集合として比較すること。
+BVI11の`ip address`を`192.168.11.1/25`から`/24`へ変更し、ACL 3本（`server_app-out`のsrc、
+`default-out`と`guest-out`のdest）の`192.168.11.0/25`を`/24`へ更新した。`write memory`まで完了し、
+`files/infrastructure/network/`の2ファイルは実機のrunning-config全文と照合済みである。
+**実施内容と照合結果の全記録は[実装状況の「IX2215構成ドリフトの解消」](implementation-status.md)にある。
+ここには、今後IX2215を触る際に必ず守るべき事項だけを残す。**
 
 **再発防止のため、IX2215のACL編集手順として次を必ず守ること。**
 
@@ -206,10 +191,25 @@ VLAN 63 → VLAN 11とGuest VLAN 40 → VLAN 11のdenyが一時的に無効化�
 フィルタを先に外すのは、空または未定義のACLを`ip filter`が参照した場合の挙動をNEC公式資料で
 確認できなかったため、無フィルタ＝素通りという既知の状態に倒して通信断を避ける意図である。
 
-### 3. Kubernetes VMの停止
+**`config.txt`を実機と照合する際の注意。** `config.txt`は日本語の注釈が付いた記録であり、
+`show running-config`の逐語dumpではない。内容は実機と一致するが、blockの並び順が3箇所で異なる
+（`device GigaEthernet2`内のsflowとvlan-groupの順、`interface GigaEthernet2.0`の位置、
+`interface GigaEthernet2:1.0`から`2:6.0`までの位置）。**行の並びではなく行の集合として比較すること。**
+並び順の差分を「ドリフト」と誤認して`config.txt`を書き換えない。
 
-- [x] 上記のIX2215構成ドリフトを解消する（2026-09-05）
-- [ ] Kubernetes VMを停止する（削除はしない）。停止後にApps側の安定を再確認する
+### 3. Kubernetes VMの停止（次作業）
+
+前提のIX2215構成ドリフトは解消済みである（2026-09-05）。**削除はしない。停止だけである。**
+Phase 3の再構築試験に合格するまで、VMもdiskもPVCもNFS dataも消さない。
+
+- [ ] 停止前に、Apps VMの7 Compose projectが正常であることを確認する
+- [ ] pve1（`192.168.10.11`）でVMID 101/102/103を`qm shutdown`で順に停止する。
+      強制停止（`qm stop`）は応答がない場合に限る
+- [ ] 停止後にApps側の7 FQDN、DNS応答、SMB到達性を再確認する
+- [ ] NFS serverの`/proc/fs/nfsd/clients/*/states`から、停止したnodeのopen stateが消えたことを確認する
+
+停止するとrollbackの所要時間が延びる。rollbackが必要になった場合は、
+下記のrollback手順を実行する前にKubernetes VMを起動し、nodeがReadyになるまで待つこと。
 
 ### 4. Phase 3: 再構築性の証明
 
@@ -237,6 +237,9 @@ Kubernetes VMの14日保持期間を開始する前に実施する。手順は
 ## rollback手順
 
 新旧を同時にwriterにしないことを最優先する。
+
+**Kubernetes VMを停止済みの場合は、下記を始める前にVMID 101/102/103を起動し、
+全nodeがReadyになりworkloadを受けられる状態になるまで待つこと。**
 
 1. Apps VMで`homelab-apps.service`を停止し、全Compose projectがdownしたことを確認する。
 2. `systemctl stop homelab-service-addresses`でservice IPを外し、
@@ -317,6 +320,8 @@ make ansible-lint ansible-check ansible-bootstrap-paths-test \
 - toolbox `ghcr.io/koji-genba/homelab-toolbox:1.0.1`は公開済み。
   digestは`sha256:7607f2c74300504e045b2649ce4032920885c1902dd22c01b4c220fc7067dad0`。
 - Caddy custom imageを含む7 projectのimageはdigest固定済み。
+- 上記より後の`k8s-decommission`上の6 commitは未pushで、mainへも未反映である。
+  cutover後の実機確認結果、監視修正の記録、IX2215構成ドリフトの解消を含む。
 
 ## cutover以降の実機確認で判明した実装バグ（PR #19、#20、#21で修正済み）
 
