@@ -17,12 +17,18 @@
     checksum: "{{ docker_gpg_checksum | default(omit) }}"
 
 - name: Configure Docker's official repository
-  ansible.builtin.apt_repository:
-    repo: >-
-      deb [arch={{ 'amd64' if ansible_architecture == 'x86_64' else ansible_architecture }}
-      signed-by=/etc/apt/keyrings/docker.asc]
-      https://download.docker.com/linux/debian {{ ansible_facts.distribution_release }} stable
-    filename: docker
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: deb
+    uris: https://download.docker.com/linux/debian
+    suites: "{{ ansible_facts.distribution_release }}"
+    components: stable
+    architectures:
+      - >-
+        {{ 'amd64' if ansible_architecture == 'x86_64'
+           else 'arm64' if ansible_architecture in ['aarch64', 'arm64']
+           else ansible_architecture }}
+    signed_by: /etc/apt/keyrings/docker.asc
     state: present
 
 - name: Install Docker Engine and Compose v2
@@ -35,6 +41,14 @@
       - docker-compose-plugin
     state: present
     update_cache: true
+
+- name: Ensure Docker configuration directory exists
+  ansible.builtin.file:
+    path: /etc/docker
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
 
 - name: Enable Docker
   ansible.builtin.systemd:

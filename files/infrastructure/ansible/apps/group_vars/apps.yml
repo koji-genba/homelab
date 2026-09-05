@@ -4,6 +4,7 @@
 # after the cutover gate is enabled.
 apps_management_ip: 192.168.10.42
 apps_final_management_ip: 192.168.10.101
+apps_hostname: apps
 network_migration_complete: false
 
 # Both flags remain false until the old Kubernetes/MetalLB/DHCP writers are

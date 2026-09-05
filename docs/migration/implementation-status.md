@@ -1,13 +1,14 @@
 # 実装状況
 
-- 状態: フェーズ0/1の基盤、認証・secret、NFS marker準備が完了、Apps VM未適用
+- 状態: フェーズ0/1のApps VM apply、Ansible bootstrap、再起動後確認まで完了。application cutoverは未実施
 - 更新日: 2026-09-05
 - 手順書: [KubernetesからComposeへの移行](k8s-to-compose.md)
 
 この文書は設計、ローカル実装、実機反映を区別する。現在も旧Kubernetesが本番サービスを
-提供しており、Apps VM、Tailscale、IX2215、ECW5211には変更を反映していない。NFS serverには
-mount guard用markerだけを追加し、export設定と既存dataは変更していない。Proxmoxの
-Terraform認証、SOPS/age、Discord webhook、Healthchecks.io checkは準備済みだが、実serviceからの通知は未検証である。
+提供しており、Apps VMは管理用のread-only/non-writer状態である。Tailscale、IX2215、ECW5211、
+legacy service IPには変更を反映していない。NFS serverにはmount guard用markerだけを追加し、export設定と
+既存dataは変更していない。ProxmoxのTerraform認証、SOPS/age、Discord webhook、Healthchecks.io checkは
+準備済みだが、実serviceからの通知は未検証である。
 
 ## Gitに実装済み
 
@@ -26,6 +27,8 @@ Terraform認証、SOPS/age、Discord webhook、Healthchecks.io checkは準備済
 - Tailscale Terraform rootの手動・import-first・global DNS only gate。live ACL exportがなければ
   `manage_tailnet=true`を拒否する
 - NFS exportの実path、client scope、option、一意markerを記録した手動反映契約
+- toolbox 1.0.1の任意UID/GID OpenSSH対応、Debian 13のcloud-init/Ansible bootstrap修正、
+  `deb822_repository`によるDocker repository設定とそのregression fixture
 - 2026-08-30に取得した実機インベントリ（[詳細](../architecture/live-inventory-2026-08-30.md)）
 
 ## ローカル検証済み
@@ -41,6 +44,8 @@ Terraform認証、SOPS/age、Discord webhook、Healthchecks.io checkは準備済
 - Samba設定を`testparm` で検証
 - 実際のage identityを使ったSOPS暗号化・復号と`state-backup-preflight`。既存のlocal Terraform
   state 7ファイルはGit非追跡を確認し、modeを`0600`へ修正済み
+- toolbox UID fixture、cloud-init schema fixture、Ansible bootstrap path fixture。Debian 13 minimal imageで
+  不足するpasswd、systemd drop-in、Docker config directory、`python3-debian`依存を検証済み
 
 これらはローカルの構文・fixture検証であり、実データのread/writeやFQDN、TLS、Discord通知を
 検証したことを意味しない。
@@ -49,9 +54,8 @@ Terraform認証、SOPS/age、Discord webhook、Healthchecks.io checkは準備済
 
 - Proxmox `pve1` 9.2.3、kernel `7.0.6-2-pve`、単一node、Ryzen 9 5900X 12コア/24スレッド、
   RAM 125 GiB（available約30 GiB）
-- `local`空き約64 GiB、`local-lvm`空き約794 GiB、`vmpool`空き約582 GiB、VMID `112`は未使用
-- VM 101/102/103はそれぞれ`192.168.10.21/.22/.23`、VM 105は`.30`、110は`.40`、111は`.41`、
-  9000はUbuntu template。`.10.42`はVM定義がなくping無応答
+- `local`空き約64 GiB、`local-lvm`空き約794 GiB、`vmpool`空き約582 GiB。VMID `112`は4 vCPU、12 GiB RAM、
+  40 GiB disk、VLAN 10の`.10.42/24`、アドレスレスVLAN 11 NICでapply済み
 - `vmbr0`は`nic0`接続、VLAN-aware `2-4094`。`vmbr0.11`の`192.18.11.11/24`とKubernetes側
   `192.168.11.21-.23`の不一致は要確認
 - NFS親export 4つ、利用path 7つは存在し、2026-09-05にmarker 7つを作成済み。ZFS poolはすべて`ONLINE`
@@ -66,7 +70,8 @@ Terraform認証、SOPS/age、Discord webhook、Healthchecks.io checkは準備済
   routeは`0.0.0.0/0`、`::/0`、`192.168.10.0/24`、`192.168.11.0/24`。exit nodeは現行機能として保持する
 - PVEに`terraform@pve`、`HomelabTerraform` role、`apps-vm` API tokenを作成済み。ACLは
   `/vms/112`、`/storage/local`、`/storage/vmpool`、`/nodes/pve1`、`/sdn/zones/localnetwork`に限定し、
-  tokenの有効期限は2026-12-04 23:59 JST
+  tokenの有効期限は2026-12-04 23:59 JST。applyには`Sys.AccessNetwork`と`vmbr0/10`、`vmbr0/11`の
+  SDN child ACLも必要だったため、対象へ限定して追加した
 - Discord webhookとHealthchecks.ioの`homelab-apps` check/Discord integrationを手動作成済み。
   endpointはSOPS bundleへ格納したが、Apps VMからの通知は未検証
 - NFS利用pathのmount、数値UID/GID、mode、ACL/xattr、snapshot、現行clientを再確認した。ZFSは
@@ -77,8 +82,14 @@ Terraform認証、SOPS/age、Discord webhook、Healthchecks.io checkは準備済
 - `tank-gen2/data/shared`には2026-09-05時点で26 snapshotがある。一方、
   `tank-gen1/data/archive`と`tank-gen2/data/k8s-volumes`はsnapshot 0件で自動snapshotもないため、
   フェーズ2のwriter停止後、切替前snapshotを必須とする
+- ED25519 host keyは、信頼済みPVE access経由のQEMU guest agentから取得したfingerprintと、network上の
+  `ssh-keyscan`で独立に観測したfingerprint `SHA256:crmNjtlEWlIzTu4VKVR6/ArBqsAZV6qUW95uyOvFLUw`が一致することを
+  確認してから`known_hosts`へ追加済み
+- 初回Ansibleは`ok=61 changed=29 failed=0`、再実行は`ok=58 changed=0 failed=0`。再起動後はhostname `apps`、
+  failed unit 0、7 NFS mountが`nfs4` read-onlyでmarker一致、mount guard enabled/active、Compose/reconcile/
+  Healthchecks/legacy-address unit disabled/inactive、container 0個を確認した
 
-## 初回apply向けに準備済み
+## フェーズ1 apply・受入確認済み
 
 - Caddyを含む7 projectすべてのimageを公開manifest digestへ固定済み
 - SSH公開鍵のfingerprintをPVEの`authorized_keys`と照合し、SSH agent経由のroot接続を確認済み。
@@ -86,13 +97,19 @@ Terraform認証、SOPS/age、Discord webhook、Healthchecks.io checkは準備済
 - age identity/recipientとProxmox tokenをKeePassXCへ保存し、実値の`runtime.sops.yaml`を作成済み
 - `make state-backup-preflight`は2026-09-05に成功
 - NFS marker 7つをserver側へ作成し、Kubernetes clientから検証済み
+- Terraform VMID 112をapplyし、state-backup remote先頭`a209ba9f9b3cddf57de48deb9b9f9168fbd21188`を確認済み
+- VMのhost keyをOOB確認後に`known_hosts`へ追加し、Ansible applyと再起動後のread-only/non-writer受入確認を完了
+- Kubernetesを唯一のwriterとして維持し、legacy IP、NFS write、Tailscale、VLAN/network cutoverは未実施
 
-## 初回apply前に必要な残作業
+## フェーズ1後の残作業
 
-- `vmbr0.11`のサブネット不一致の原因と、VMID 112、`.10.42`、NIC名、bridge/VLAN tag、storage IDを確定する
-- IX2215のDHCP leaseとARP、旧`.11.100/.101/.103`所有者、ECW5211のport/SSID mappingを記録する
-- Proxmox API tokenとSSH公開鍵を管理端末から渡し、Terraform planをレビューする
+- merge後にGHCRへ`ghcr.io/koji-genba/homelab-toolbox:1.0.1`をpublishする。現在はlocal buildのみである
+- cloud-init templateの`lock_passwd`/hostname修正を、credential付きsaved Terraform planでreviewし、snippet driftだけで
+  あることを確認してapplyする。現在のVMへcloud-init clean/reinitは行わない（host key risk）。
+- 実serviceのFQDN/TLS、Discord/Healthchecks通知、stateful application probeはwriter fencing後に検証する
 - Tailscaleのlive ACL/DNS/route/deviceをexportし、Terraform import先と完全なpolicy差分を確認する
+- Phase 2前にIX2215のDHCP/ARP、旧`.11.100/.101/.103`所有者、ECW5211のport/SSID mappingを記録し、
+  archiveと`k8s-volumes`を含むsnapshotを取得する
 
 ## 後続のゲート
 

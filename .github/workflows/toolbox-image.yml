@@ -24,10 +24,10 @@ jobs:
           set -eu
           printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
           docker buildx build --platform linux/amd64 --push \
-            --tag ghcr.io/koji-genba/homelab-toolbox:1.0.0 \
+            --tag ghcr.io/koji-genba/homelab-toolbox:1.0.1 \
             --file files/tools/homelab-toolbox/Dockerfile \
             files/tools/homelab-toolbox
-          digest="$(docker buildx imagetools inspect ghcr.io/koji-genba/homelab-toolbox:1.0.0 | awk '/^Digest:/ {print $2; exit}')"
+          digest="$(docker buildx imagetools inspect ghcr.io/koji-genba/homelab-toolbox:1.0.1 | awk '/^Digest:/ {print $2; exit}')"
           printf '%s\n' "$digest" | grep -Eq '^sha256:[0-9a-fA-F]{64}$'
           {
             echo '## Toolbox image'

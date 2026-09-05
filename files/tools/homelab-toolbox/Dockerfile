@@ -14,7 +14,7 @@ ARG ADGUARD_ARCHIVE_SHA256=c48f4a43000665484c5ec28177de11a004759b620dae8f77b2aab
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
-      ca-certificates curl git openssh-client python3 python3-jinja2 python3-pip python3-yaml \
+      ca-certificates curl git libnss-wrapper openssh-client python3 python3-jinja2 python3-pip python3-yaml \
       "shellcheck=${SHELLCHECK_VERSION}" tar unzip \
     && rm -rf /var/lib/apt/lists/*
 
@@ -63,6 +63,14 @@ RUN python3 -m pip install --break-system-packages \
 RUN mkdir -p /usr/share/ansible/collections \
     && ansible-galaxy collection install --collections-path /usr/share/ansible/collections ansible.posix:==2.1.0
 ENV ANSIBLE_COLLECTIONS_PATH=/usr/share/ansible/collections
+
+# The runner is deliberately started with the invoking host UID/GID. Keep a
+# stable path for the NSS shim so the entrypoint can provide that arbitrary
+# UID with a passwd/group record without requiring root or changing the image's
+# real /etc/passwd.
+RUN nss_wrapper_lib="$(dpkg -L libnss-wrapper | awk '/\/libnss_wrapper\.so$/ { print; exit }')" \
+    && test -n "$nss_wrapper_lib" \
+    && ln -s "$nss_wrapper_lib" /usr/local/lib/libnss_wrapper.so
 
 COPY entrypoint.sh /usr/local/bin/homelab-toolbox
 RUN chmod 0755 /usr/local/bin/homelab-toolbox

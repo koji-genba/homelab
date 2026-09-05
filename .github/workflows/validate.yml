@@ -25,6 +25,12 @@ jobs:
         run: |
           make ansible-lint
           make ansible-check
+      - name: Ansible bootstrap path regression
+        run: make ansible-bootstrap-paths-test
+      - name: Toolbox arbitrary UID/GID regression
+        run: make toolbox-uid-test
+      - name: Apps VM cloud-init schema regression
+        run: make cloud-init-test
       - name: Compose configuration
         run: make compose-config
       - name: AdGuard schema-34 configuration check

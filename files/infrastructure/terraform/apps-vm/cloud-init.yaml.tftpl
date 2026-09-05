@@ -2,6 +2,7 @@
 package_update: true
 package_upgrade: false
 timezone: Asia/Tokyo
+hostname: ${vm_name}
 
 users:
   - default
@@ -11,6 +12,7 @@ users:
     # Bootstrap needs full become. SSH keys are the only authentication path;
     # this root-equivalent rule is the operator's security boundary.
     sudo: "ALL=(ALL) NOPASSWD:ALL"
+    lock_passwd: true
     ssh_authorized_keys:
       - ${ssh_public_key}
 
@@ -25,7 +27,6 @@ packages:
 
 ssh_pwauth: false
 disable_root: true
-lock_passwd: true
 
 runcmd:
   - systemctl enable --now qemu-guest-agent
