@@ -17,7 +17,8 @@ IX2215はVLAN 11のDHCP bindingを解除したが`write memory`は未実行、Ta
 済んだがTerraformへのimportは済んでおらず`manage_tailnet=false`を維持、ECW5211とVLAN 10/20/30/40への
 再編（Phase 4）は未着手である。NFS serverのexport設定と既存dataはmount guard用marker追加以外変更していない。
 ProxmoxのTerraform認証、SOPS/age、Discord webhook、Healthchecks.io checkは準備済みだが、受入試験のうち
-実serviceからの通知確認や一部のread/write確認は未検証のまま残っている（詳細は「今後の残作業」）。
+実serviceからの通知確認や一部のread/write確認は未検証のまま残っている。2026-09-05にユーザーから
+7 FQDNの動作確認とIoT/Guest/Internet隔離テストの完了申告があった（詳細は「今後の残作業」）。
 
 ## Gitに実装済み
 
@@ -190,7 +191,15 @@ cutover適用中に、AdGuardHome.yaml.j2のYAML生成不正によるDNS起動�
 
 自動確認できた受入項目は合格した。7 FQDNのLet's Encrypt証明書、DNSの通常応答・内部record・
 ブロック、stashPad prod/stagingの`200`、SillyTavernの`401`、SMB 445の到達性、稼働image digestと
-Git宣言の一致。ユーザー確認・発火が必要な受入項目は未了で、「今後の残作業」に記載する。
+Git宣言の一致。2026-09-05にユーザーが7 FQDNの動作確認とIoT/Guest/Internetから管理UI、SSH、SMBへ
+到達できない隔離テストの完了を申告した。FQDN確認の操作内訳は未記録のため、application別の
+read/write項目は未了のまま「今後の残作業」に記載する。
+
+同日20:54の読み取り再確認では、Apps VMの7 container、3 service IP、7 NFS mount、mount guard、
+reconcile timerが正常だった。旧KubernetesはFlux Kustomization 4件suspend、CronJob suspend、
+Deployment 6件replicas=0、MetalLB speaker停止、3 ServiceのClusterIP化を維持していた。NFS server側で
+Kubernetes workerに残るopenは旧Unbound RPZへのread-onlyだけで、rw openはApps VMのstashPad
+prod/staging DBだけだった。
 
 ## 今後の残作業
 
@@ -200,7 +209,7 @@ Git宣言の一致。ユーザー確認・発火が必要な受入項目は未�
 - [ ] stashPad prod/stagingのmetadataが分離されていることを確認する（ユーザー確認）
 - [ ] SillyTavernでlogin・会話・設定保存を確認する（ユーザー確認）
 - [ ] Samba 3 shareを既存userでread/writeできることを確認する（ユーザー確認）
-- [ ] IoT/Guest/Internetから管理UI、SSH、SMBへ到達できないことを確認する（ユーザー確認）
+- [x] IoT/Guest/Internetから管理UI、SSH、SMBへ到達できないことを確認する（2026-09-05、ユーザー確認）
 - [ ] Apps VM reboot後にmountと全serviceが自動復旧することを確認する（サービス断を伴う）
 - [ ] NFS未mountまたはmarker不一致でapplicationが起動しない（fail-closed）ことを確認する（サービス断を伴う）
 - [ ] Gatusが障害と復旧をDiscordへ通知することを確認する（発火が必要）

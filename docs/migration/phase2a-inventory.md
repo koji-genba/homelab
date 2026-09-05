@@ -421,6 +421,13 @@ mountする。データのコピーは発生しない。
 | Kubernetes VMの停止 | 受入試験合格後もしばらく起動したままとする（workloadは0、speakerも停止済みでwriterではない）。安定を確認してから停止する。削除は再構築試験の合格日から14日後 |
 | OpenLDAP | 廃止済みであることをPod一覧で確認した。orphan dataはPhase 5で処理する |
 
+### 9.2 cutover後のユーザー確認（2026-09-05）
+
+ユーザーから、7 FQDN（stashPad prod/stagingの正式名と短縮alias、SillyTavern、DNS、status）の動作確認と、
+IoT/Guest/Internetから管理UI、SSH、SMBへ到達できない隔離テストの完了申告があった。FQDN確認で実施した
+application操作の内訳は記録されていないため、stashPadの更新/upload/metadata分離、SillyTavernの
+会話・設定保存、Samba 3 shareのread/writeは個別の受入項目として残す。
+
 ## 10. 未解決事項
 
 1. Dependabotスキャンjobの失敗原因。cutoverの停止条件ではない。

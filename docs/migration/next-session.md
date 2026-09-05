@@ -56,7 +56,7 @@
 - secret、API token、age秘密鍵、復号済み設定、Terraform stateの実値を会話、ログ、Git、tfvarsへ出力しない。
 - ZFS snapshot `@pre-compose-cutover-20260905`（4 dataset）を、Phase 3の再構築試験に合格するまで削除しない。
 
-## 現在のシステム状態（2026-09-05 19:11 実測）
+## 現在のシステム状態（2026-09-05 20:54 再確認）
 
 ### Apps VM（VMID 112、`192.168.10.42`）
 
@@ -77,6 +77,9 @@
 - NFS 7 mountのうち`stashpad-media`だけが`ro`、他6つが`rw`。これが正しい状態である。
 - `/opt/homelab`は`origin/main` `4e28a08`のcleanなcheckout。`homelab-app-reconcile.timer`はenabled/active。
 - 稼働中imageのdigestはGit宣言と一致している。
+- NFS server側のopen stateは、Apps VMがstashPad prod/staging DBのrw openを保持する一方、
+  Kubernetes worker 2台に残るのは旧Unboundの`hagezi-pro.txt`に対するread-only openだけである。
+  想定外のwriterは観測されていない。
 
 ### Kubernetes（停止状態だがVMは起動中）
 
@@ -127,13 +130,23 @@ pve1のroot crontabにある`/usr/local/bin/mover.sh`（05:00）は`tank-gen2/da
 自動確認できる範囲は合格済みである（7 FQDNのTLS、DNSの通常応答・内部record・ブロック、
 stashPad prod/stagingの`200`、SillyTavernの`401`、SMB 445の到達性、image digestの一致）。
 
+2026-09-05にユーザーが次の完了を申告した。
+
+- 7 FQDN（`prod.stashpad.kojigenba-srv.com`、`staging.stashpad.kojigenba-srv.com`、
+  `prod.kojigenba-srv.com`、`staging.kojigenba-srv.com`、`sillytavern.kojigenba-srv.com`、
+  `dns.kojigenba-srv.com`、`status.kojigenba-srv.com`）の動作確認
+- IoT/Guest/Internetから管理UI、SSH、SMBへ到達できない隔離テスト
+
+7 FQDNの動作確認は完了申告として記録するが、操作内容の内訳は記録されていないため、下記の
+application別read/write項目を自動的に完了扱いにはしない。
+
 ユーザーの確認が必要な項目。
 
 - [ ] stashPad prod/stagingで閲覧、更新、upload、共有mediaを確認する
 - [ ] stashPad prod/stagingのmetadataが分離されている
 - [ ] SillyTavernでlogin、会話、設定保存を確認する
 - [ ] Samba 3 shareを既存userでread/writeできる
-- [ ] IoT/Guest/Internetから管理UI、SSH、SMBへ到達できない
+- [x] IoT/Guest/Internetから管理UI、SSH、SMBへ到達できない（2026-09-05、ユーザー確認）
 
 サービス断を伴うため実施タイミングの合意が必要な項目。
 
