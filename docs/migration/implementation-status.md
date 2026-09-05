@@ -45,6 +45,9 @@ ProxmoxのTerraform認証、SOPS/age、Discord webhook、Healthchecks.io check�
   `trim_blocks=True`起因のYAML生成不正、`homelab-apps.service.j2`/`homelab-app-reconcile.service.j2`の
   改行消失による`PartOf=docker.service`/`Wants=network-online.target`無効化、Samba image内蔵
   HEALTHCHECKの誤検知（終了コード判定へ変更）。いずれもoffline検証では検出できず実機適用で顕在化した
+- cutover後の監視確認で判明したGatus Caddy probeのredirect/TLS誤検知をPR #20で修正し、
+  `gatus-config-check`を追加した。さらにbind-mounted fileだけのGit変更をcontainerへ反映できない
+  reconcile/rollbackの不具合をPR #21で修正し、選択projectをforce-recreateするfixtureを追加した
 
 ## ローカル検証済み
 
@@ -200,6 +203,12 @@ reconcile timerが正常だった。旧KubernetesはFlux Kustomization 4件suspe
 Deployment 6件replicas=0、MetalLB speaker停止、3 ServiceのClusterIP化を維持していた。NFS server側で
 Kubernetes workerに残るopenは旧Unbound RPZへのread-onlyだけで、rw openはApps VMのstashPad
 prod/staging DBだけだった。
+
+21:09までにPR #20（Gatus Caddy probe修正）とPR #21（bind mount更新時のreconcile/rollback修正）を
+mainへmergeし、Apps VMへ反映した。Gatus containerは手動force-recreate後、Caddy probeを`HTTP 308`、
+`success=true`として観測した。Ansible適用は`failed=0`で、reconcile/rollback helper 2本を更新し、
+runtime入力に差分がなかったため全Compose projectの再作成は発生しなかった。Apps VMのcheckoutは
+`origin/main` `c44170d`と一致している。
 
 ## 今後の残作業
 
