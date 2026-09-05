@@ -1,7 +1,7 @@
 # 実装状況
 
 - 状態: フェーズ0/1の基盤はローカル実装完了、フェーズ0の実機インベントリ確認済み、実機未適用
-- 更新日: 2026-08-30
+- 更新日: 2026-09-05
 - 手順書: [KubernetesからComposeへの移行](k8s-to-compose.md)
 
 この文書は設計、ローカル実装、実機反映を区別する。現在も旧Kubernetesが本番サービスを
@@ -71,9 +71,9 @@
 - 初回apply前に`AGE_RECIPIENT`、age identity、SSH agent/socket、SSH pushurl、state追跡状態を
   `make state-backup-preflight`で検証する
 - Proxmox API tokenとSSH公開鍵を管理端末から渡し、Terraform planをレビューする
-- 7 project中6 projectは実機または公開manifestから`repo@sha256:<digest>`へ固定済み。
-  未公開のCaddy custom imageを初回CI buildでregistryへpushし、そのmanifest digestを
-  `edge/compose.yaml`へ固定する。Caddyがtagのままではapplication cutover gateを通過しない
+- 7 projectすべてのimageを実機または公開manifestから`repo@sha256:<digest>`へ固定済み。
+  Caddy custom imageは2026-09-05にGitHub ActionsでGHCRへ公開し、manifest digestを
+  `edge/compose.yaml`へ固定した
 - Tailscaleのlive ACL/DNS/route/deviceをexportし、Terraform import先と完全なpolicy差分を確認する
 - Healthchecks.io check/Discord integrationとDiscord webhookを手動作成する
 

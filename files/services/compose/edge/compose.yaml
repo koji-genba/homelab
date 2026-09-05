@@ -2,7 +2,7 @@ services:
   caddy:
     # Tags are review-only; pin this literal to repo@sha256:<64 hex chars>
     # before application_cutover_confirmed is enabled.
-    image: ghcr.io/koji-genba/caddy-cloudflare:2.11.4
+    image: ghcr.io/koji-genba/caddy-cloudflare@sha256:e2a92e76f07428763c253e005c016b3da0515f025a30762b2f68e9ea26a21d59
     env_file:
       - path: "${SECRETS_DIR:?set SECRETS_DIR}/edge.env"
         format: raw
