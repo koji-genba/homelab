@@ -106,4 +106,12 @@ resource "proxmox_virtual_environment_vm" "apps" {
 
   serial_device {}
 
+  # Cloud-init is consumed at VM creation. Refreshing the creation-time
+  # snippet must not replace an existing VM; a new/recreated VM still reads
+  # the current snippet ID during creation.
+  lifecycle {
+    ignore_changes = [
+      initialization[0].user_data_file_id,
+    ]
+  }
 }

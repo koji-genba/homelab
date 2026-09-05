@@ -49,7 +49,7 @@ TOOLBOX_PROXMOX_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_PROXMOX_ENV) $(TOOLBOX_IMAGE
 TOOLBOX_TAILSCALE_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_TAILSCALE_ENV) $(TOOLBOX_IMAGE)
 
 .PHONY: toolbox-build terraform-init terraform-fmt terraform-validate terraform-validate-tailscale terraform-plan terraform-apply
-.PHONY: ansible-lint ansible-check ansible-apply ansible-bootstrap-paths-test toolbox-uid-test cloud-init-test compose-config adguard-config-check shellcheck secrets-scan preflight
+.PHONY: ansible-lint ansible-check ansible-apply ansible-bootstrap-paths-test terraform-apps-vm-lifecycle-test toolbox-uid-test cloud-init-test compose-config adguard-config-check shellcheck secrets-scan preflight
 .PHONY: state-backup-preflight state-backup-preflight-test state-backup state-backup-push state-restore state-restore-test state-backup-test rollback-app
 .PHONY: secrets-encrypt secrets-decrypt-check
 .PHONY: tailscale-init tailscale-acl-preflight tailscale-plan tailscale-apply tailscale-import-core tailscale-import-acl tailscale-import-magic-dns tailscale-import-dns tailscale-import-router tailscale-acl-path-test
@@ -152,6 +152,9 @@ ansible-apply:
 
 ansible-bootstrap-paths-test:
 	./scripts/tests/ansible-bootstrap-paths-fixture.sh
+
+terraform-apps-vm-lifecycle-test:
+	./scripts/tests/terraform-apps-vm-lifecycle-fixture.sh
 
 toolbox-uid-test:
 	$(TOOLBOX_RUN) ./scripts/tests/toolbox-uid-fixture.sh
