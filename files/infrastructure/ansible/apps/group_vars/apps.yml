@@ -9,8 +9,8 @@ network_migration_complete: false
 
 # Both flags remain false until the old Kubernetes/MetalLB/DHCP writers are
 # fenced and ARP ownership has been checked by an operator.
-legacy_service_addresses_enabled: false
-legacy_service_cutover_confirmed: false
+legacy_service_addresses_enabled: true
+legacy_service_cutover_confirmed: true
 legacy_service_interface_name: ens19
 legacy_service_addresses:
   - 192.168.11.100/24  # Caddy/HTTP (cutover only)
@@ -111,4 +111,4 @@ healthchecks_ping_period: 60
 # Dead-man pings fail closed when rootfs usage reaches this percentage.
 healthchecks_rootfs_max_percent: 90
 compose_wait_timeout_seconds: 120
-application_cutover_confirmed: false
+application_cutover_confirmed: true

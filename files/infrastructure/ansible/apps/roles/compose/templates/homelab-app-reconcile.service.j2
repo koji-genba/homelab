@@ -1,7 +1,8 @@
 [Unit]
 Description=Fast-forward and reconcile one homelab application project
-Requires=docker.service homelab-mount-guard.service{% if legacy_service_addresses_enabled | default(false) | bool %} homelab-service-addresses.service{% endif %}
-After=docker.service homelab-mount-guard.service network-online.target{% if legacy_service_addresses_enabled | default(false) | bool %} homelab-service-addresses.service{% endif %}
+{% set legacy_addr_dep = ' homelab-service-addresses.service' if (legacy_service_addresses_enabled | default(false) | bool) else '' %}
+Requires=docker.service homelab-mount-guard.service{{ legacy_addr_dep }}
+After=docker.service homelab-mount-guard.service network-online.target{{ legacy_addr_dep }}
 
 [Service]
 Type=oneshot
