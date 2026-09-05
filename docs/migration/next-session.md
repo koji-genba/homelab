@@ -2,212 +2,225 @@
 
 - 更新日: 2026-09-05
 - 対象リポジトリ: `/home/s-sato/homelab`
-- 作業ブランチ: `k8s-decommission`
-- 現在地: Phase 1完了。Apps VMはread-only/non-writer。Phase 2のapplication cutoverは未実施
+- 作業ブランチ: `k8s-decommission`（`origin/main` = `4e28a08`）
+- 現在地: **Phase 2B application cutover実施済み。Apps VMが唯一のwriterで、7 Compose projectが稼働中**
 
 この文書は、会話履歴がない次セッションが安全に作業を再開するための指示書である。
 進捗の羅列ではなく、ここに記載した順序、ゲート、停止条件に従うこと。
 
-## 目的とフェーズ境界
-
-- KubernetesをDebian 13の単一Apps VMとDocker Composeへ段階的に置き換え、現在の機能を減らさない。
-- Proxmoxインストール済みの状態からGit、Terraform、Ansible、Compose、SOPS/ageで再構築可能にする。
-- NFS上の既存dataを最優先で保護し、新旧を同時writerにしない。
-- Phase 2では現在のVLAN 11上でapplicationだけを切り替える。VLAN 10/20/30/40への再編は別windowで行う。
-- Apps VMの削除・IaC再構築試験に合格した日から14日間は旧Kubernetes VMを保持する。
-- `stashPadDev`（VMID 111）は作業用VMであり、この移行の対象外とする。
-
 ## セッション開始時に必ず行うこと
 
-1. この文書を最後まで読み、次に以下を確認する。
+1. この文書を最後まで読み、次を確認する。
+   - [Phase 2A事前調査結果](phase2a-inventory.md) — 実測値、cutover/rollback手順、ユーザー判断
    - [実装状況](implementation-status.md)
    - [KubernetesからComposeへの移行手順](k8s-to-compose.md)
-   - [実機インベントリ](../architecture/live-inventory-2026-08-30.md)
    - [Apps VM復旧手順](../operations/apps-vm-recovery.md)
 2. worktreeとbranchを読み取り専用で確認する。protectedなnetwork 2ファイルを触らない。
 
    ```sh
    git status --short --branch
    git log --oneline --decorate -10
-   git diff --check -- . \
-     ':(exclude)files/infrastructure/network/README.md' \
-     ':(exclude)files/infrastructure/network/config.txt'
    ```
 
-3. 外部状態を変更する前に、現在もKubernetesが唯一のwriterで、Apps VMがnon-writerであることを再確認する。
-4. まずは後述の「Phase 2A: 読み取り専用の事前調査」だけを行う。調査結果をユーザーへ提示し、別途明示的な
-   cutover許可を得るまでwriter停止、IP移譲、NFS read/write化、service起動へ進まない。
+3. 実機の現在状態を読み取り専用で確認する（後述の「現在のシステム状態」と一致するか）。
+
+## 目的とフェーズ境界
+
+- KubernetesをDebian 13の単一Apps VMとDocker Composeへ置き換え、現在の機能を減らさない。
+- Proxmoxインストール済みの状態からGit、Terraform、Ansible、Compose、SOPS/ageで再構築可能にする。
+- NFS上の既存dataを最優先で保護し、新旧を同時writerにしない。
+- VLAN 10/20/30/40への再編（Phase 4）は別windowで行う。application cutoverへ混ぜない。
+- **Apps VMの削除・IaC再構築試験（Phase 3）に合格した日から14日間は旧Kubernetes VMを保持する。**
+  この14日はまだ開始していない。
+- `stashPadDev`（VMID 111）は作業用VMであり、この移行の対象外とする。
 
 ## 絶対に維持する安全条件
 
-- Kubernetesを唯一のwriterとして維持する。Phase 2 cutoverが明示承認されるまで停止・変更しない。
-- Apps VMへ`192.168.11.100`、`192.168.11.101`、`192.168.11.103`を付与せず、NFSはread-only、
-  Compose containerは0個を維持する。
-- 次のAnsible flagは明示承認まで、すべて`false`のままにする。
-  - `legacy_service_addresses_enabled`
-  - `legacy_service_cutover_confirmed`
-  - `application_cutover_confirmed`
-  - `network_migration_complete`
+**writerの向きがcutoverで反転した。以下は2026-09-05時点の状態を前提とする。**
+
+- **Apps VMが唯一のwriterである。Kubernetes側のworkloadを再開させない。**
+  Flux Kustomization 4件はsuspend、対象Deployment 6件はreplicas=0、MetalLB speakerは停止、
+  3つのLoadBalancer ServiceはClusterIP化されている。この状態を維持する。
+- Kubernetes VMを起動したまま残しているが、writerではない。**Fluxをresumeしない。
+  Deploymentをscale upしない。ServiceをLoadBalancerへ戻さない。** これらはrollback時にだけ行う。
+- 次のAnsible flagは現在の値を維持する。`network_migration_complete`をtrueにしない。
+  - `legacy_service_addresses_enabled: true`
+  - `legacy_service_cutover_confirmed: true`
+  - `application_cutover_confirmed: true`
+  - `network_migration_complete: false`
 - Tailscaleはlive設定の完全なexport、review、importが終わるまで`manage_tailnet=false`を維持する。
-- Apps VMのcloud-init warning履歴を消す目的で`cloud-init clean`やreinitを行わない。SSH host keyを変える危険がある。
+  global nameserverは`192.168.11.101`のままであり、Terraform宣言の`192.168.10.101`はPhase 4の期待値である。
+  **今applyするとtailnet全体のDNSが解決不能になる。**
+- Apps VMのcloud-init warning履歴を消す目的で`cloud-init clean`やreinitを行わない。
 - Terraform planにVMID 112のreplace、想定外resource、Apps VM以外の変更が出たらapplyしない。
 - secret、API token、age秘密鍵、復号済み設定、Terraform stateの実値を会話、ログ、Git、tfvarsへ出力しない。
+- ZFS snapshot `@pre-compose-cutover-20260905`（4 dataset）を、Phase 3の再構築試験に合格するまで削除しない。
 
-## 現在のシステム状態
+## 現在のシステム状態（2026-09-05 20:54 再確認）
 
-### 本番サービス
+### Apps VM（VMID 112、`192.168.10.42`）
 
-- Kubernetes 3 nodeはReadyで、現在も本番サービスを提供している。
-- 現行service IPはIngress `.11.100`、Unbound `.11.101`、Samba `.11.103`。
-- VLAN 11のDHCP pool `.100-.200`とservice IPが重複している。Phase 2ではDHCP停止または確実な除外が必須。
-- Unboundは旧Replica 1つで提供中。新Replicaは不正なTIF RPZでCrashLoopし、blocklist Jobも直近3回失敗している。
-- Tailscale `home-gateway`はexit node、IPv4/IPv6 default route、VLAN 10/11 routeを提供している。
-  live ACL/DNS/route/deviceはまだAPIからexport・Terraform importしていない。
+- 7 Compose projectがすべて稼働。`homelab-apps.service`は`active`。
 
-### Apps VM
+  | project | container | 状態 |
+  | --- | --- | --- |
+  | edge | `homelab-edge-caddy-1` | healthy |
+  | dns | `homelab-dns-adguard-1` | 稼働 |
+  | samba | `homelab-samba-samba-1` | healthy |
+  | stashpad-prod | `homelab-stashpad-prod-stashpad-prod-1` | healthy |
+  | stashpad-staging | `homelab-stashpad-staging-stashpad-staging-1` | healthy |
+  | sillytavern | `homelab-sillytavern-sillytavern-1` | 稼働 |
+  | monitoring | `homelab-monitoring-gatus-1` | 稼働 |
 
-- Proxmox `pve1`上のVMID 112。Debian 13、hostname `apps`、4 vCPU、12 GiB RAM、40 GiB disk。
-- VLAN 10の`192.168.10.42/24`と、アドレスを持たないVLAN 11 NICを持つ。
-- ED25519 host keyはPVE/QEMU guest agent経由とnetwork経由で独立に照合済み。
-  fingerprintは`SHA256:crmNjtlEWlIzTu4VKVR6/ArBqsAZV6qUW95uyOvFLUw`。
-- 初回Ansibleは`ok=61 changed=29 failed=0`、再実行は`ok=58 changed=0 failed=0`。
-- 再起動後はfailed unit 0。7 NFS mountはすべて`nfs4,ro`でmarker一致。
-- `homelab-mount-guard.service`はenabled/active。
-- Apps、reconcile、Healthchecks、legacy-address unitはdisabled/inactive。running containerは0個。
-- service側IPv4は`.10.42`だけで、Docker bridge以外のlegacy service IPはない。
+- `ens19`に`192.168.11.100/24`、`192.168.11.101/24`、`192.168.11.103/24`を保持。
+  `eth0`は管理用`192.168.10.42/24`のまま。
+- NFS 7 mountのうち`stashpad-media`だけが`ro`、他6つが`rw`。これが正しい状態である。
+- `/opt/homelab`は`origin/main` `4e28a08`のcleanなcheckout。`homelab-app-reconcile.timer`はenabled/active。
+- 稼働中imageのdigestはGit宣言と一致している。
+- NFS server側のopen stateは、Apps VMがstashPad prod/staging DBのrw openを保持する一方、
+  Kubernetes worker 2台に残るのは旧Unboundの`hagezi-pro.txt`に対するread-only openだけである。
+  想定外のwriterは観測されていない。
 
-### Terraform、cloud-init、state
+### Kubernetes（停止状態だがVMは起動中）
 
-- Apps VMとcloud-init snippetはTerraformへ収束済み。
-- PVEの`terraform@pve` user、`HomelabTerraform` role、`apps-vm` tokenは作成済み。ACLはVMID 112、
-  `local`、`vmpool`、`pve1`、対象SDN networkへ限定し、token期限は2026-12-04 23:59 JST。
-- cloud-init snippetは`hostname: apps`、deploy user配下の`lock_passwd: true`、top-level `lock_passwd`なし。
-- creation-time snippet更新で既存VMをreplaceしないlifecycle guardを実装済み。
-- snippet drift解消時のplanはVMID 112差分なしで、apply後もboot time、MAC、disk、config、host keyを維持した。
-- saved planと一時token handoffは削除済み。
-- 暗号化state backup branchの確認済み先頭は`39ee06b5028ae318676c736dfb432f73404a95ca`。
-- local stateとbackupはmode `0600`。
+- VM 101/102/103は起動したままだが、application workloadは動いていない。
+- Flux Kustomization `stashpad-prod` `stashpad-staging` `sillytavern` `flux-system` はsuspend。
+- CronJob `external-dns/blocklist-updater` はsuspend。
+- Deployment 6件（stashpad prod/staging、sillytavern、samba、external-unbound、
+  ingress-nginx-controller）は`replicas=0`。
+- DaemonSet `metallb-speaker` は`nodeSelector`に`homelab.io/metallb: disabled`を追加して停止。
+  **元の値は`{"kubernetes.io/os":"linux"}`である。**
+- 3つのServiceはtypeを`ClusterIP`へ変更済み。rollback用に`spec.loadBalancerIP`を固定してある。
 
-### NFS/ZFS
+  | Service | namespace | 固定IP |
+  | --- | --- | --- |
+  | `ingress-nginx-controller` | ingress-nginx | `192.168.11.100` |
+  | `external-unbound-dns` | external-dns | `192.168.11.101` |
+  | `samba-smb` | samba | `192.168.11.103` |
 
-- NFS親export 4つと利用path 7つは存在し、markerをKubernetes worker 2台とApps VMから確認済み。
-- ZFS poolは全て`ONLINE`。対象pathは`noacl`で、確認時にxattrはなかった。
-- `tank-gen2/data/shared`には2026-09-05時点で26 snapshotがある。
-- `tank-gen1/data/archive`と`tank-gen2/data/k8s-volumes`にはsnapshotがない。
-  cutover時はwriter停止と必要な最終syncの直後、Apps VMをwriterにする前にsnapshotを必ず取得する。
+  変更前の完全なService定義JSONはセッションのscratchpadにのみ存在し、恒久保存されていない。
+  必要なら`kubectl get svc -o json`で現状を再取得すること。
+- Unboundは**旧ReplicaSet `external-unbound-588bcf9d7c`（revision 129）が正常な世代**である。
+  新ReplicaSet `external-unbound-75dd79988f`（revision 288）は不正なRPZでCrashLoopする。
 
-| path | marker内容 |
-| --- | --- |
-| `/mnt/tank-gen2/data/shared/.homelab-export-shared`（`/mnt/shared`から参照） | `shared` |
-| `/mnt/tank-gen2/data/shared/.homelab-export-shared-hdd` | `shared-hdd` |
-| `/mnt/tank-gen1/data/archive/.homelab-export` | `archive` |
-| `/mnt/shared/koji-genba/stashPadLib/.homelab-export` | `stashpad-media` |
-| `/mnt/tank-gen2/data/k8s-volumes/sillytavern-sillytavern-data-pvc-85f01a24-9480-4341-a6ad-f44b17cbecaa/.homelab-export` | `sillytavern-data` |
-| `/mnt/tank-gen2/data/k8s-volumes/stashpad-prod-stashpad-data-pvc-c96b1813-be70-49ca-865f-989e77359a6b/.homelab-export` | `stashpad-prod-data` |
-| `/mnt/tank-gen2/data/k8s-volumes/stashpad-staging-stashpad-data-pvc-ecc8b17c-bd0a-47db-b169-248d5d98995b/.homelab-export` | `stashpad-staging-data` |
+### ネットワーク
 
-`shared`と`shared-hdd`は同じ`tank-gen2/data/shared` rootがmergerfs経由と直接export経由で見えるため、
-意図的に固有marker名を使っている。共通`.homelab-export`へ戻さない。
+- IX2215のBVI11は`192.168.11.1/25`。**この`/25`は誤りで、期待値は`/24`である。修正はPhase 4で行う。**
+- `interface BVI11`の`ip dhcp binding server_app-dhcp`を解除済み。**running-configのみで
+  `write memory`は未実行。** ルータを再起動すると解除が失われる。
+- VLAN 11のDHCP leaseは解除前から0件で、影響を受けるclientはない。
+- `vmbr0.11`は`192.18.11.11/24`のまま（記録のみ、修正しない）。
 
-## 認証情報と作業環境の復旧
+### ZFS snapshot
 
-- age identityはKeePassXCに保存済みで、管理端末の配置先は
-  `/home/s-sato/.config/sops/age/keys.txt`。public recipientは
-  `age1a8v97ung7t9g39vdxsdxgzta4fq4hz7hv7yezzlx6ac7xfgqgsws420x6u`。
-- Proxmox API tokenはKeePassXCの`terraform@pve!apps-vm=...` entryに保存済み。値をファイルへ転記せず、
-  Terraform作業が必要な時だけ`TF_VAR_proxmox_api_token`へ一時注入する。
-- SSH agent socketはセッション固有であり、以前の`/tmp/homelab-migration-agent.sock`が残っていても
-  生存確認なしに再利用しない。新しいagentを起動し、ユーザーが保存済み鍵を明示的に追加する。
-- `runtime.sops.yaml`は作成済み。次を外部変更前に確認する。
+cutover直前に4 datasetへ`@pre-compose-cutover-20260905`を取得済み。
 
-  ```sh
-  export AGE_IDENTITY_FILE=/home/s-sato/.config/sops/age/keys.txt
-  make secrets-decrypt-check
-  make state-backup-preflight
-  ```
+- `tank-gen2/data/k8s-volumes`（それまでsnapshot 0件）
+- `tank-gen1/data/archive`（それまでsnapshot 0件）
+- `tank-gen2/data/shared`
+- `cache-pool`（mergerfsのcache branch。HDD側datasetのsnapshotだけでは直近の書き込みを保護できない）
 
-`state-backup-preflight`には生きたSSH agent/socketとSSH push経路が必要である。資格情報を復旧できない場合は
-Terraform/Ansible applyを行わず、読み取り専用調査だけに留める。
+pve1のroot crontabにある`/usr/local/bin/mover.sh`（05:00）は`tank-gen2/data/shared`のみを
+対象とする自家製snapshot/tieringである。cutover後も運用を継続する。
 
-## 次に行う作業 — Phase 2A: 読み取り専用の事前調査
+## 次に行う作業
 
-このセクションが次セッションの最初の実作業である。設定変更を伴わない方法で現在値を取得し、日時、取得元、
-コマンド、結果を記録する。既存文書との差分があれば、cutover前に解消方針をユーザーへ提示する。
+### 1. 受入試験の残項目
 
-1. Gitの基準を確定する。
-   - remoteをfetchし、mainの最新cutover候補commitとCI結果を確認する。
-   - 7 Compose projectのimageがすべてmanifest digest固定であることを確認する。
-   - 未commit差分を確認し、protectedなnetwork 2ファイルをstageしない。
-2. 現行writerとservice ownershipをinventoryする。
-   - Kubernetes workload、Flux reconciliation、MetalLB address pool/advertisement、Ingress、Unbound、Sambaを記録する。
-   - NFS server側でclientとopen writerを確認し、どのworkloadが各pathへ書くか対応表を作る。
-   - `.11.100/.11.101/.11.103`の所有者をKubernetes、IX2215のARP/DHCP、同一VLAN上の観測で照合する。
-3. networkの事前条件をinventoryする。
-   - IX2215のrunning/startup config、VLAN 11 DHCP lease、`.100/.101/.103`の予約・除外可否を記録する。
-   - ECW5211の接続port、management IP、SSID/VLAN mappingを記録する。
-   - `vmbr0.11`の`192.18.11.11/24`とKubernetes側`192.168.11.0/24`の不整合は記録するが、ここでは修正しない。
-4. Tailscaleをexportしてreviewする。
-   - live ACL全体、DNS、route、device、tag、exit-node状態を取得する。
-   - `home-gateway`のdefault route、VLAN 10/11 route、無tag状態が保持対象であることを確認する。
-   - exportとTerraform宣言の差分を提示する。調査段階ではimport/apply、DNS変更を行わない。
-5. cutover計画を完成させる。
-   - writerごとの停止方法、停止確認、再開方法を表にする。
-   - 必要なfinal syncのsource/destination、dry-run、検証方法を決める。最初から`rsync --delete`を使わない。
-   - snapshot対象、snapshot名、取得コマンド、存在確認、rollback方法を事前に確定する。
-   - DHCP除外、service IP移譲、NFS read/write化、Compose起動、受入試験、rollbackの実行順を確定する。
-   - maintenance window、想定停止時間、操作者、OOB access、各段階の中止判断をユーザーと合意する。
+自動確認できる範囲は合格済みである（7 FQDNのTLS、DNSの通常応答・内部record・ブロック、
+stashPad prod/stagingの`200`、SillyTavernの`401`、SMB 445の到達性、image digestの一致）。
 
-Phase 2Aの完了報告には、少なくとも次を含める。
+2026-09-05にユーザーが次の完了を申告した。
 
-- 不明なwriterが0であること
-- 3つのservice IPについて重複・DHCP競合がない切替方法
-- snapshot 0件の2 datasetを含むsnapshot計画
-- Tailscale live exportとTerraformの差分
-- cutoverとrollbackの時系列手順
-- 変更対象と、明示的に変更しない対象
+- 7 FQDN（`prod.stashpad.kojigenba-srv.com`、`staging.stashpad.kojigenba-srv.com`、
+  `prod.kojigenba-srv.com`、`staging.kojigenba-srv.com`、`sillytavern.kojigenba-srv.com`、
+  `dns.kojigenba-srv.com`、`status.kojigenba-srv.com`）の動作確認
+- IoT/Guest/Internetから管理UI、SSH、SMBへ到達できない隔離テスト
 
-ここまで終えても自動的にcutoverへ進まない。結果を提示し、ユーザーからPhase 2Bの明示許可を得る。
+7 FQDNの動作確認は完了申告として記録するが、操作内容の内訳は記録されていないため、下記の
+application別read/write項目を自動的に完了扱いにはしない。
 
-## Phase 2B: 明示承認後だけ行うcutover
+ユーザーの確認が必要な項目。
 
-次の順序は骨格である。Phase 2Aで実機に合わせて具体化し、maintenance window内で一段ずつgateを確認する。
+- [ ] stashPad prod/stagingで閲覧、更新、upload、共有mediaを確認する
+- [ ] stashPad prod/stagingのmetadataが分離されている
+- [ ] SillyTavernでlogin、会話、設定保存を確認する
+- [ ] Samba 3 shareを既存userでread/writeできる
+- [x] IoT/Guest/Internetから管理UI、SSH、SMBへ到達できない（2026-09-05、ユーザー確認）
 
-1. cutover対象のmain commit、全image digest、rollback先commit、現在の設定backupを記録する。
-2. IX2215で`.11.100/.11.101/.11.103`をDHCP対象外にするかVLAN 11 DHCPを停止する。
-3. Flux reconciliationをsuspendする。
-4. stashPad prod/staging、SillyTavern、Samba、Unboundを停止する。
-5. Pod停止とNFSのopen writer消失を確認する。不明なwriterが1つでもあれば中止する。
-6. 必要なfinal syncを実行・検証する。最初から`--delete`を使わない。
-7. `archive`と`k8s-volumes`を含む対象ZFS snapshotを取得し、全snapshotの存在を確認する。
-8. Ingress/MetalLBから`.11.100/.11.101/.11.103` ownershipを外し、router/client双方でARP消失を確認する。
-9. review済み差分で`legacy_service_addresses_enabled=true`、`legacy_service_cutover_confirmed=true`、
-   `application_cutover_confirmed=true`へ変更し、`network_migration_complete=false`のままAnsibleを適用する。
-10. Caddy、AdGuard Home、Samba、applications、Gatusの順に起動し、
-    [受入試験](k8s-to-compose.md#acceptance)を実施する。
-11. 全項目合格後はKubernetes VMを停止してよいが、削除しない。再構築試験合格日から14日間保持する。
+サービス断を伴うため実施タイミングの合意が必要な項目。
 
-Tailscale Terraformのimport/applyとVLAN 10/20/30/40への再編は、このapplication cutoverへ混ぜない。
-network migrationは別maintenance windowで行う。
+- [ ] Apps VM reboot後にmountと全serviceが自動復旧する
+- [ ] NFS未mountまたはmarker不一致ならapplicationが起動しない（fail-closed）
 
-## rollbackの最低条件
+発火させないと確認できない項目。
 
-1. Apps VMの`homelab-apps.service`を停止し、全Compose projectがdownしたことを確認する。
-2. Apps VMからservice IPを外し、ARP entry消失を確認する。
-3. 新側で発生したwriteを記録し、旧側へ戻すdata/schemaの扱いを決める。
-4. MetalLB、Ingress、service、Fluxを復元する。
-5. Kubernetes側がwriterへ戻ったことと、現行FQDNから旧serviceが正常なことを確認する。
+- [ ] Gatusが障害と復旧をDiscordへ通知する
+- [ ] Healthchecks.ioがdead-man停止を通知する
 
-rollback時も新旧を同時writerにしない。snapshot restoreやreconcileはデータ差分を評価してから行う。
+### 2. 受入試験の合格後
+
+- [ ] IX2215で`write memory`を実行し、DHCP binding解除を保存する
+- [ ] Kubernetes VMを停止する（削除はしない）。安定を確認してからでよい
+
+### 3. Phase 3: 再構築性の証明
+
+Kubernetes VMの14日保持期間を開始する前に実施する。手順は
+[移行手順書](k8s-to-compose.md)のフェーズ3に従う。snapshot restoreで代替してはならない。
+
+**合格した日が、Kubernetes VM 14日保持期間の開始日である。**
+
+### 4. Phase 4: ネットワーク移行
+
+別のmaintenance windowで実施する。application cutoverへ混ぜない。含まれるのは次である。
+
+- BVI11の`/25`→`/24`修正と、それに伴うACL（`server_app-out`）の更新
+- `files/infrastructure/network/README.md`と`config.txt`の反映（ユーザー管理。勝手に触らない）
+- Tailscale live ACLのexport、Terraform import、global nameserverの`192.168.10.101`への変更
+- VLAN 10/20/30/40への再編、ECW5211の設定、Apps VMの`192.168.10.101`への集約
+- MetalLB pool（`.100-.200`）が`/25`を超えている不整合の解消（MetalLBごと廃止で自然に消える）
+
+### 5. Phase 5: 廃止
+
+再構築試験から14日経過し、rollbackが発生していないことを条件とする。詳細は移行手順書に従う。
+`k8s-volumes`配下のorphan directory 7件（`openldap-*` 3世代、旧`external-dns-blocklist-*` 2世代、
+旧stashpad prod/staging各1世代）の削除判断もここで行う。
+
+## rollback手順
+
+新旧を同時にwriterにしないことを最優先する。
+
+1. Apps VMで`homelab-apps.service`を停止し、全Compose projectがdownしたことを確認する。
+2. `systemctl stop homelab-service-addresses`でservice IPを外し、
+   `ip -4 addr show dev ens19`に`.11.x`がないことを確認する。
+3. NFS serverで`/proc/fs/nfsd/clients/*/states`を確認し、Apps VM（`192.168.10.42`）の
+   open stateが0件であることを確認する。
+4. Apps VM側で発生したwriteを記録し、旧側へ戻すdata/schemaの扱いを決める。
+5. `metallb-speaker` DaemonSetの`nodeSelector`を`{"kubernetes.io/os":"linux"}`へ戻す。
+6. 3つのServiceのtypeを`LoadBalancer`へ戻す。`spec.loadBalancerIP`が固定してあるため
+   MetalLBは同じIPを再割り当てする。
+7. ingress-nginx、samba、sillytavern、stashpad-prod/stagingを`--replicas=1`へ戻す。
+8. **Unboundは旧ReplicaSetで復旧する。** 単に`replicas=1`にすると新Podが不正なRPZで再度
+   CrashLoopする。復旧前にNFS server上で
+   `/mnt/tank-gen2/data/k8s-volumes/external-dns-blocklist-data-pvc-8e7db6e1-.../rpz/hagezi-tif.txt`
+   を退避すること。
+9. Flux Kustomization 4件をresumeする。
+10. IX2215で`interface BVI11`に`ip dhcp binding server_app-dhcp`を再投入する。
+11. 現行FQDNから旧serviceが正常なことを確認する。
+
+`make rollback-app`が成功した場合は、自動reconcileが停止したまま
+`/var/lib/homelab/reconcile.pending`に現在の`origin/main` SHAと対象projectが記録される。
+原因とdata/schema互換性を確認した後にだけ`reconcile.paused`を削除する。
 
 ## 直ちに停止する条件
 
-- VMID 112、`.10.42`、`.11.100/.11.101/.11.103`に想定外の所有者がいる。
+- Apps VMと旧Kubernetesが同時にwriterになりうる状態が観測された。
+- NFS serverの`states`に、想定していないclientのwrite openがある。
 - Terraform planがApps VM以外を変更する、VMID 112をreplaceする、または説明できない差分を含む。
 - state backup preflight、SSH host key、NFS source/fstype/mode/markerのいずれかを検証できない。
-- NFSの所有者、ACL/xattr、snapshot、open writerを説明できない。
-- DHCPまたはMetalLBがservice IPを所有したまま、Apps VMへ同じIPを付けようとしている。
 - imageがdigest固定されていない、または宣言digestと公開manifestが一致しない。
 - Tailscale live ACL全体をexport・reviewせずに`manage_tailnet=true`へ変更しようとしている。
+- Phase 3の再構築試験に合格していないのにKubernetes VMを削除しようとしている。
 - rollback手順、OOB access、maintenance window、ユーザーの明示許可のいずれかがない。
 
 ## 作業対象外・worktree保護
@@ -215,22 +228,24 @@ rollback時も新旧を同時writerにしない。snapshot restoreやreconcile�
 - `files/infrastructure/network/README.md`
 - `files/infrastructure/network/config.txt`
 
-上記2ファイルには、この移行作業開始前からのユーザー変更がある。明示依頼なしに編集、破棄、整形、stage、commitしない。
-選択的にstageし、commit前に`git diff --cached --name-only`で対象を確認する。
+上記2ファイルには、この移行作業開始前からのユーザー変更（VLAN 11を`/25`から`/24`へ改める期待値）が
+ある。明示依頼なしに編集、破棄、整形、stage、commitしない。選択的にstageし、commit前に
+`git diff --cached --name-only`で対象を確認する。
 
 次も現時点では行わない。
 
-- Kubernetes VM、PVC、NFS data、ZFS datasetの削除
-- IX2215、ECW5211、VLAN、DHCPの変更（承認済みcutover windowを除く）
+- Kubernetes VM、PVC、NFS data、ZFS dataset、cutover snapshotの削除
+- IX2215、ECW5211、VLAN、DHCPの追加変更（`write memory`と承認済みwindowを除く）
 - `vmbr0.11`の修正・削除
 - Tailscale DNS/ACL/routeのapply
-- Apps VMの削除・再作成試験
 - `stashPadDev`（VMID 111）の変更
 
-コード変更が必要な作業は、ユーザーの希望により可能な限りLunaへ委譲する。ただし、この指示書の最終編集は
-primary agentが実施した。設計・運用文書は日本語で記述する。
+コード変更が必要な作業は、ユーザーの希望により可能な限りsonnetの補助agentへ委譲する。ただし、この
+指示書の最終編集はprimary agentが実施した。設計・運用文書は日本語で記述する。
 
-コードまたは構成を変更した場合は、対象に応じて次の既知のCI相当検証を実行する。失敗を残したまま実機変更へ進まない。
+コードまたは構成を変更した場合は、対象に応じて次の既知のCI相当検証を実行する。失敗を残したまま
+実機変更へ進まない。**Apps VMのCompose定義は`origin/main`のcloneから読まれるため、
+`compose.yaml`の変更はmainへmergeし、reconcile経由で配布しなければ反映されない。**
 
 ```sh
 make ansible-lint ansible-check ansible-bootstrap-paths-test \
@@ -243,11 +258,37 @@ make ansible-lint ansible-check ansible-bootstrap-paths-test \
 
 ## 完了済みのGit delivery
 
-- PR #7、#9、#14、#15、#16、#17はmainへmerge済みで、各CIは成功済み。
+- PR #7、#9、#14、#15、#16、#17、#18、#19はmainへmerge済みで、各CIは成功済み。
+- `origin/main`は`4e28a08`。
 - toolbox `ghcr.io/koji-genba/homelab-toolbox:1.0.1`は公開済み。
   digestは`sha256:7607f2c74300504e045b2649ce4032920885c1902dd22c01b4c220fc7067dad0`。
 - Caddy custom imageを含む7 projectのimageはdigest固定済み。
-- Apps VM Terraform apply、Ansible bootstrap、再起動後gate、cloud-init snippet drift解消まで完了済み。
 
-次セッションはPhase 2Aの読み取り専用inventoryから開始する。Phase 2Bへの移行は、調査結果、具体的なrollback、
-maintenance windowを提示し、ユーザーから明示的なcutover許可を得た場合に限る。
+## cutoverで判明した実装バグ（PR #19で修正済み）
+
+いずれもoffline検証では検出できず、実機適用で初めて顕在化した。同種の不具合を疑う際の参考にする。
+
+1. **AdGuardHome.yaml.j2が不正なYAMLを生成していた。** Ansibleのtemplateは`trim_blocks=True`で
+   動作するため、inlineの`{% for %}{% if %}`直後の改行が削除され、`user_rules`のsequence entryが
+   1行に連結されていた。AdGuard Homeが起動できず、cutover中のDNS断の直接原因になった。
+   `make adguard-config-check`は静的なconfigしか検証しておらず、**Ansibleがレンダリングした
+   実出力を検証していなかった**ことが見逃しの原因である。
+2. **systemd unit templateで同じ改行消失が起きていた。** `homelab-apps.service.j2`と
+   `homelab-app-reconcile.service.j2`で`Requires=`/`After=`行末の改行が消え、次のdirectiveと
+   連結していた。systemdは該当行を`Invalid argument`として無視するため、**設計上意図していた
+   `PartOf=docker.service`と`Wants=network-online.target`が実機で無効だった**。
+   実装状況文書に「Docker再起動時の`PartOf`復旧連携」として記載されていた機能が動いていなかった。
+3. **Samba image内蔵のHEALTHCHECKが構造的に誤検知していた。**
+   `smbclient -L localhost -U% | grep -q Server`を使っているが、SMB1無効化により
+   server一覧テーブルが出力されず`Server`に永久にマッチしない。この誤検知で
+   `docker compose up --wait`がtimeoutし、後続4 projectが起動しなかった。
+   `compose.yaml`側で終了コード判定のhealthcheckを明示して解決した。
+
+あわせて、Phase 2Aの調査でも次の乖離が判明している。
+
+- kube-proxyがIPVSモードかつlive ConfigMapの`strictARP: false`であるため、MetalLB speakerを
+  止めてもnodeが`kube-ipvs0`のLoadBalancer IPに対してARPを返し続けた。
+  kubespray inventoryは`kube_proxy_strict_arp: true`であり、実機がdriftしていた。
+  service IPの解放にはServiceのClusterIP化が必要だった。
+- 移行文書が管理する7 pathの外に、NFS上へPVデータを持つ未記録のworkloadが2系統
+  （`openldap`、`external-dns-blocklist`）存在した。

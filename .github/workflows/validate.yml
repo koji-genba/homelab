@@ -37,6 +37,8 @@ jobs:
         run: make compose-config
       - name: AdGuard schema-34 configuration check
         run: make adguard-config-check
+      - name: Gatus Caddy probe regression check
+        run: make gatus-config-check
       - name: Shell lint
         run: make shellcheck
       - name: Plaintext secret and state scan
