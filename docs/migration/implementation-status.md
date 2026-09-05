@@ -257,6 +257,95 @@ mainへmergeし、Apps VMのcheckoutは`origin/main` `e272c75`と一致してい
 12. BVI11が`/24`になったことで、MetalLB pool（`.100-.200`）が`/25`を超えているという既知の
     不整合は解消した。
 
+## Kubernetes VMの停止（2026-09-05）
+
+Phase 2B application cutoverの受入試験と、IX2215構成ドリフトの解消が完了したため、
+Kubernetes VM 3台を停止した。**停止のみであり、VM、disk、PVC、NFS data、ZFS snapshotは削除していない。**
+Phase 3の再構築試験に合格するまで削除しない。
+
+### 停止前に取得したもの
+
+停止すると`kubectl`が使えなくなるため、rollbackに必要な値を
+[rollback用 状態スナップショット](k8s-rollback-state.md)へ恒久保存した。Service 3件の完全なJSON、
+Deployment replicas、`metallb-speaker`のnodeSelector、Flux suspend状態、PVC/PV一覧、
+NFS open stateのベースラインを含む。それまで変更前のService定義はセッションのscratchpadにしか
+存在せず、恒久保存されていなかった。
+
+あわせて、これまでの記録にあった**Unbound復旧手順の誤りを訂正した**。「旧ReplicaSet
+`external-unbound-588bcf9d7c`（revision 129）が正常な世代」という記述は誤りである。
+Deploymentの`revisionHistoryLimit`は`10`で、当該ReplicaSetはとうに回収されて存在しない。
+現存する11件（revision 278〜288）はpod templateが完全に同一であり、差分は
+`kubectl.kubernetes.io/restartedAt` annotationと`pod-template-hash`だけである
+（template本体のhashは全件`edb261e79bf9d3d6`、imageは全件`ghcr.io/koji-genba/external-unbound:v1.8`）。
+CrashLoopの原因はReplicaSetではなくPVC上の`rpz/hagezi-tif.txt`であり、中身はRPZ zoneではなく
+GitHub側のサイズ超過エラー文（143 bytes）だった。`blocklist-updater`のdownloaderがHTTPエラー本文を
+そのままファイルへ保存したことが原因である。正しい復旧手順はスナップショット文書に記載した。
+
+### 停止前のベースライン（すべて合格）
+
+- Compose 7 containerすべて`Up`、`homelab-apps.service`は`active`、failed unit 0件
+- `ens19`に`192.168.11.100` `.101` `.103`を保持
+- 7 FQDNのHTTPS: stashPad prod/staging系4件が`200`、SillyTavern `401`、dns `302`、status `401`。
+  TLS検証は全件`ssl_verify_result=0`
+- DNS: 外部名前解決、内部record（`prod.stashpad` → `192.168.11.100`）、ブロック
+  （`ads.doubleclick.net`と`analytics.google.com`がNXDOMAIN）すべて正常
+- SMB `192.168.11.103:445`到達可
+- VM 101/102/103は`Ready`、QEMU guest agentが3台とも応答
+
+**apexの`doubleclick.net`はブロックされず実IPを返すが、これは正常である。**
+hagezi側でapexが許可されているためであり、ブロック機能の確認には
+`ads.doubleclick.net`など実際にリストへ載るFQDNを使うこと。
+
+### 停止の実施
+
+worker → control planeの順で`qm shutdown --timeout 180`を実行した。guest agentが応答したため
+3台ともクリーンに停止し、`qm stop`による強制停止は不要だった。
+
+| 順 | VMID | name | 所要 |
+| --- | --- | --- | --- |
+| 1 | 103 | `k8s-worker02` | 約16秒 |
+| 2 | 102 | `k8s-worker01` | 約4秒 |
+| 3 | 101 | `k8s-master01` | 約4秒 |
+
+### 停止後の確認（すべて合格）
+
+- VM 101/102/103が`stopped`。112 `apps`、105、110、111は`running`のまま
+- Compose 7 containerは再起動なしで`Up`を継続。failed unit 0件、service IP 3つを保持
+- 7 FQDNのHTTPSは停止前と同一の結果（`200`×4、`401`、`302`、`401`、TLS検証すべて`0`）
+- DNSの外部解決・内部record・ブロックいずれも停止前と同一
+- SMB 445到達可
+
+### NFS open stateの扱い（想定と異なるが正常）
+
+停止後もworker01/02のclient entryと`rpz/hagezi-pro.txt`へのread-only openが`states`に残る。
+これはLinux nfsdの**courteous server**によるもので、`info`の`status`が`confirmed`から
+`courtesy`へ遷移している。lease期限を過ぎてもread openやdelegationしか持たないclientは
+即座にexpireせず、最大24時間保持される仕様である。
+
+| client | 停止前 | 停止後 | open |
+| --- | --- | --- | --- |
+| `192.168.10.42` apps | `confirmed`、callback UP | `confirmed`、callback UP | stashPad prod/staging DBのrw open + write delegation 計20件 |
+| `192.168.10.22` k8s-worker01 | すでに`courtesy`（last renewから17896秒） | `courtesy` | `rpz/hagezi-pro.txt`へのread-only open 6件 |
+| `192.168.10.23` k8s-worker02 | `confirmed` | `courtesy` | `rpz/hagezi-pro.txt`へのread-only open 4件 |
+
+worker01は停止前の時点ですでに`courtesy`だった。つまりこのstateは今回の停止で生じたものではなく、
+以前scale downした旧Unbound Podが残したものである。いずれもread-onlyでdataへの影響はなく、
+競合するアクセスがあればnfsdがrevokeする。**`ctl`への書き込みによる強制expireは行っていない。**
+24時間以内に自然消滅するため、`states`から消えたことの確認はPhase 3の作業時に行えばよい。
+
+### 併せて判明したこと（停止とは無関係の既存事象）
+
+Apps VMのhost側resolverは`systemd-resolved`で、`eth0`のuplink DNSが`192.168.10.1`と`1.1.1.1`に
+なっている。`192.168.10.1`はTCP/UDP 53を`connection refused`で拒否し、`1.1.1.1`は内部recordを
+持たないため、**Apps VM自身のhost namespaceからは`*.kojigenba-srv.com`を解決できない。**
+`192.168.11.101`のAdGuardへ明示的に問い合わせれば正しく解決する。
+
+これはKubernetes VMの停止によるものではない。いずれのuplinkもKubernetesに依存していないためである。
+実害も現時点ではない。Gatusはcontainer名（`http://caddy:80`等）で監視し、Docker内のcontainerは
+public名の解決だけをhost resolverに依存するためである。**ただしhost側でFQDNを解決する運用スクリプトを
+追加する場合はこの前提が崩れる。** Phase 4でApps VMを`192.168.10.101`へ集約し
+global nameserverを移す際に解消される見込みである。
+
 ## 今後の残作業
 
 ### 受入試験の残項目

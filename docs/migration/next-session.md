@@ -3,11 +3,12 @@
 - 更新日: 2026-09-05
 - 対象リポジトリ: `/home/s-sato/homelab`
 - 作業ブランチ: `k8s-decommission`（`origin/main` = `e272c75`）
-- 未pushのcommit: `k8s-decommission`は`origin/k8s-decommission`より6 commit先行している。
+- 未pushのcommit: `k8s-decommission`は`origin/k8s-decommission`より先行している。
   内容は文書と`files/infrastructure/network/`の記録のみで、実機の挙動を変えるコードは含まない。
   pushとPRはユーザーの指示を受けてから行う。
 - 現在地: **Phase 2B application cutover実施済み。Apps VMが唯一のwriterで、7 Compose projectが稼働中。
-  IX2215の構成ドリフトは2026-09-05に解消済み。次の作業はKubernetes VMの停止**
+  IX2215の構成ドリフトは2026-09-05に解消済み。Kubernetes VM 3台は2026-09-05に停止済み（削除はしていない）。
+  次の作業はPhase 3の再構築性の証明**
 
 この文書は、会話履歴がない次セッションが安全に作業を再開するための指示書である。
 進捗の羅列ではなく、ここに記載した順序、ゲート、停止条件に従うこと。
@@ -47,8 +48,10 @@
 - **Apps VMが唯一のwriterである。Kubernetes側のworkloadを再開させない。**
   Flux Kustomization 4件はsuspend、対象Deployment 6件はreplicas=0、MetalLB speakerは停止、
   3つのLoadBalancer ServiceはClusterIP化されている。この状態を維持する。
-- Kubernetes VMを起動したまま残しているが、writerではない。**Fluxをresumeしない。
-  Deploymentをscale upしない。ServiceをLoadBalancerへ戻さない。** これらはrollback時にだけ行う。
+- **Kubernetes VM 101/102/103は2026-09-05に停止した。削除はしていない。**
+  Phase 3の再構築試験に合格し、そこから14日が経過するまでVM、disk、PVC、NFS data、
+  ZFS snapshotのいずれも削除しない。**rollback以外の目的でVMを起動しない。**
+  起動した場合も、Fluxをresumeせず、Deploymentをscale upせず、ServiceをLoadBalancerへ戻さない。
 - 次のAnsible flagは現在の値を維持する。`network_migration_complete`をtrueにしない。
   - `legacy_service_addresses_enabled: true`
   - `legacy_service_cutover_confirmed: true`
@@ -62,7 +65,7 @@
 - secret、API token、age秘密鍵、復号済み設定、Terraform stateの実値を会話、ログ、Git、tfvarsへ出力しない。
 - ZFS snapshot `@pre-compose-cutover-20260905`（4 dataset）を、Phase 3の再構築試験に合格するまで削除しない。
 
-## 現在のシステム状態（2026-09-05 21:09 再確認）
+## 現在のシステム状態（2026-09-05 23:20 再確認、Kubernetes VM停止後）
 
 ### Apps VM（VMID 112、`192.168.10.42`）
 
@@ -88,11 +91,21 @@
   Apps VMへ反映済みである。
 - NFS server側のopen stateは、Apps VMがstashPad prod/staging DBのrw openを保持する一方、
   Kubernetes worker 2台に残るのは旧Unboundの`hagezi-pro.txt`に対するread-only openだけである。
-  想定外のwriterは観測されていない。
+  想定外のwriterは観測されていない。VM停止後もworker 2台のentryは`states`に残るが、
+  `info`の`status`が`courtesy`へ遷移しており、これはLinux nfsdのcourteous serverによる
+  最大24時間の保持である。詳細は後述の「Kubernetes VM停止後のNFS open state」を参照。
+- **Apps VM自身のhost resolverでは`*.kojigenba-srv.com`を解決できない。** `systemd-resolved`の
+  `eth0` uplinkが`192.168.10.1`（53をrefuse）と`1.1.1.1`（内部record非保持）のためである。
+  Kubernetes停止とは無関係の既存事象で、実害は現時点でない。host側でFQDNを扱う確認は
+  `192.168.11.101`を明示指定するか`curl --resolve`を使うこと。
 
-### Kubernetes（停止状態だがVMは起動中）
+### Kubernetes（VM停止済み）
 
-- VM 101/102/103は起動したままだが、application workloadは動いていない。
+- **VM 101/102/103は`stopped`である。** 2026-09-05にworker → control planeの順
+  （103 → 102 → 101）で`qm shutdown --timeout 180`を実行し、guest agent応答により3台とも
+  クリーンに停止した。強制停止（`qm stop`）は使っていない。VMもdiskも削除していない。
+- 以下のKubernetes側の状態は、VM停止前に確認した最終値である。rollbackで起動した際の
+  前提として保持する。完全な値は[rollback用 状態スナップショット](k8s-rollback-state.md)にある。
 - Flux Kustomization `stashpad-prod` `stashpad-staging` `sillytavern` `flux-system` はsuspend。
 - CronJob `external-dns/blocklist-updater` はsuspend。
 - Deployment 6件（stashpad prod/staging、sillytavern、samba、external-unbound、
@@ -201,26 +214,54 @@ VLAN 63 → VLAN 11とGuest VLAN 40 → VLAN 11のdenyが一時的に無効化�
 `interface GigaEthernet2:1.0`から`2:6.0`までの位置）。**行の並びではなく行の集合として比較すること。**
 並び順の差分を「ドリフト」と誤認して`config.txt`を書き換えない。
 
-### 3. Kubernetes VMの停止（次作業）
+### 3. Kubernetes VMの停止（完了、2026-09-05）
 
-前提のIX2215構成ドリフトは解消済みである（2026-09-05）。**削除はしない。停止だけである。**
-Phase 3の再構築試験に合格するまで、VMもdiskもPVCもNFS dataも消さない。
+**削除はしていない。停止だけである。** Phase 3の再構築試験に合格するまで、VMもdiskもPVCも
+NFS dataも消さない。実施内容と確認結果の全記録は
+[実装状況の「Kubernetes VMの停止」](implementation-status.md)にある。
 
-- [ ] 停止前に、Apps VMの7 Compose projectが正常であることを確認する
-- [ ] pve1（`192.168.10.11`）でVMID 101/102/103を`qm shutdown`で順に停止する。
-      強制停止（`qm stop`）は応答がない場合に限る
-- [ ] 停止後にApps側の7 FQDN、DNS応答、SMB到達性を再確認する
-- [ ] NFS serverの`/proc/fs/nfsd/clients/*/states`から、停止したnodeのopen stateが消えたことを確認する
+- [x] 停止前に、Apps VMの7 Compose projectが正常であることを確認する（2026-09-05、全項目合格）
+- [x] 停止前にrollbackへ必要な値を[状態スナップショット](k8s-rollback-state.md)へ恒久保存する
+- [x] pve1（`192.168.10.11`）でVMID 103 → 102 → 101を`qm shutdown --timeout 180`で停止する
+      （2026-09-05、guest agent応答により3台ともクリーン停止。`qm stop`は不要だった）
+- [x] 停止後にApps側の7 FQDN、DNS応答、SMB到達性を再確認する
+      （2026-09-05、停止前と完全に同一の結果）
+- [x] NFS serverの`/proc/fs/nfsd/clients/*/states`を確認する（2026-09-05、後述の通り想定と異なるが正常）
 
-停止するとrollbackの所要時間が延びる。rollbackが必要になった場合は、
+停止によりrollbackの所要時間が延びた。rollbackが必要になった場合は、
 下記のrollback手順を実行する前にKubernetes VMを起動し、nodeがReadyになるまで待つこと。
 
-### 4. Phase 3: 再構築性の証明
+#### Kubernetes VM停止後のNFS open state
+
+停止後もworker01/02のclient entryと`rpz/hagezi-pro.txt`へのread-only openが`states`に残る。
+**これは正常であり、対処しない。** `/proc/fs/nfsd/clients/<id>/info`の`status`が`confirmed`から
+`courtesy`へ遷移しており、Linux nfsdのcourteous serverがread openやdelegationしか持たないclientを
+最大24時間保持する仕様によるものである。worker01は停止前からすでに`courtesy`だった。
+
+| client | `status` | open |
+| --- | --- | --- |
+| `192.168.10.42` apps | `confirmed`、callback UP | stashPad prod/staging DBのrw open + write delegation 計20件 |
+| `192.168.10.22` k8s-worker01 | `courtesy` | `rpz/hagezi-pro.txt`へのread-only open 6件 |
+| `192.168.10.23` k8s-worker02 | `courtesy` | `rpz/hagezi-pro.txt`へのread-only open 4件 |
+
+**`/proc/fs/nfsd/clients/<id>/ctl`へ書き込んで強制expireしないこと。** 24時間以内に自然消滅する。
+`states`から消えたことの確認はPhase 3の作業時に行えばよい。write openを持つのはApps VMだけであり、
+「新旧が同時にwriterになりうる状態」は観測されていない。
+
+### 4. Phase 3: 再構築性の証明（次作業）
 
 Kubernetes VMの14日保持期間を開始する前に実施する。手順は
 [移行手順書](k8s-to-compose.md)のフェーズ3に従う。snapshot restoreで代替してはならない。
 
 **合格した日が、Kubernetes VM 14日保持期間の開始日である。**
+
+Apps VMを実際に削除して再構築する試験であり、全serviceの停止を伴う。**着手前に必ず
+ユーザーとmaintenance windowを合意すること。** 実施前に次を満たしていることを確認する。
+
+- ZFS snapshot `@pre-compose-cutover-20260905`（4 dataset）が残っている
+- Terraform planがVMID 112のみを対象とし、replaceや説明できない差分を含まない
+- state backupのpreflightが通る
+- rollback時にKubernetes VMを起動できる（VMもdiskも削除していない）
 
 ### 5. Phase 4: ネットワーク移行
 
