@@ -7,7 +7,11 @@ set -eu
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 fixture=$(mktemp -d)
 bin=$(mktemp -d)
-cleanup() { rm -rf "$fixture" "$bin"; }
+remote=
+cleanup() {
+  rm -rf "$fixture" "$bin"
+  test -z "$remote" || rm -rf "$remote"
+}
 trap cleanup EXIT INT TERM
 
 cat >"$bin/age" <<'AGE'
@@ -76,6 +80,53 @@ PATH="$bin:$PATH" AGE_RECIPIENT=age1fixture AGE_IDENTITY_FILE="$fixture/identity
   STATE_BACKUP_REPO_ROOT="$fixture" "$repo_root/scripts/state-backup.sh" --no-push >/dev/null
 test "$first_ciphertext" = "$(git -C "$fixture" show state-backup:terraform-state/files/infrastructure/terraform/apps-vm/terraform.tfstate.age | sha256sum | awk '{print $1}')"
 test "$second_ciphertext" = "$(git -C "$fixture" show state-backup:terraform-state/files/infrastructure/terraform/tailscale/terraform.tfstate.age | sha256sum | awk '{print $1}')"
+
+# Exercise synchronization with a local bare origin. The script must recover
+# a missing local branch from the remote, retain local commits that are ahead,
+# fast-forward a stale local branch, and fail closed on divergence.
+remote=$(mktemp -d)
+git -C "$remote" init --bare -q
+git -C "$fixture" remote add origin "$remote"
+git -C "$fixture" push -q origin state-backup
+base=$(git -C "$fixture" rev-parse refs/heads/state-backup)
+git -C "$fixture" update-ref -d refs/heads/state-backup
+PATH="$bin:$PATH" AGE_RECIPIENT=age1fixture AGE_IDENTITY_FILE="$fixture/identity" \
+  STATE_BACKUP_REPO_ROOT="$fixture" "$repo_root/scripts/state-backup.sh" --no-push >/dev/null
+test "$(git -C "$fixture" rev-parse refs/heads/state-backup)" = "$base"
+
+make_child() {
+  parent=$1
+  tree=$(git -C "$fixture" rev-parse "$parent^{tree}")
+  printf '%s\n' "$2" | git -C "$fixture" commit-tree "$tree" -p "$parent"
+}
+
+local_ahead=$(make_child "$base" local-ahead)
+git -C "$fixture" update-ref refs/heads/state-backup "$local_ahead" "$base"
+PATH="$bin:$PATH" AGE_RECIPIENT=age1fixture AGE_IDENTITY_FILE="$fixture/identity" \
+  STATE_BACKUP_REPO_ROOT="$fixture" "$repo_root/scripts/state-backup.sh" --no-push >/dev/null
+test "$(git -C "$fixture" rev-parse refs/heads/state-backup)" = "$local_ahead"
+
+git -C "$fixture" update-ref refs/heads/state-backup "$base" "$local_ahead"
+remote_ahead=$(make_child "$base" remote-ahead)
+git -C "$fixture" push -q origin "$remote_ahead:refs/heads/state-backup"
+PATH="$bin:$PATH" AGE_RECIPIENT=age1fixture AGE_IDENTITY_FILE="$fixture/identity" \
+  STATE_BACKUP_REPO_ROOT="$fixture" "$repo_root/scripts/state-backup.sh" --no-push >/dev/null
+test "$(git -C "$fixture" rev-parse refs/heads/state-backup)" = "$remote_ahead"
+
+local_diverged=$(make_child "$remote_ahead" local-diverged)
+git -C "$fixture" update-ref refs/heads/state-backup "$local_diverged" "$remote_ahead"
+remote_diverged=$(make_child "$remote_ahead" remote-diverged)
+git -C "$fixture" push -q origin "$remote_diverged:refs/heads/state-backup"
+if PATH="$bin:$PATH" AGE_RECIPIENT=age1fixture AGE_IDENTITY_FILE="$fixture/identity" \
+  STATE_BACKUP_REPO_ROOT="$fixture" "$repo_root/scripts/state-backup.sh" --no-push \
+  >"$fixture/diverged.log" 2>&1; then
+  echo "diverged state-backup branches were unexpectedly accepted" >&2
+  exit 1
+fi
+grep -q 'refusing diverged state-backup branches' "$fixture/diverged.log"
+test "$(git -C "$fixture" rev-parse refs/heads/state-backup)" = "$local_diverged"
+git -C "$fixture" update-ref refs/heads/state-backup "$remote_diverged" "$local_diverged"
+
 # A removed state is removed from the backup branch while another state keeps
 # the run valid.
 rm "$fixture/files/infrastructure/terraform/apps-vm/terraform.tfstate"
