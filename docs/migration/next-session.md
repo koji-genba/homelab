@@ -30,7 +30,7 @@
 - Tailscale Terraformはimport-firstで、既存ACLをexportしない限り管理を有効化できない。
 - Tailscale deviceは`home-gateway`。既存exit node、IPv4/IPv6 default route、VLAN 10/11 route、無tag状態を保持する。
 - AdGuard HomeはCloudflare DoHをprimary、Quad9 DoHをfallbackとし、現行相当のHaGeZi 6 feedを使う。
-- 7 project中6 projectのimageはdigest固定済み。Caddy custom imageだけが未固定である。
+- 7 projectすべてのimageはdigest固定済み。Caddy custom imageもGHCRへ公開済みである。
 
 ## 実機で確認済みの重要事項
 
@@ -74,19 +74,17 @@ make ansible-lint ansible-check compose-config adguard-config-check \
 
 前回は全項目成功している。失敗した場合は実機作業へ進まず、差分または実行環境を直す。
 
-### 2. Caddy imageを公開してdigest固定する
+### 2. Caddy imageを公開してdigest固定する（完了）
 
-`ghcr.io/koji-genba/caddy-cloudflare:2.11.4`はまだregistryに存在しない。ユーザーからcommit/pushの
-許可を得た後、network 2ファイルを除外して実装をcommitし、`.github/workflows/caddy-image.yml`で
-imageをbuild/pushする。workflow成功後にmanifest digestを確認する。
+2026-09-05にPR #7をmainへmergeし、`.github/workflows/caddy-image.yml`で
+`ghcr.io/koji-genba/caddy-cloudflare:2.11.4`をbuild/pushした。workflow成功後にmanifest digestを確認した。
 
 ```sh
 docker buildx imagetools inspect ghcr.io/koji-genba/caddy-cloudflare:2.11.4
 ```
 
-得られたdigestを`files/services/compose/edge/compose.yaml`のimageへ
-`ghcr.io/koji-genba/caddy-cloudflare@sha256:...`形式で反映し、再検証する。tagのままではcutover gateを
-通してはならない。
+確認したdigestは`sha256:e2a92e76f07428763c253e005c016b3da0515f025a30762b2f68e9ea26a21d59`である。
+`files/services/compose/edge/compose.yaml`のimageへ反映し、再検証済み。今後tagのままへ戻してはならない。
 
 ### 3. 認証・state復旧経路を準備する
 
