@@ -160,19 +160,41 @@ stashPad prod/stagingの`200`、SillyTavernの`401`、SMB 445の到達性、imag
 - [x] Gatusが障害と復旧をDiscordへ通知する（2026-09-05、Caddy/Public TLS certificateの障害・resolved通知をDiscordで受信確認）
 - [x] Healthchecks.ioがdead-man停止を通知する（2026-09-05、DOWN/UP通知をDiscordで受信確認）
 
-### 2. 受入試験の合格後
+### 2. IX2215構成ドリフトの解消（次作業）
 
-- [x] IX2215で`write memory`を実行し、DHCP binding解除を保存する（2026-09-05、ユーザー実行確認）
-- [ ] Kubernetes VMを停止する（削除はしない）。安定を確認してからでよい
+IX2215で`write memory`を実行し、DHCP binding解除をstartup-configへ保存済みである
+（2026-09-05、ユーザー実行確認）。この結果、現状は次の3状態に分かれている。
 
-### 3. Phase 3: 再構築性の証明
+| 対象 | BVI11 | `server_app-dhcp` binding | 位置付け |
+| --- | --- | --- | --- |
+| Git HEAD | `/25` | あり | cutover前の旧状態 |
+| 未commitのworktree | `/24` | あり | Phase 4の将来期待値 |
+| IX2215 running/startup-config | `/25` | なし | 現在の実機状態 |
+
+このドリフトを解消するまで、`files/infrastructure/network/config.txt`をIX2215へ投入せず、
+Kubernetes VMの停止にも進まない。次の順序で整理する。
+
+1. IX2215のrunning-configとstartup-configをexportし、両者が一致することを確認する。
+2. `files/infrastructure/network/README.md`と`config.txt`にある既存の未commit `/24`変更を、
+   Phase 4用の別ファイルまたはpatchとして失わない形で退避する。
+3. 現行構成を表すファイルを、実機どおりBVI11 `/25`かつbindingなしへ更新する。
+   Phase 4まで `/24`化やDHCP bindingの再投入をIX2215へapplyしない。
+4. `docs/migration/implementation-status.md`に残る`write memory`未実行の記述を更新する。
+5. diffで実機・現行構成・Phase 4期待値の境界を確認し、関係するファイルだけをcommitする。
+
+### 3. Kubernetes VMの停止
+
+- [ ] 上記のIX2215構成ドリフトを解消する
+- [ ] Kubernetes VMを停止する（削除はしない）。停止後にApps側の安定を再確認する
+
+### 4. Phase 3: 再構築性の証明
 
 Kubernetes VMの14日保持期間を開始する前に実施する。手順は
 [移行手順書](k8s-to-compose.md)のフェーズ3に従う。snapshot restoreで代替してはならない。
 
 **合格した日が、Kubernetes VM 14日保持期間の開始日である。**
 
-### 4. Phase 4: ネットワーク移行
+### 5. Phase 4: ネットワーク移行
 
 別のmaintenance windowで実施する。application cutoverへ混ぜない。含まれるのは次である。
 
@@ -182,7 +204,7 @@ Kubernetes VMの14日保持期間を開始する前に実施する。手順は
 - VLAN 10/20/30/40への再編、ECW5211の設定、Apps VMの`192.168.10.101`への集約
 - MetalLB pool（`.100-.200`）が`/25`を超えている不整合の解消（MetalLBごと廃止で自然に消える）
 
-### 5. Phase 5: 廃止
+### 6. Phase 5: 廃止
 
 再構築試験から14日経過し、rollbackが発生していないことを条件とする。詳細は移行手順書に従う。
 `k8s-volumes`配下のorphan directory 7件（`openldap-*` 3世代、旧`external-dns-blocklist-*` 2世代、
