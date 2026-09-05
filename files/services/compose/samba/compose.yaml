@@ -22,6 +22,19 @@ services:
       - SYS_CHROOT
     security_opt:
       - no-new-privileges:true
+    # Image's built-in HEALTHCHECK greps stdout for the literal "Server" from
+    # `smbclient -L localhost -U%`. That heading only appears in the SMB1
+    # server-list table, which is absent because SMB1 is intentionally
+    # disabled (see smb.conf) -- so the built-in check is permanently
+    # unhealthy even though smbd is fine. Override it: judge by the command's
+    # own exit code instead of scraping its output. Verified on the running
+    # container that `smbclient -L localhost -U%` exits 0 when healthy.
+    healthcheck:
+      test: ["CMD-SHELL", "smbclient -L localhost -U% >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 volumes:
   samba-logs:
