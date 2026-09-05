@@ -1,0 +1,50 @@
+#!/bin/sh
+set -eu
+
+repo={{ compose_install_dir | quote }}
+compose_root="${HOMELAB_COMPOSE_ROOT:-$repo/files/services/compose}"
+env_file={{ compose_env_file | quote }}
+cutover_confirmed=$(sed -n 's/^APPLICATION_CUTOVER_CONFIRMED=//p' "$env_file" 2>/dev/null || true)
+test "$cutover_confirmed" = true || {
+  echo "application_cutover_confirmed is false; refusing to start Compose" >&2
+  exit 1
+}
+
+case "${1:-}" in
+  edge|dns|samba|stashpad-prod|stashpad-staging|sillytavern|monitoring)
+    projects="$1"
+    ;;
+  all)
+    projects="edge dns samba stashpad-prod stashpad-staging sillytavern monitoring"
+    ;;
+  *)
+    echo "usage: $0 {all|edge|dns|samba|stashpad-prod|stashpad-staging|sillytavern|monitoring}" >&2
+    exit 2
+    ;;
+esac
+
+/usr/local/sbin/homelab-mount-guard
+
+for project in $projects; do
+  file="$compose_root/$project/compose.yaml"
+  test -r "$file" || { echo "missing Compose project: $file" >&2; exit 1; }
+  compose() {
+    docker compose --project-name "homelab-$project" --env-file "$env_file" --file "$file" "$@"
+  }
+  compose config --quiet
+  if test "$cutover_confirmed" = true; then
+    images=$(compose config --images)
+    test -n "$images" || { echo "Compose project has no image: $project" >&2; exit 1; }
+    bad_images=$(printf '%s\n' "$images" | grep -Ev '^.+@sha256:[0-9a-fA-F]{64}$' || true)
+    test -z "$bad_images" || {
+      echo "all images must be immutable digests during cutover ($project):" >&2
+      printf '%s\n' "$bad_images" >&2
+      exit 1
+    }
+  fi
+  if test "${HOMELAB_FORCE_RECREATE:-false}" = true; then
+    compose up -d --wait --wait-timeout {{ compose_wait_timeout_seconds | default(120) | int }} --force-recreate
+  else
+    compose up -d --wait --wait-timeout {{ compose_wait_timeout_seconds | default(120) | int }}
+  fi
+done

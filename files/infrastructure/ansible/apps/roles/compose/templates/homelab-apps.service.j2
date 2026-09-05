@@ -1,0 +1,16 @@
+[Unit]
+Description=Start homelab Docker Compose projects after NFS validation
+Requires=docker.service homelab-mount-guard.service{% if legacy_service_addresses_enabled | default(false) | bool %} homelab-service-addresses.service{% endif %}
+PartOf=docker.service
+After=docker.service homelab-mount-guard.service network-online.target{% if legacy_service_addresses_enabled | default(false) | bool %} homelab-service-addresses.service{% endif %}
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/homelab-compose-up all
+ExecStop=/usr/local/sbin/homelab-compose-down all
+TimeoutStopSec={{ compose_wait_timeout_seconds | default(120) | int }}
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,3 @@
+# One AdGuard rule per line. Keep this file reviewed and Git-managed.
+# No manual block rules are currently required; the reviewed HaGeZi feeds
+# above provide the block policy.

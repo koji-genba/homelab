@@ -1,0 +1,10 @@
+[Unit]
+Description=Fast-forward and reconcile one homelab application project
+Requires=docker.service homelab-mount-guard.service{% if legacy_service_addresses_enabled | default(false) | bool %} homelab-service-addresses.service{% endif %}
+After=docker.service homelab-mount-guard.service network-online.target{% if legacy_service_addresses_enabled | default(false) | bool %} homelab-service-addresses.service{% endif %}
+
+[Service]
+Type=oneshot
+# The helper detects all affected application projects from the fetched diff;
+# it never applies infrastructure, secrets, or firewall changes.
+ExecStart=/usr/local/sbin/homelab-app-reconcile

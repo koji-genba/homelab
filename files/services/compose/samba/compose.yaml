@@ -1,0 +1,33 @@
+services:
+  samba:
+    # Tags are review-only; pin this literal to a full digest before cutover.
+    image: ghcr.io/koji-genba/samba@sha256:72441fe92383b35e12f7cd9c31c89a5f1e711101fad9deccc31e99995601dbb5
+    ports:
+      - "${SMB_BIND_IP:-0.0.0.0}:445:445/tcp"
+    volumes:
+      - ./config/smb.conf:/etc/samba/smb.conf:ro
+      - ./config/users.json:/etc/samba/users/users.json:ro
+      - "${SECRETS_DIR:?set SECRETS_DIR}/samba:/run/samba-secrets:ro"
+      - "${SHARED_MOUNT_PATH:?set SHARED_MOUNT_PATH}:/mnt/shared"
+      - "${SHARED_HDD_MOUNT_PATH:?set SHARED_HDD_MOUNT_PATH}:/mnt/shared-hdd"
+      - "${ARCHIVE_MOUNT_PATH:?set ARCHIVE_MOUNT_PATH}:/mnt/archive"
+      - samba-logs:/var/log/samba
+      - samba-state:/var/lib/samba
+    networks:
+      - frontend
+    cap_add:
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+      - SYS_CHROOT
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  samba-logs:
+  samba-state:
+
+networks:
+  frontend:
+    name: homelab_frontend
+    external: true

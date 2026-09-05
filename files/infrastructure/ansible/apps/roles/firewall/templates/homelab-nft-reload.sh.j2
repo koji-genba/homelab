@@ -1,0 +1,29 @@
+#!/bin/sh
+set -eu
+
+# Build the exact transaction used by both Ansible's %s validator and the
+# reload handler. The managed table is deleted only inside the candidate
+# transaction; Docker-owned filter/nat tables are never flushed.
+policy=${1:-/etc/nftables.conf}
+mode=${2:-check}
+test -r "$policy" || { echo "nft policy is not readable: $policy" >&2; exit 1; }
+test "$mode" = check || test "$mode" = apply || {
+  echo "usage: $0 [policy-file] [check|apply]" >&2
+  exit 2
+}
+
+candidate=$(mktemp)
+cleanup() { rm -f "$candidate"; }
+trap cleanup EXIT INT TERM
+if /usr/sbin/nft list table inet homelab_filter >/dev/null 2>&1; then
+  {
+    printf '%s\n' 'delete table inet homelab_filter'
+    cat "$policy"
+  } >"$candidate"
+else
+  cp "$policy" "$candidate"
+fi
+/usr/sbin/nft -c -f "$candidate"
+if test "$mode" = apply; then
+  /usr/sbin/nft -f "$candidate"
+fi

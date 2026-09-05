@@ -1,5 +1,5 @@
 # Tailscale Gateway VM の出力定義
-# 現在の設定が適切なため変更不要
+# 実機インベントリ（Tailnet device: home-gateway）に合わせた出力
 
 output "tailscale_gateway_ip" {
   description = "Tailscale Gateway VM IP address"
@@ -7,8 +7,10 @@ output "tailscale_gateway_ip" {
 }
 
 output "advertised_routes" {
-  description = "Routes to be advertised by Tailscale subnet router"
+  description = "Routes currently advertised by the existing Tailscale device home-gateway"
   value = {
+    exit_ipv4  = "0.0.0.0/0"
+    exit_ipv6  = "::/0"
     management = "192.168.10.0/24"
     services   = "192.168.11.0/24"
   }
@@ -29,7 +31,7 @@ output "next_steps" {
   description = "Next configuration steps"
   value = [
     "1. SSH to VM: ssh -i ~/.ssh/k8s_ed25519 ubuntu@192.168.10.30",
-    "2. Authenticate Tailscale: sudo tailscale up --advertise-routes=192.168.10.0/24,192.168.11.0/24 --accept-dns=false --hostname=home-gateway",
+    "2. Authenticate Tailscale: sudo tailscale up --advertise-exit-node --advertise-routes=192.168.10.0/24,192.168.11.0/24 --accept-dns=false --hostname=home-gateway",
     "3. Approve routes in Tailscale admin console",
     "4. Test connection from mobile device"
   ]

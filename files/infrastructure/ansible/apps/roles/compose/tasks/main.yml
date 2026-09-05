@@ -1,0 +1,218 @@
+---
+- name: Reject unresolved opaque PVC paths before any container starts
+  ansible.builtin.assert:
+    that:
+      - "'REPLACE_WITH_' not in stashpad_data_path"
+      - "'REPLACE_WITH_' not in stashpad_staging_data_path"
+      - "'REPLACE_WITH_' not in sillytavern_data_path"
+    fail_msg: >-
+      Resolve the existing opaque PVC directories on the restored NFS export
+      before deployment. Ansible will not guess or create replacement paths.
+
+- name: Require explicit writer-fencing acknowledgement before app startup
+  ansible.builtin.assert:
+    that:
+      - application_cutover_confirmed | bool
+      - legacy_service_addresses_enabled | bool
+      - legacy_service_cutover_confirmed | bool
+    fail_msg: >-
+      Keep Compose, reconciliation, and dead-man timers stopped during Phase 1.
+      Set application_cutover_confirmed and the legacy service cutover flags
+      only after Kubernetes writers, MetalLB, DHCP leases, and ARP ownership
+      have been fenced.
+  when:
+    - application_cutover_confirmed | default(false) | bool
+    - not (network_migration_complete | default(false) | bool)
+
+- name: Require a Git checkout for the VM-side application reconciler
+  ansible.builtin.assert:
+    that:
+      - homelab_repo_url is defined
+      - homelab_repo_url | length > 0
+      - "'REPLACE_WITH_' not in homelab_repo_url"
+    fail_msg: >-
+      Set homelab_repo_url to the repository containing this tree. The
+      reconciler is intentionally unable to operate from an unversioned copy.
+
+- name: Clone or update the application repository on the Apps VM
+  ansible.builtin.git:
+    repo: "{{ homelab_repo_url }}"
+    dest: "{{ compose_install_dir }}"
+    version: "{{ homelab_repo_branch | default('main') }}"
+    update: false
+    # Keep history so make rollback-app can select a known-good commit.
+    depth: 0
+
+- name: Create the Compose project directory
+  ansible.builtin.file:
+    path: "{{ compose_project_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+
+- name: Render the host-specific Compose environment
+  ansible.builtin.template:
+    src: compose.env.j2
+    dest: "{{ compose_env_file }}"
+    owner: root
+    group: root
+    mode: '0600'
+  register: compose_host_env
+
+- name: Record whether rendered runtime inputs changed
+  ansible.builtin.set_fact:
+    compose_runtime_changed: >-
+      {{ secrets_runtime_changed | default(false) | bool
+         or compose_host_env.changed | default(false) | bool }}
+
+- name: Require immutable image references for a cutover deployment
+  ansible.builtin.shell: |
+    set -eu
+    compose_root={{ compose_install_dir | quote }}/files/services/compose
+    for project in edge dns samba stashpad-prod stashpad-staging sillytavern monitoring; do
+      file="$compose_root/$project/compose.yaml"
+      test -r "$file" || { echo "missing Compose project: $file" >&2; exit 1; }
+      images_file=$(mktemp)
+      cleanup() { rm -f "$images_file"; }
+      trap cleanup EXIT INT TERM
+      docker compose --project-name "homelab-$project" --env-file {{ compose_env_file | quote }} \
+        --file "$file" config --images >"$images_file"
+      test -s "$images_file" || { echo "no image resolved for $project" >&2; exit 1; }
+      bad_images=$(awk '!/^.+@sha256:[0-9a-fA-F]{64}$/ {print}' "$images_file")
+      test -z "$bad_images" || {
+        echo "all images must be immutable digests during cutover ($project):" >&2
+        printf '%s\n' "$bad_images" >&2
+        exit 1
+      }
+      rm -f "$images_file"
+      trap - EXIT INT TERM
+    done
+  args:
+    executable: /bin/sh
+  changed_when: false
+  when:
+    - application_cutover_confirmed | default(false) | bool
+
+- name: Inspect the shared Compose network
+  ansible.builtin.command: docker network inspect homelab_frontend
+  register: compose_network
+  changed_when: false
+  failed_when: false
+
+- name: Create the shared Compose network when absent
+  ansible.builtin.command: docker network create --driver bridge homelab_frontend
+  changed_when: true
+  when: compose_network.rc != 0
+
+- name: Install Compose lifecycle helper
+  ansible.builtin.template:
+    src: homelab-compose-up.sh.j2
+    dest: /usr/local/sbin/homelab-compose-up
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install Compose shutdown helper
+  ansible.builtin.template:
+    src: homelab-compose-down.sh.j2
+    dest: /usr/local/sbin/homelab-compose-down
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install application startup service
+  ansible.builtin.template:
+    src: homelab-apps.service.j2
+    dest: /etc/systemd/system/homelab-apps.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload systemd
+
+- name: Install application reconciliation helper
+  ansible.builtin.template:
+    src: homelab-app-reconcile.sh.j2
+    dest: /usr/local/sbin/homelab-app-reconcile
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install the application rollback helper
+  ansible.builtin.template:
+    src: homelab-rollback-app.sh.j2
+    dest: /usr/local/sbin/homelab-rollback-app
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install application reconciliation units
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "/etc/systemd/system/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - {src: homelab-app-reconcile.service.j2, dest: homelab-app-reconcile.service}
+    - {src: homelab-app-reconcile.timer.j2, dest: homelab-app-reconcile.timer}
+  notify: Reload systemd
+
+- name: Install Healthchecks.io dead-man ping helper
+  ansible.builtin.template:
+    src: healthchecks-ping.sh.j2
+    dest: /usr/local/sbin/homelab-healthchecks-ping
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install Healthchecks.io timer units
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "/etc/systemd/system/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - {src: healthchecks-ping.service.j2, dest: homelab-healthchecks-ping.service}
+    - {src: healthchecks-ping.timer.j2, dest: homelab-healthchecks-ping.timer}
+  notify: Reload systemd
+
+- name: Keep mount guard enabled throughout the migration
+  ansible.builtin.systemd:
+    name: homelab-mount-guard.service
+    daemon_reload: true
+    enabled: true
+    state: started
+
+- name: Keep application lifecycle units stopped before cutover
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: false
+    state: stopped
+  loop:
+    - homelab-apps.service
+    - homelab-app-reconcile.timer
+    - homelab-healthchecks-ping.timer
+  when: not application_cutover_confirmed | bool
+
+- name: Enable mount guard and application services after cutover
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - homelab-apps.service
+    - homelab-app-reconcile.timer
+    - homelab-healthchecks-ping.timer
+  when: application_cutover_confirmed | bool
+
+- name: Force-reconcile projects after rendered runtime changes
+  ansible.builtin.command:
+    cmd: /usr/local/sbin/homelab-compose-up all
+  environment:
+    HOMELAB_FORCE_RECREATE: 'true'
+  changed_when: true
+  when:
+    - application_cutover_confirmed | default(false) | bool
+    - compose_runtime_changed | default(false) | bool

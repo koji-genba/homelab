@@ -1,0 +1,56 @@
+#!/bin/sh
+set -eu
+
+repo={{ compose_install_dir | quote }}
+project="${1:-}"
+rollback_sha="${2:-}"
+record=/var/lib/homelab/deployments.log
+pending=/var/lib/homelab/reconcile.pending
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT INT TERM
+
+case "$project" in
+  edge|dns|samba|stashpad-prod|stashpad-staging|sillytavern|monitoring) ;;
+  *) echo "a valid Compose project is required" >&2; exit 2 ;;
+esac
+case "$rollback_sha" in
+  ''|*[!0-9a-fA-F]*) echo "a commit SHA is required" >&2; exit 2 ;;
+esac
+
+cd "$repo"
+status=$(git status --porcelain --untracked-files=all)
+test -z "$status" || { echo "refusing to rollback a dirty checkout" >&2; exit 1; }
+git fetch --prune origin main
+desired_sha="$(git rev-parse origin/main)"
+if ! git cat-file -e "$rollback_sha^{commit}" 2>/dev/null; then
+  git fetch --no-tags origin main
+fi
+git cat-file -e "$rollback_sha^{commit}" || {
+  echo "rollback commit is not available in the full local clone: $rollback_sha" >&2
+  exit 1
+}
+git archive "$rollback_sha" files/services/compose | tar -x -C "$tmp"
+export HOMELAB_COMPOSE_ROOT="$tmp/files/services/compose"
+# Hold the automatic timer at the selected rollback until the operator has
+# reviewed the incident and removes this file manually.
+touch /var/lib/homelab/reconcile.paused
+if /usr/local/sbin/homelab-compose-up "$project"; then
+  result=success
+else
+  result=failure
+fi
+if test "$result" = success; then
+  # Keep every unrelated retry request, but replace all stale entries for this
+  # project with the current desired main SHA. The resume reconcile uses the
+  # project as the work item and fetches main again before applying it.
+  pending_tmp="$tmp/reconcile.pending"
+  if test -r "$pending"; then
+    awk -v project="$project" 'NF < 2 || $2 != project { print }' "$pending" >"$pending_tmp"
+  else
+    : >"$pending_tmp"
+  fi
+  printf '%s %s\n' "$desired_sha" "$project" >>"$pending_tmp"
+  mv "$pending_tmp" "$pending"
+fi
+printf '%s project=%s sha=%s desired_sha=%s result=%s\n' "$(date -Is)" "$project" "$rollback_sha" "$desired_sha" "$result" >>"$record"
+test "$result" = success

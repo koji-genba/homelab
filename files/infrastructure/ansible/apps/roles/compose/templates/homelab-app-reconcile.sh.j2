@@ -1,0 +1,87 @@
+#!/bin/sh
+set -eu
+
+repo={{ compose_install_dir | quote }}
+compose_root="$repo/files/services/compose"
+branch="${HOMELAB_RECONCILE_BRANCH:-main}"
+record=/var/lib/homelab/deployments.log
+pause_file=/var/lib/homelab/reconcile.paused
+pending=/var/lib/homelab/reconcile.pending
+
+if test -e "$pause_file"; then
+  printf '%s project=paused result=skipped\n' "$(date -Is)" >>"$record"
+  exit 0
+fi
+
+cd "$repo"
+status=$(git status --porcelain --untracked-files=all)
+test -z "$status" || { echo "refusing to reconcile a dirty checkout" >&2; exit 1; }
+git fetch --prune origin "$branch"
+new_sha="$(git rev-parse "origin/$branch")"
+old_sha="$(git rev-parse HEAD)"
+
+projects=""
+add_project() {
+  case " $projects " in
+    *" $1 "*) ;;
+    *) projects="$projects $1" ;;
+  esac
+}
+if test -r "$pending"; then
+  while read -r pending_sha pending_project; do
+    test -n "$pending_project" || continue
+    add_project "$pending_project"
+  done <"$pending"
+fi
+changed_files=$(git diff --name-only "$old_sha" "$new_sha")
+for changed in $changed_files; do
+  case "$changed" in
+    files/services/compose/edge/*) add_project edge ;;
+    files/services/compose/dns/*) add_project dns ;;
+    files/services/compose/samba/*) add_project samba ;;
+    files/services/compose/stashpad-prod/*) add_project stashpad-prod ;;
+    files/services/compose/stashpad-staging/*) add_project stashpad-staging ;;
+    files/services/compose/sillytavern/*) add_project sillytavern ;;
+    files/services/compose/monitoring/*) add_project monitoring ;;
+    files/services/compose/.env.example) add_project edge; add_project dns; add_project samba; add_project stashpad-prod; add_project stashpad-staging; add_project sillytavern; add_project monitoring ;;
+    files/services/images/caddy-cloudflare/*) add_project edge ;;
+    # Non-application paths are pulled but never applied by this timer.
+    *) ;;
+  esac
+done
+
+test "$old_sha" = "$new_sha" -a -z "$projects" && exit 0
+
+# Validate every affected project from the fetched commit before fast-forwarding.
+if test -n "$projects"; then
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT INT TERM
+  git archive "$new_sha" files/services/compose | tar -x -C "$tmp"
+  for project in $projects; do
+    docker compose --project-name "homelab-$project" --env-file {{ compose_env_file | quote }} \
+      --file "$tmp/files/services/compose/$project/compose.yaml" config --quiet
+  done
+fi
+
+git merge --ff-only "$new_sha"
+if test -z "$projects"; then
+  printf '%s project=manual-only sha=%s result=pulled\n' "$(date -Is)" "$new_sha" >>"$record"
+  exit 0
+fi
+
+status_result=success
+: >"$pending"
+for project in $projects; do
+  image_digest=$(docker compose --project-name "homelab-$project" --env-file {{ compose_env_file | quote }} \
+    --file "$repo/files/services/compose/$project/compose.yaml" config --images 2>/dev/null | tr '\n' ',' || printf '%s' unknown)
+  if /usr/local/sbin/homelab-compose-up "$project"; then
+    result=success
+  else
+    result=failure
+    status_result=failure
+    printf '%s %s\n' "$new_sha" "$project" >>"$pending"
+  fi
+  printf '%s project=%s sha=%s image=%s result=%s\n' "$(date -Is)" "$project" "$new_sha" "$image_digest" "$result" >>"$record"
+done
+test "$status_result" = success || exit 1
+: >"$pending"

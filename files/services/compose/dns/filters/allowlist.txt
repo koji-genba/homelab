@@ -1,0 +1,4 @@
+# One AdGuard rule per line. Keep this file reviewed and Git-managed.
+# Required compatibility exceptions from the existing DNS policy.
+@@||t.co^
+@@||tailscale.com^

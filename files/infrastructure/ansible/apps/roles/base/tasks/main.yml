@@ -1,0 +1,98 @@
+---
+- name: Install host prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - git
+      - iproute2
+      - iputils-arping
+      - jq
+      - nfs-common
+      - openssh-server
+      - python3
+      - sudo
+      - unattended-upgrades
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure the deploy account exists
+  ansible.builtin.user:
+    name: "{{ deploy_user }}"
+    shell: /bin/bash
+    groups: sudo
+    append: true
+    create_home: true
+    password_lock: true
+
+- name: Install the operator SSH key when provided
+  ansible.posix.authorized_key:
+    user: "{{ deploy_user }}"
+    key: "{{ deploy_public_key }}"
+    state: present
+    manage_dir: true
+  when:
+    - deploy_public_key is defined
+    - deploy_public_key | length > 0
+    - not deploy_public_key.startswith('ssh-ed25519 AAAA...')
+
+- name: Restrict SSH authentication
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/99-homelab-hardening.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      PermitRootLogin no
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      ChallengeResponseAuthentication no
+      PubkeyAuthentication yes
+      AllowUsers {{ deploy_user }}
+  notify: Restart ssh
+
+- name: Give deploy account the bootstrap sudo entry point
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/{{ deploy_user }}-homelab"
+    owner: root
+    group: root
+    mode: '0440'
+    validate: /usr/sbin/visudo -cf %s
+    content: |
+      # Ansible bootstrap requires become for arbitrary host modules. This is
+      # intentionally root-equivalent: the deploy SSH key is the security
+      # boundary and must be protected by the operator's key store.
+      {{ deploy_user }} ALL=(ALL) NOPASSWD: ALL
+
+- name: Ensure SSH remains available while hardening is applied
+  ansible.builtin.systemd:
+    name: ssh
+    enabled: true
+    state: started
+
+- name: Create host directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+  loop:
+    - /etc/homelab
+    - /etc/homelab/secrets
+    - /opt/homelab
+    - /var/lib/homelab
+
+- name: Configure bounded journald retention
+  ansible.builtin.copy:
+    dest: /etc/systemd/journald.conf.d/60-homelab.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Journal]
+      SystemMaxUse=500M
+      RuntimeMaxUse=256M
+      MaxRetentionSec=14day
+  notify: Restart journald

@@ -1,0 +1,20 @@
+# Copy to terraform.tfvars outside Git, or export TF_VAR_* variables.
+# Never put API tokens or a private key in this file.
+
+proxmox_endpoint  = "https://192.168.10.11:8006/"
+proxmox_api_token = "pveadmin@pam!terraform=REPLACE_WITH_TOKEN_UUID"
+ssh_public_key    = "ssh-ed25519 AAAA... operator@example"
+
+node_name           = "pve1"
+datastore_id        = "vmpool"
+snippet_datastore_id = "local"
+vm_id               = 112
+vm_name             = "apps"
+management_ip       = "192.168.10.42/24"
+legacy_service_nic  = true
+final_management_ip = "192.168.10.101/24"
+
+# This is the official SHA512SUMS value for the pinned Debian image. If the
+# URL changes, update both values in the same reviewed change.
+debian_cloud_image_url      = "https://cloud.debian.org/images/cloud/trixie/20260826-2582/debian-13-genericcloud-amd64-20260826-2582.qcow2"
+debian_cloud_image_checksum = "184761b0dad0f9ace02f9298050ca96ce3caa39a461a47706d47ff9698b59933918b91b40177fbd4d392f6446af8b4d18ecb94caca988169b19641606bf34003"

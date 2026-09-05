@@ -1,0 +1,17 @@
+services:
+  gatus:
+    # Tags are review-only; pin this literal to a full digest before cutover.
+    image: twinproduction/gatus@sha256:8df964117ac6a78749ec8cd00039a499268156b874c3a110dc58de7e312c1ab5
+    env_file:
+      - path: "${SECRETS_DIR:?set SECRETS_DIR}/gatus.env"
+        format: raw
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
+    networks:
+      - frontend
+    security_opt:
+      - no-new-privileges:true
+networks:
+  frontend:
+    name: homelab_frontend
+    external: true

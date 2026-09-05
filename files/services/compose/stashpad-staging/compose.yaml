@@ -1,0 +1,20 @@
+services:
+  stashpad-staging:
+    # The staging workflow updates this literal to the edge tag's digest.
+    image: ghcr.io/koji-genba/stashpad@sha256:87c7f28bcb231f27e39138a45712d0363ed2400a6a5a586c9f42f5e99e87ad5e
+    environment:
+      STASHPAD_ADDR: ":8080"
+      STASHPAD_DATA_DIR: /data
+      STASHPAD_SCAN_ON_START: "true"
+      STASHPAD_LIBRARY_ROOTS: /media
+    volumes:
+      - "${STASHPAD_MEDIA_MOUNT_PATH:?set STASHPAD_MEDIA_MOUNT_PATH}:/media:ro"
+      - "${STASHPAD_STAGING_DATA_PATH:?set STASHPAD_STAGING_DATA_PATH}:/data"
+    networks:
+      frontend:
+        aliases: [stashpad-staging]
+
+networks:
+  frontend:
+    name: homelab_frontend
+    external: true

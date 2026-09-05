@@ -1,266 +1,86 @@
-# Homelab 
+# Homelab
 
+自宅サーバーの構成、アプリケーション、ネットワークを管理するためのIaCリポジトリです。
 
-自宅ラボ環境のKubernetesクラスタとインフラストラクチャのための、TerraformやKubespray、その他定義ファイル。
+現在は、同一物理ホスト上のKubernetes基盤を、Debian 13の単一Apps VMとDocker Composeへ移行中です。既存Kubernetesが本番サービスを提供しており、新構成はまだ実環境へ適用していません。
 
-## システム構成
+## 目標
 
-### ネットワークアーキテクチャ
+- Proxmoxインストール済みの状態から、リポジトリをcloneして復旧できる
+- 提供中の機能とFQDNを維持しつつ、機能追加と日常運用を単純化する
+- Terraform、Ansible、Compose、SOPS/ageの責務を明確に分ける
+- Gitに望ましい状態と設計理由を残し、手作業は切替確認など必要な箇所に限定する
+- NFS上の既存データを保護し、誤った空ディレクトリへの書き込みをfail closedにする
 
-```
-Management VLAN 10 (192.168.10.0/24)
-├── Proxmox VE Host: 192.168.10.11
-├── k8s-master01: 192.168.10.21
-├── k8s-worker01: 192.168.10.22
-├── k8s-worker02: 192.168.10.23
-├── tailscale-gateway: 192.168.10.30
-├── elastiflow: 192.168.10.40 (LXC, フロー分析)
-└── stashPadDev: 192.168.10.41 (stashPad開発VM)
+## 移行先の概要
 
-Service VLAN 11 (192.168.11.0/24)
-├── k8s-master01: 192.168.11.21
-├── k8s-worker01: 192.168.11.22
-├── k8s-worker02: 192.168.11.23
-└── MetalLB LoadBalancer Pool: 192.168.11.100-200
-    ├── Samba: 192.168.11.103 (TCP 445)
-    └── その他サービス用予約IPアドレス
-
-Kubernetes Internal Networks
-├── Pod Network (Flannel): 10.0.0.0/16
-└── Service Network: 10.1.0.0/16
+```text
+Proxmox VE 192.168.10.11
+└── Apps VM (Debian 13, フェーズ1: 192.168.10.42)
+    ├── Caddy                         192.168.11.100 (移行中)
+    ├── AdGuard Home                  192.168.11.101 (移行中)
+    ├── Samba                         192.168.11.103 (移行中)
+    ├── stashPad production/staging
+    ├── SillyTavern
+    └── Gatus + Healthchecks.io dead-man
 ```
 
-### Kubernetesサービスフロー
+最終的にはVLAN 10をServer、20をTrusted、30をIoT、40をGuestとして整理し、Apps VMを `192.168.10.101` に移します。VLAN 11と63は段階的に廃止します。
 
-```
-外部アクセス
-    ↓
-Tailscale VPN Gateway (192.168.10.30)
-    ↓
-MetalLB LoadBalancer (192.168.11.100-200)
-    ↓
-Nginx Ingress Controller (SSL終端)
-    ↓
-Kubernetes Services
-    ├── OpenLDAP (ldap://openldap.openldap.svc:389)
-    ├── Samba (smb://192.168.11.103:445)
-    ├── External DNS (dns://192.168.11.101:53)
-    └── その他アプリケーション
-```
+## まず読むもの
 
-### ストレージ構成
+- [目標アーキテクチャ](docs/architecture/target-state.md)
+- [現状監査](docs/architecture/current-state-audit.md)
+- [実機インベントリ（2026-08-30）](docs/architecture/live-inventory-2026-08-30.md)
+- [設計判断（ADR）](docs/adr/README.md)
+- [ネットワークゾーン仕様](docs/network/target-zones.md)
+- [KubernetesからComposeへの移行手順](docs/migration/k8s-to-compose.md)
+- [実装・適用状況](docs/migration/implementation-status.md)
+- [次セッションへの作業指示](docs/migration/next-session.md)
+- [Apps VM復旧手順](docs/operations/apps-vm-recovery.md)
+- [アプリ更新・promotion・rollback](docs/operations/application-lifecycle.md)
+- [NFS export契約と手動反映メモ](docs/operations/nfs-export.md)
 
-```
-NFS Server (192.168.10.11)
-├── /tank-gen2/data/k8s-volumes # 動的PV (NFS Provisioner)
-├── /tank-gen2/data/shared  # Samba共有ストレージ (4TB)
-└── /tank-gen1/data/archive # Sambaアーカイブストレージ (6TB)
-```
+設計を変更するときは、コードだけでなく該当ADRまたは運用手順も更新します。
 
-## 技術スタック
+## リポジトリ構成
 
-### Infrastructure Layer
-
-| コンポーネント | バージョン | 用途 |
-|---------------|-----------|------|
-| **Proxmox VE** | 8.x | ホスト仮想化プラットフォーム |
-| **Terraform** | >= 1.0 | Infrastructure as Code ([設定](files/infrastructure/terraform/k8s-cluster/providers.tf)) |
-| **Proxmox Provider** | ~> 0.81 | Proxmox API連携 |
-| **Kubespray** | Latest | Kubernetes自動構築（Ansible） |
-  
-### Kubernetes Platform
-
-| コンポーネント | バージョン | 用途 |
-|---------------|-----------|------|
-| **Kubernetes** | 1.31.x | コンテナオーケストレーション ([詳細設定](files/kubernetes/kubespray/inventory/mycluster/group_vars/k8s-cluster/k8s-cluster.yml)) |
-| **containerd** | 1.7.x | コンテナランタイム |
-| **Flannel** | Latest | Pod間ネットワーキング（CNI） |
-| **IPVS** | - | Kubernetesプロキシモード |
-
-### Infrastructure Services
-
-| サービス | Namespace | 用途 |
-|---------|-----------|------|
-| **MetalLB** | metallb-system | ベアメタルLoadBalancer（Layer 2） |
-| **Nginx Ingress** | ingress-nginx | HTTP/HTTPSルーティング |
-| **cert-manager** | cert-manager | Let's Encrypt証明書自動発行（Cloudflare DNS-01） ([マニフェスト](files/kubernetes/manifests/infrastructure/cert-manager/)) |
-| **External DNS** | external-dns | Unbound DNSサーバー + Hageziブロックリスト |
-| **NFS Provisioner** | default | 動的ストレージプロビジョニング |
-
-### Application Services
-
-| サービス | Namespace | 用途 | LoadBalancer IP |
-|---------|-----------|------|-----------------|
-| **OpenLDAP** | openldap | ディレクトリサービス（認証・認可） | LoadBalancer (LDAPS:636) |
-| **phpLDAPadmin** | openldap | LDAP管理WebUI | (ingress) |
-| **Samba** | samba | SMB3ファイル共有（LDAP統合） | 192.168.11.103 |
-
-### External Services
-
-| サービス | 用途 |
-|---------|------|
-| **Tailscale Gateway** | 外部ネットワークアクセス（サブネットルーター） |
-| **Cloudflare DNS** | DNS-01 Challenge用（cert-manager） |
-
-### Observability
-
-| サービス | 用途 |
-|---------|------|
-| **ElastiFlow** | ネットワークフロー分析（IX2215からのsFlowを収集・可視化、[詳細](files/infrastructure/terraform/elastiflow/README.md)） |
-| Elasticsearch + Kibana | ElastiFlowのバックエンド（単一ノード、LXC上にネイティブ構築） |
-
-## ディレクトリ構造
-
-```
-homelab/
-├── files/
-│   ├── infrastructure/
-│   │   ├── terraform/              # VM/LXCの定義
-│   │   │   ├── k8s-cluster/        # Kubernetesクラスタ用VM構築
-│   │   │   ├── tailscale-gateway/  # VPN Gateway用VM構築
-│   │   │   ├── elastiflow/         # ネットワークフロー分析用LXC構築
-│   │   │   └── stashpad-dev/       # stashPad開発用VM構築
-│   │   └── network/                # ネットワーク機器設定 (IX2215)
-│   └── kubernetes/
-│       ├── kubespray/              # Kubernetesクラスタ自動構築（Ansible）
-│       │   ├── ansible.cfg
-│       │   └── inventory/mycluster/
-│       └── manifests/              # Kubernetes Manifests
-│           ├── infrastructure/     # インフラ系
-│           │   ├── metallb/        # LoadBalancer (Layer 2)
-│           │   ├── ingress-nginx/  # Ingress Controller
-│           │   ├── cert-manager/   # TLS証明書管理
-│           │   ├── external-dns/   # イントラ向けDNSサーバー (Unbound)
-│           │   └── ldap/           # 認証基盤 (OpenLDAP + phpLDAPadmin)
-│           ├── storage/            # ストレージプロビジョニング
-│           │   └── nfs-provisioner/
-│           └── applications/       # アプリケーション
-│               ├── samba/          # ファイル共有 (LDAP統合)
-│               └── test-apps/      # テスト用アプリケーション
-└── README.md
+```text
+docs/
+├── adr/                         # 採用理由とトレードオフ
+├── architecture/                # 現状監査と目標構成
+├── migration/                   # 段階移行、切戻し、廃止条件
+├── network/                     # VLANゾーンと手動反映の期待状態
+└── operations/                  # 復旧手順
+files/
+├── infrastructure/
+│   ├── terraform/apps-vm/       # Apps VM
+│   ├── terraform/tailscale/     # Tailscale設定（移行作業中）
+│   ├── ansible/apps/            # OS、NFS、firewall、Compose lifecycle
+│   ├── network/                 # IX2215の設定と手動変更記録
+│   └── secrets/                 # SOPS暗号化済みruntime secrets
+├── services/
+│   ├── compose/                 # サービス単位のCompose project
+│   └── images/                  # カスタムイメージ
+└── kubernetes/                  # 移行完了までの現行定義
+scripts/                         # preflight、rollback、state backup/restore
 ```
 
-## 構築手順
+## 操作方針
 
-### 前提条件
+日常操作はルートの `Makefile` を入口にします。管理端末に要求するのは原則としてGit、Docker、Make、SSHだけで、TerraformやAnsibleなどはバージョン固定のtoolboxから実行します。
 
-- Proxmox VE環境（192.168.10.11）
-- NFSサーバー（192.168.10.11）
-- Cloudflare DNSアカウント（cert-manager用）
-- SSHキーペア（~/.ssh/k8s_ed25519）
+実環境の変更は次の境界を守ります。
 
-### 1. インフラストラクチャ構築
+- Terraformの `apply`、Ansibleの適用、Tailscale変更は手動実行
+- stagingのアプリケーション更新は自動反映、productionは明示的な昇格
+- legacy IPの取得は旧所有者を停止し、ARP重複がないことを確認した後だけ許可
+- Apps VMでage秘密鍵を保持しない。復号は管理端末で行い、runtime secretだけをroot専用領域へ転送する
+- Terraform stateはローカル管理し、同じリポジトリの `state-backup` branchへage暗号化した復旧コピーを保存する
+- NFS mountとmarkerの検証に失敗した場合はアプリケーションを起動しない
 
-#### 1.1 Kubernetes VM構築
+新構成を実機へ適用する前は、必ず移行runbookのPhase gateとpreflightを確認してください。
 
-TerraformでProxmox VE上にKubernetesクラスタ用のVMを構築します。
+## 現行Kubernetesについて
 
-詳細は [Terraform k8s-cluster README](files/infrastructure/terraform/k8s-cluster/README.md) を参照してください。
-
-**構築されるVM**:
-- k8s-master01: 192.168.10.21, 192.168.11.21 (2 cores, 6GB RAM, 50GB disk)
-- k8s-worker01: 192.168.10.22, 192.168.11.22 (4 cores, 8GB RAM, 40GB disk)
-- k8s-worker02: 192.168.10.23, 192.168.11.23 (4 cores, 8GB RAM, 40GB disk)
-
-#### 1.2 Tailscale Gateway構築（オプション）
-
-外部からホームラボへのセキュアなアクセスを提供するVPN Gatewayを構築します。
-
-詳細は [Terraform tailscale-gateway README](files/infrastructure/terraform/tailscale-gateway/README.md) を参照してください。
-
-#### 1.3 stashPadDev VM構築（オプション）
-
-stashPad開発用の単体VMを構築します。
-
-詳細は [Terraform stashpad-dev README](files/infrastructure/terraform/stashpad-dev/README.md) を参照してください。
-
-**構築されるVM**:
-- stashPadDev: 192.168.10.41 (8 cores, 16GB RAM, 30GB disk)
-
-### 2. Kubernetesクラスタ構築
-
-Kubespray（Ansible）でKubernetesクラスタを自動構築します。
-
-詳細は [Kubespray README](files/kubernetes/kubespray/README.md) を参照してください。
-
-**クラスタ構成**:
-- Kubernetes 1.31.x
-- containerd 1.7.x
-- Flannel CNI (Pod CIDR: 10.0.0.0/16)
-- IPVS proxy mode (MetalLB対応)
-
-### 3. 基盤サービスデプロイ
-
-#### 3.1 MetalLB（LoadBalancer）
-
-ベアメタル環境でLoadBalancerタイプのServiceを使用可能にします。
-
-詳細は [MetalLB README](files/kubernetes/manifests/infrastructure/metallb/README.md) を参照してください。
-
-#### 3.2 Ingress NGINX
-
-HTTP/HTTPSトラフィックのルーティングとSSL終端を提供します。
-
-詳細は [Ingress NGINX README](files/kubernetes/manifests/infrastructure/ingress-nginx/README.md) を参照してください。
-
-#### 3.3 cert-manager
-
-Let's Encrypt証明書の自動発行・更新を行います。
-
-詳細手順は [setup-instructions.md](files/kubernetes/manifests/infrastructure/cert-manager/setup-instructions.md) を参照してください。
-
-#### 3.4 External DNS
-
-イントラネット向けDNSサーバー（Unbound）とHageziブロックリストを提供します。
-
-詳細は [External DNS README](files/kubernetes/manifests/infrastructure/external-dns/README.md) を参照してください。
-
-**機能**:
-- Unbound DNSサーバー
-- Hageziブロックリスト
-- カスタムDNSゾーン対応
-
-### 4. ストレージ構成
-
-NFSサーバーを使用した動的PersistentVolumeプロビジョニングを提供します。
-
-詳細は [NFS Provisioner README](files/kubernetes/manifests/storage/nfs-provisioner/README.md) を参照してください。
-
-**設定**:
-- NFS Server: 192.168.10.11
-- Export Path: /tank-gen2/data/k8s-volumes
-- StorageClass: nfs-k8s-volumes (default)
-- Reclaim Policy: Retain
-
-### 5. アプリケーション
-
-#### 5.1 OpenLDAP（Identity Management）
-
-LDAP認証基盤を提供します。
-
-詳細は [ldap/README.md](files/kubernetes/manifests/infrastructure/ldap/README.md) を参照してください。
-
-#### 5.2 Samba
-
-OpenLDAP統合のSMB3ファイル共有サービスを提供します。
-
-詳細は [samba/README.md](files/kubernetes/manifests/applications/samba/README.md) を参照してください。
-
-**共有設定**:
-- [shared]: NFS: 192.168.10.11:/tank-gen2/data/shared
-- [archive]: NFS: 192.168.10.11:/tank-gen1/data/archive
-- 認証: OpenLDAP ldapsam backend
-- アクセス: samba-users グループメンバー
-
-### 6. Observability（オプション）
-
-#### 6.1 ElastiFlow構築
-
-IX2215からのsFlowを収集し、Elasticsearch + Kibanaでネットワークトラフィックを可視化します。DockerではなくネイティブパッケージでLXCコンテナ上に構築します。
-
-詳細は [elastiflow/README.md](files/infrastructure/terraform/elastiflow/README.md) を参照してください。
-
-**構成**:
-
-- elastiflow: 192.168.10.40（管理VLAN10、LXC）
-- IX2215側のsFlow設定は [network/README.md](files/infrastructure/network/README.md) を参照
+`files/kubernetes/` と `files/infrastructure/terraform/k8s-cluster/` は移行完了まで本番の参照元として残します。Apps VMの再構築試験に合格し、14日間の安定稼働を確認するまでは削除しません。`stashPadDev` は作業用VMのため今回の移行対象外です。

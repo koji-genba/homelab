@@ -1,0 +1,36 @@
+#!/bin/sh
+set -eu
+
+interface={{ legacy_service_interface_name | quote }}
+addresses="{% for address in legacy_service_addresses %}{{ address }}{% if not loop.last %} {% endif %}{% endfor %}"
+
+start() {
+  ip link set dev "$interface" up
+  missing=""
+  for address in $addresses; do
+    if ip -4 addr show dev "$interface" | grep -Fq "inet $address "; then
+      continue
+    fi
+    # Duplicate-address detection happens immediately before assignment. This
+    # never adds the address while probing.
+    arping -D -I "$interface" -c 2 -w 3 "${address%/*}"
+    missing="$missing $address"
+  done
+  # Only add after every missing address has passed duplicate detection. This
+  # avoids leaving a partially attached legacy service set on failure.
+  for address in $missing; do
+    ip addr add "$address" dev "$interface"
+  done
+}
+
+stop() {
+  for address in $addresses; do
+    ip addr del "$address" dev "$interface" 2>/dev/null || true
+  done
+}
+
+case "${1:-}" in
+  start) start ;;
+  stop) stop ;;
+  *) echo "usage: $0 {start|stop}" >&2; exit 2 ;;
+esac

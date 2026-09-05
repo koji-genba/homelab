@@ -1,0 +1,91 @@
+web:
+  port: 8080
+alerting:
+  discord:
+    webhook-url: ${DISCORD_WEBHOOK_URL}
+    default-alert:
+      enabled: true
+      failure-threshold: 3
+      success-threshold: 2
+      send-on-resolved: true
+endpoints:
+  - name: Caddy
+    group: edge
+    url: http://caddy:80
+    conditions:
+      - "[STATUS] == any(200, 308, 404)"
+    alerts:
+      - type: discord
+  - name: AdGuard Home
+    group: edge
+    url: http://adguard:3000/
+    conditions:
+      - "[STATUS] == any(200, 302)"
+    alerts:
+      - type: discord
+  - name: stashPad production
+    group: applications
+    url: http://stashpad-prod:8080/
+    conditions:
+      - "[STATUS] == 200"
+    alerts:
+      - type: discord
+  - name: stashPad staging
+    group: applications
+    url: http://stashpad-staging:8080/
+    conditions:
+      - "[STATUS] == 200"
+    alerts:
+      - type: discord
+  - name: SillyTavern
+    group: applications
+    url: http://sillytavern:8000/
+    conditions:
+      - "[STATUS] == any(200, 401)"
+    alerts:
+      - type: discord
+  - name: Samba
+    group: storage
+    url: tcp://samba:445
+    conditions:
+      - "[CONNECTED] == true"
+    alerts:
+      - type: discord
+  - name: Internal DNS record
+    group: dns
+    url: adguard
+    dns:
+      query-name: dns.kojigenba-srv.com
+      query-type: A
+    conditions:
+      - "[DNS_RCODE] == NOERROR"
+    alerts:
+      - type: discord
+  - name: DNS allowlist probe
+    group: dns
+    url: adguard
+    dns:
+      query-name: t.co
+      query-type: A
+    conditions:
+      - "[DNS_RCODE] == NOERROR"
+    alerts:
+      - type: discord
+  - name: DNS blocklist probe
+    group: dns
+    url: adguard
+    dns:
+      query-name: gatus-blocked.invalid
+      query-type: A
+    conditions:
+      - "[DNS_RCODE] == NXDOMAIN"
+    alerts:
+      - type: discord
+  - name: Public TLS certificate
+    group: edge
+    url: https://dns.kojigenba-srv.com
+    conditions:
+      - "[STATUS] == any(200, 302, 403)"
+      - "[CERTIFICATE_EXPIRATION] > 240h"
+    alerts:
+      - type: discord

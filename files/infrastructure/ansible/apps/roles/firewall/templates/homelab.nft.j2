@@ -1,0 +1,41 @@
+{% set effective_trusted_networks = trusted_networks %}
+{% if network_migration_complete | default(false) | bool %}
+{% set effective_trusted_networks = trusted_networks | reject('equalto', '192.168.11.0/24') | list %}
+{% endif %}
+define trusted_networks = {
+{% for network in effective_trusted_networks %}
+  {{ network }}{% if not loop.last %},{% endif %}
+{% endfor %}
+}
+
+table inet homelab_filter {
+  chain input {
+    type filter hook input priority 0; policy drop;
+
+    iifname "lo" accept
+    ct state established,related accept
+    ct state invalid drop
+
+    # Docker bridge traffic is handled by Docker's own chains; do not blanket
+    # allow a container to reach host services here.
+    iifname "tailscale0" tcp dport { 22, 80, 443, 445, 53 } accept
+    iifname "tailscale0" udp dport 53 accept
+
+    ip saddr $trusted_networks tcp dport { 22, 80, 443, 445, 53 } accept
+    ip saddr $trusted_networks udp dport 53 accept
+  }
+
+  chain forward {
+    # Docker owns its own filter/nat chains. This chain is an independent
+    # early guard and never flushes or replaces Docker's rules.
+    type filter hook forward priority -100; policy accept;
+    ct state established,related accept
+    ct status dnat ip saddr != $trusted_networks drop
+  }
+
+  chain output {
+    # Egress is intentionally permitted; applications still only receive
+    # runtime credentials from /etc/homelab/secrets. Host input is default-drop.
+    type filter hook output priority 0; policy accept;
+  }
+}
