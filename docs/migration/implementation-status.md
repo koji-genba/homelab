@@ -13,7 +13,9 @@
 Apps VMが唯一のwriterとなり、Caddy/AdGuard Home/Samba/stashPad prod・staging/SillyTavern/Gatusの
 7 Compose projectが稼働している。旧KubernetesはVMを起動したまま残しているが、Flux Kustomization 4件の
 suspend、Deployment 6件のreplicas=0、MetalLB speakerの停止、3 ServiceのClusterIP化によりwriterではない。
-IX2215はVLAN 11のDHCP bindingを解除したが`write memory`は未実行、Tailscaleはlive ACLのexport・reviewは
+IX2215はVLAN 11のDHCP bindingを解除して`write memory`で保存済み、さらに2026-09-05にBVI11を
+`192.168.11.1/25`から`/24`へ修正し、ACL 3本（`server_app-out`、`default-out`、`guest-out`）の
+`/25`表記を`/24`へ更新して`write memory`で保存済みである。Tailscaleはlive ACLのexport・reviewは
 済んだがTerraformへのimportは済んでおらず`manage_tailnet=false`を維持、ECW5211とVLAN 10/20/30/40への
 再編（Phase 4）は未着手である。NFS serverのexport設定と既存dataはmount guard用marker追加以外変更していない。
 ProxmoxのTerraform認証、SOPS/age、Discord webhook、Healthchecks.io checkは準備済みで、2026-09-05に
@@ -138,9 +140,12 @@ application cutoverの受入試験を完了した（詳細は「今後の残作�
   inventoryの宣言値`kube_proxy_strict_arp: true`とdriftしており、MetalLB speakerを停止しても
   nodeが`kube-ipvs0`経由でLoadBalancer IPへのARPを返し続けたため、service IP解放にはServiceの
   ClusterIP化が別途必要だった
-- IX2215のBVI11は`192.168.11.1/25`（期待値`/24`との不一致は既知でPhase 4修正対象）で、
-  `server_app-dhcp`のDHCP leaseは実測で0件だった。影響を受けるclientがないことを確認した上で
-  `interface BVI11`の`ip dhcp binding server_app-dhcp`を解除した（`write memory`は未実行）
+- IX2215のBVI11は`192.168.11.1/25`で、`server_app-dhcp`のDHCP leaseは実測で0件だった
+  （Phase 2A調査時点の観測値。歴史的記録として残す）。影響を受けるclientがないことを確認した上で
+  `interface BVI11`の`ip dhcp binding server_app-dhcp`を解除した。2026-09-05にユーザーが
+  `write memory`を実行し、解除後のrunning-configをstartup-configへ保存済みである。同日、
+  BVI11の`ip address`を`/25`から`/24`へ修正済みである（詳細は後述の
+  「IX2215構成ドリフトの解消（2026-09-05）」）
 
 ## フェーズ1 apply・受入確認済み
 
@@ -210,6 +215,41 @@ mainへmergeし、Apps VMへ反映した。Gatus containerは手動force-recreat
 runtime入力に差分がなかったため全Compose projectの再作成は発生しなかった。PR #22の文書更新も
 mainへmergeし、Apps VMのcheckoutは`origin/main` `e272c75`と一致している。
 
+## IX2215構成ドリフトの解消（2026-09-05）
+
+2026-09-05にユーザーがIX2215のCLIで次を実施し、`write memory`まで完了した。
+
+1. `interface BVI11`の`ip address`を`192.168.11.1/25`から`/24`へ変更した。新しい`ip address`の
+   投入で上書きされ、`no ip address`は不要だった。`show ip route`で
+   `C 192.168.11.0/24 ... BVI11`を確認した。
+2. ACL 3本の`192.168.11.0/25`を`/24`へ更新した。`server_app-out`（srcの5エントリ）、
+   `default-out`（destの1エントリ）、`guest-out`（destの1エントリ）。`iot-out`、`main-out`、
+   `server-out`は元から`/24`で無変更だった。
+3. **IX2215のACLは投入順に末尾追加され、エントリ単位のシーケンス番号や途中挿入の構文がない。**
+   そのため個別エントリを`no`で消して再投入すると、末尾の`permit ip src any dest any`の後ろに
+   回り、永久に評価されなくなる。実際に`default-out`と`guest-out`でこれが発生し、VLAN 63 →
+   VLAN 11とGuest VLAN 40 → VLAN 11のdenyが一時的に無効化された。変更前は`/25`のdenyが
+   `permit any`より前にあって有効だったため、**一時的にcutover前より弱い状態を作った**。
+4. 復旧方法（`server_app-out`では最初からこの方法を用いた）は次の順序である。インターフェースから
+   `ip filter`のバインドを外す → `no ip access-list <名前>`でリストごと削除する →
+   `option optimize`を先頭に、正しい順序で全エントリを再投入する → `ip filter`を再バインドする。
+   フィルタを先に外すのは、空または未定義のACLを`ip filter`が参照した場合の挙動をNEC公式資料で
+   確認できなかったため、無フィルタ＝素通りという既知の状態に倒して通信断を避ける意図である。
+5. 事後確認として、BVI63に`ip filter default-out 10 in`、BVI40に`ip filter guest-out 10 in`が
+   戻っていることと、Guest VLAN 40の端末から`192.168.11.100`へ到達できないことをユーザーが
+   実測した。そのうえで`write memory`を実行した。
+6. 実機のソフトウェアバージョンは**10.11.6**（`Compiled May 22-Thu-2025`）であり、記録上の
+   10.7.18とドリフトしていた。`config.txt`と`README.md`を10.11.6へ更新済みである。
+7. 実機にある`system interfaces bvi 64`が記録に無かったため`config.txt`へ追加した。`sflow`の
+   2行は実機にも存在し、記録上の位置だけがずれていたので実機の順序へ移動した。
+8. 実機から取得できた範囲（running-configの先頭から`sflow collector`まで、`!`の区切り行を
+   除く73行）は`config.txt`と完全一致することを確認した。dhcp profile、class-map/policy-map、
+   BVI11/BVI40/BVI63以外のインターフェース定義は未照合のまま残る。
+9. `interface BVI11`の`ip dhcp binding server_app-dhcp`は解除済みのまま（今回変更していない）。
+   `ip dhcp profile server_app-dhcp`の定義自体は残してある。
+10. BVI11が`/24`になったことで、MetalLB pool（`.100-.200`）が`/25`を超えているという既知の
+    不整合は解消した。
+
 ## 今後の残作業
 
 ### 受入試験の残項目
@@ -240,7 +280,7 @@ Apps VM/PVEのLAN IP直指定で実施した。
 
 ### 受入試験の合格後
 
-- [ ] IX2215で`write memory`を実行し、DHCP binding解除を保存する
+- [x] IX2215で`write memory`を実行し、DHCP binding解除を保存する（2026-09-05、ユーザー実行）
 - [ ] Kubernetes VMを停止する（削除はしない。安定を確認してからでよい）
 
 ### Phase 3: 再構築性の証明
@@ -253,11 +293,11 @@ Kubernetes VMの14日保持期間を開始する前に実施する。手順は
 
 別のmaintenance windowで実施し、application cutoverへ混ぜない。含まれるのは次である。
 
-- BVI11の`/25`→`/24`修正と、それに伴うACL（`server_app-out`）の更新
-- `files/infrastructure/network/README.md`と`config.txt`の反映（ユーザー管理。本作業では触っていない）
+- `files/infrastructure/network/README.md`と`config.txt`の反映（ユーザー管理）。BVI11の`/24`化と
+  実機バージョン整合は2026-09-05に反映済みのため、Phase 4で残るのはVLAN 10/20/30/40再編に伴う
+  変更に限る
 - Tailscale live ACLのTerraform import、global nameserverの`192.168.10.101`への変更
 - VLAN 10/20/30/40への再編、ECW5211の設定、Apps VMの`192.168.10.101`への集約
-- MetalLB pool（`.100-.200`）が`/25`を超えている不整合の解消（MetalLB廃止で自然に解消）
 
 ### Phase 5: 廃止
 
@@ -274,6 +314,6 @@ Phase 3の再構築性試験（Apps VMをTerraform/Ansible/Gitから実際に削
 Unboundの復旧を、新旧を同時にwriterにしないことを最優先して行う。手順の詳細は
 [next-session.mdのrollback手順](next-session.md)を参照。
 
-VLAN 10/20/30/40への再編（Phase 4）は別maintenance windowで実施する。BVI11の`/25`→`/24`修正、
+VLAN 10/20/30/40への再編（Phase 4）は別maintenance windowで実施する。
 Tailscale live ACLのimport、Apps VMの最終`.10.101`への統合、ECW5211の設定はいずれも未着手であり、
 現時点では期待状態と手順のみがGit管理されている。

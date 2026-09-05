@@ -110,7 +110,8 @@
 
 - 管理端末のTailscaleは、Apps VM停止中にtailnet DNSへ依存しないようユーザーが切断済み。
   作業はApps VM `192.168.10.42`とPVE `192.168.10.11`へのLAN直指定で実施した。
-- IX2215のBVI11は`192.168.11.1/25`。**この`/25`は誤りで、期待値は`/24`である。修正はPhase 4で行う。**
+- IX2215のBVI11は`192.168.11.1/24`。2026-09-05にユーザーが`/25`から`/24`へ修正し、
+  `write memory`でstartup-configへ保存済みである。
 - `interface BVI11`の`ip dhcp binding server_app-dhcp`を解除済み。2026-09-05にユーザーが
   `write memory`を実行し、解除後のrunning-configをstartup-configへ保存した。
 - VLAN 11のDHCP leaseは解除前から0件で、影響を受けるclientはない。
@@ -160,31 +161,47 @@ stashPad prod/stagingの`200`、SillyTavernの`401`、SMB 445の到達性、imag
 - [x] Gatusが障害と復旧をDiscordへ通知する（2026-09-05、Caddy/Public TLS certificateの障害・resolved通知をDiscordで受信確認）
 - [x] Healthchecks.ioがdead-man停止を通知する（2026-09-05、DOWN/UP通知をDiscordで受信確認）
 
-### 2. IX2215構成ドリフトの解消（次作業）
+### 2. IX2215構成ドリフトの解消（完了）
 
-IX2215で`write memory`を実行し、DHCP binding解除をstartup-configへ保存済みである
-（2026-09-05、ユーザー実行確認）。この結果、現状は次の3状態に分かれている。
+2026-09-05にユーザーがIX2215のCLIで次を実施し、`write memory`まで完了した。
 
-| 対象 | BVI11 | `server_app-dhcp` binding | 位置付け |
-| --- | --- | --- | --- |
-| Git HEAD | `/25` | あり | cutover前の旧状態 |
-| 未commitのworktree | `/24` | あり | Phase 4の将来期待値 |
-| IX2215 running/startup-config | `/25` | なし | 現在の実機状態 |
+1. `interface BVI11`の`ip address`を`192.168.11.1/25`から`/24`へ変更した。新しい`ip address`の
+   投入で上書きされ、`no ip address`は不要だった。`show ip route`で
+   `C 192.168.11.0/24 ... BVI11`を確認した。
+2. ACL 3本の`192.168.11.0/25`を`/24`へ更新した。`server_app-out`（srcの5エントリ）、
+   `default-out`（destの1エントリ）、`guest-out`（destの1エントリ）。`iot-out`、`main-out`、
+   `server-out`は元から`/24`で無変更だった。
+3. 事後確認として、BVI63に`ip filter default-out 10 in`、BVI40に`ip filter guest-out 10 in`が
+   戻っていることと、Guest VLAN 40の端末から`192.168.11.100`へ到達できないことを実測した。
+   そのうえで`write memory`を実行し、running-configをstartup-configへ保存した。
+4. あわせてrunning-configをソフトウェアバージョン10.11.6（`Compiled May 22-Thu-2025`）と照合し、
+   `config.txt`・`README.md`を記録上の10.7.18から更新した。実機にある`system interfaces bvi 64`を
+   `config.txt`へ追加し、`sflow`設定2行は実機にも存在したため記録上の位置を実機の順序へ移動した。
+   実機から取得できた範囲（running-configの先頭から`sflow collector`まで、`!`区切り行を除く73行）は
+   `config.txt`と完全一致することを確認済みである。dhcp profile、class-map/policy-map、
+   BVI11/BVI40/BVI63以外のインターフェース定義は未照合のまま残る。
 
-このドリフトを解消するまで、`files/infrastructure/network/config.txt`をIX2215へ投入せず、
-Kubernetes VMの停止にも進まない。次の順序で整理する。
+**再発防止のため、IX2215のACL編集手順として次を必ず守ること。**
 
-1. IX2215のrunning-configとstartup-configをexportし、両者が一致することを確認する。
-2. `files/infrastructure/network/README.md`と`config.txt`にある既存の未commit `/24`変更を、
-   Phase 4用の別ファイルまたはpatchとして失わない形で退避する。
-3. 現行構成を表すファイルを、実機どおりBVI11 `/25`かつbindingなしへ更新する。
-   Phase 4まで `/24`化やDHCP bindingの再投入をIX2215へapplyしない。
-4. `docs/migration/implementation-status.md`に残る`write memory`未実行の記述を更新する。
-5. diffで実機・現行構成・Phase 4期待値の境界を確認し、関係するファイルだけをcommitする。
+IX2215のACLは投入順に末尾追加され、エントリ単位のシーケンス番号や途中挿入の構文がない。
+そのため個別エントリを`no`で消して再投入すると、末尾の`permit ip src any dest any`の後ろに
+回り、永久に評価されなくなる。今回の作業でも`default-out`と`guest-out`でこれが発生し、
+VLAN 63 → VLAN 11とGuest VLAN 40 → VLAN 11のdenyが一時的に無効化された。変更前は`/25`のdenyが
+`permit any`より前にあって有効だったため、一時的にcutover前より弱い状態を作ってしまった
+（`server_app-out`は最初から下記の正しい手順で投入したため影響なし）。ACLエントリを書き換える
+際は必ず次の順序で行う。
+
+1. 対象インターフェースから`ip filter`のバインドを外す。
+2. `no ip access-list <名前>`でリストごと削除する。
+3. `option optimize`を先頭に、正しい順序で全エントリを再投入する。
+4. `ip filter`を再バインドする。
+
+フィルタを先に外すのは、空または未定義のACLを`ip filter`が参照した場合の挙動をNEC公式資料で
+確認できなかったため、無フィルタ＝素通りという既知の状態に倒して通信断を避ける意図である。
 
 ### 3. Kubernetes VMの停止
 
-- [ ] 上記のIX2215構成ドリフトを解消する
+- [x] 上記のIX2215構成ドリフトを解消する（2026-09-05）
 - [ ] Kubernetes VMを停止する（削除はしない）。停止後にApps側の安定を再確認する
 
 ### 4. Phase 3: 再構築性の証明
@@ -198,11 +215,11 @@ Kubernetes VMの14日保持期間を開始する前に実施する。手順は
 
 別のmaintenance windowで実施する。application cutoverへ混ぜない。含まれるのは次である。
 
-- BVI11の`/25`→`/24`修正と、それに伴うACL（`server_app-out`）の更新
-- `files/infrastructure/network/README.md`と`config.txt`の反映（ユーザー管理。勝手に触らない）
+- `files/infrastructure/network/README.md`と`config.txt`の反映（ユーザー管理。勝手に触らない）。
+  BVI11の`/24`化と実機バージョン整合は2026-09-05に反映済みのため、Phase 4で残るのは
+  VLAN 10/20/30/40再編に伴う変更に限る
 - Tailscale live ACLのexport、Terraform import、global nameserverの`192.168.10.101`への変更
 - VLAN 10/20/30/40への再編、ECW5211の設定、Apps VMの`192.168.10.101`への集約
-- MetalLB pool（`.100-.200`）が`/25`を超えている不整合の解消（MetalLBごと廃止で自然に消える）
 
 ### 6. Phase 5: 廃止
 
@@ -229,7 +246,9 @@ Kubernetes VMの14日保持期間を開始する前に実施する。手順は
    `/mnt/tank-gen2/data/k8s-volumes/external-dns-blocklist-data-pvc-8e7db6e1-.../rpz/hagezi-tif.txt`
    を退避すること。
 9. Flux Kustomization 4件をresumeする。
-10. IX2215で`interface BVI11`に`ip dhcp binding server_app-dhcp`を再投入する。
+10. IX2215で`interface BVI11`に`ip dhcp binding server_app-dhcp`を再投入する。BVI11のprefixは
+    `/24`のままでよい。rollbackで復帰する`.11.100`/`.11.101`/`.11.103`はいずれも旧`/25`の範囲内に
+    あり、`/24`のままでも到達性に影響しないためである。
 11. 現行FQDNから旧serviceが正常なことを確認する。
 
 `make rollback-app`が成功した場合は、自動reconcileが停止したまま
@@ -252,14 +271,17 @@ Kubernetes VMの14日保持期間を開始する前に実施する。手順は
 - `files/infrastructure/network/README.md`
 - `files/infrastructure/network/config.txt`
 
-上記2ファイルには、この移行作業開始前からのユーザー変更（VLAN 11を`/25`から`/24`へ改める期待値）が
-ある。明示依頼なしに編集、破棄、整形、stage、commitしない。選択的にstageし、commit前に
+上記2ファイルにあった、この移行作業開始前からのユーザー変更（VLAN 11を`/25`から`/24`へ改める
+期待値）は、2026-09-05にユーザーの明示的な承認のもとで実機へ適用したうえでcommit済みであり、
+未commitの変更はもう残っていない。ただし両ファイルは引き続きユーザー管理であり、明示依頼なしに
+編集、破棄、整形、stage、commitしない。選択的にstageし、commit前に
 `git diff --cached --name-only`で対象を確認する。
 
 次も現時点では行わない。
 
 - Kubernetes VM、PVC、NFS data、ZFS dataset、cutover snapshotの削除
-- IX2215、ECW5211、VLAN、DHCPの追加変更（`write memory`と承認済みwindowを除く）
+- IX2215、ECW5211、VLAN、DHCPの追加変更（2026-09-05に承認済みwindowで実施したBVI11 prefix変更・
+  ACL更新と、`write memory`を除く）
 - `vmbr0.11`の修正・削除
 - Tailscale DNS/ACL/routeのapply
 - `stashPadDev`（VMID 111）の変更

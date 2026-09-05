@@ -1,9 +1,11 @@
 !
 !
 ! NEC Portable Internetwork Core Operating System Software
-! IX Series IX2215 (magellan-sec) Software, Version 10.7.18, RELEASE SOFTWARE
-! Compiled Oct 25-Tue-2022 12:37:13 JST #2
-! Current time Jul 26-Sat-2025 19:30:00 JST
+! IX Series IX2215 (magellan-sec) Software, Version 10.11.6, RELEASE SOFTWARE
+! Compiled May 22-Thu-2025 14:55:23 JST #2
+! Current time Sep 05-Sat-2026 22:29:31 JST
+!
+system interfaces bvi 64
 !
 hostname IX2215-HOME
 timezone +09 00
@@ -27,18 +29,16 @@ ip ufs-cache max-entries 20000
 ip ufs-cache enable
 ip route default GigaEthernet0.0
 ip dhcp enable
-sflow agent ip 192.168.10.1
-sflow collector ip 192.168.10.40
 ip access-list default-out option optimize
 ip access-list default-out deny ip src 192.168.63.0/24 dest 192.168.10.0/24
-ip access-list default-out deny ip src 192.168.63.0/24 dest 192.168.11.0/25
+ip access-list default-out deny ip src 192.168.63.0/24 dest 192.168.11.0/24
 ip access-list default-out deny ip src 192.168.63.0/24 dest 192.168.20.0/24
 ip access-list default-out deny ip src 192.168.63.0/24 dest 192.168.30.0/24
 ip access-list default-out deny ip src 192.168.63.0/24 dest 192.168.40.0/24
 ip access-list default-out permit ip src any dest any
 ip access-list guest-out option optimize
 ip access-list guest-out deny ip src 192.168.40.0/24 dest 192.168.10.0/24
-ip access-list guest-out deny ip src 192.168.40.0/24 dest 192.168.11.0/25
+ip access-list guest-out deny ip src 192.168.40.0/24 dest 192.168.11.0/24
 ip access-list guest-out deny ip src 192.168.40.0/24 dest 192.168.20.0/24
 ip access-list guest-out deny ip src 192.168.40.0/24 dest 192.168.30.0/24
 ip access-list guest-out deny ip src 192.168.40.0/24 dest 192.168.63.0/24
@@ -66,11 +66,11 @@ ip access-list server-out deny ip src 192.168.10.0/24 dest 192.168.40.0/24
 ip access-list server-out deny ip src 192.168.10.0/24 dest 192.168.63.0/24
 ip access-list server-out permit ip src any dest any
 ip access-list server_app-out option optimize
-ip access-list server_app-out permit ip src 192.168.11.0/25 dest 192.168.10.0/24
-ip access-list server_app-out permit ip src 192.168.11.0/25 dest 192.168.20.0/24
-ip access-list server_app-out deny ip src 192.168.11.0/25 dest 192.168.30.0/24
-ip access-list server_app-out deny ip src 192.168.11.0/25 dest 192.168.40.0/24
-ip access-list server_app-out deny ip src 192.168.11.0/25 dest 192.168.63.0/24
+ip access-list server_app-out permit ip src 192.168.11.0/24 dest 192.168.10.0/24
+ip access-list server_app-out permit ip src 192.168.11.0/24 dest 192.168.20.0/24
+ip access-list server_app-out deny ip src 192.168.11.0/24 dest 192.168.30.0/24
+ip access-list server_app-out deny ip src 192.168.11.0/24 dest 192.168.40.0/24
+ip access-list server_app-out deny ip src 192.168.11.0/24 dest 192.168.63.0/24
 ip access-list server_app-out permit ip src any dest any
 !
 !
@@ -91,6 +91,10 @@ ssh-server ip enable
 http-server authentication-method digest
 http-server username admin secret-password (HASH)
 http-server ip enable
+!
+!
+sflow agent ip 192.168.10.1
+sflow collector ip 192.168.10.40
 !
 !
 !
@@ -318,8 +322,7 @@ interface BVI10
 !
 ! vlan11の仮想インターフェース設定
 interface BVI11
-  ip address 192.168.11.1/25
-  ip dhcp binding server_app-dhcp
+  ip address 192.168.11.1/24
   ip filter server_app-out 10 in
   ip ufs-cache timeout tcp 300
   ip ufs-cache timeout udp 1800
