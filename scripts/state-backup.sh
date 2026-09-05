@@ -37,10 +37,37 @@ trap cleanup EXIT INT TERM
 git -C "$repo_root" fetch --no-tags origin state-backup:refs/remotes/origin/state-backup >/dev/null 2>&1 || true
 git -C "$repo_root" worktree add --detach "$worktree" HEAD >/dev/null
 
-if git -C "$repo_root" show-ref --verify --quiet refs/heads/state-backup; then
-  git -C "$worktree" checkout -B state-backup state-backup >/dev/null
-elif git -C "$repo_root" show-ref --verify --quiet refs/remotes/origin/state-backup; then
-  git -C "$worktree" checkout -B state-backup origin/state-backup >/dev/null
+local_ref=refs/heads/state-backup
+remote_ref=refs/remotes/origin/state-backup
+if git -C "$repo_root" show-ref --verify --quiet "$local_ref"; then
+  local_exists=1
+else
+  local_exists=0
+fi
+if git -C "$repo_root" show-ref --verify --quiet "$remote_ref"; then
+  remote_exists=1
+else
+  remote_exists=0
+fi
+
+if test "$local_exists" -eq 1 && test "$remote_exists" -eq 1; then
+  # Keep an existing local commit when it is ahead of the fetched remote, but
+  # move a stale local branch to the fetched remote when the remote is ahead.
+  # A diverged branch is never silently overwritten: an operator must resolve
+  # it explicitly before another encrypted backup can be produced.
+  if git -C "$repo_root" merge-base --is-ancestor "$local_ref" "$remote_ref"; then
+    backup_base=$remote_ref
+  elif git -C "$repo_root" merge-base --is-ancestor "$remote_ref" "$local_ref"; then
+    backup_base=$local_ref
+  else
+    echo "refusing diverged state-backup branches; resolve $local_ref and $remote_ref explicitly" >&2
+    exit 1
+  fi
+  git -C "$worktree" checkout -B state-backup "$backup_base" >/dev/null
+elif test "$local_exists" -eq 1; then
+  git -C "$worktree" checkout -B state-backup "$local_ref" >/dev/null
+elif test "$remote_exists" -eq 1; then
+  git -C "$worktree" checkout -B state-backup "$remote_ref" >/dev/null
 else
   git -C "$worktree" checkout --orphan state-backup >/dev/null
   git -C "$worktree" rm -rf . >/dev/null 2>&1 || true

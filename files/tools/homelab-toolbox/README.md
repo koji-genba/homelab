@@ -30,6 +30,9 @@ push URL、SSH agent socket、mode `0600`のlocal state、平文state scanを検
 
 `state-backup`はmodeが異なる既存stateを拒否し、暗黙に修復しない。toolbox内では暗号化、復号確認、
 `state-backup` branchのlocal commitまでを行い、Terraform操作成功後のpushはhost Gitから実行する。
+実行時はremote-trackingの`origin/state-backup`とlocal branchの履歴を同期確認する。remoteがlocalの先祖なら
+localの先行commitを保持し、localがremoteの先祖ならremoteへ追随する。両者が分岐している場合は既存commitを
+破棄せずfail closedするため、手動で履歴を解決してから再実行する。
 任意host UIDを`/etc/passwd`へ追加しないtoolbox内のOpenSSHへpushを任せないためである。
 `make state-backup-preflight`はtoolbox内のage roundtripと平文state scanに加え、host側でSSH pushの
 dry-runを行う。SSH origin（またはSSH `pushurl`）とhost SSH agentをcredential境界として使い、hostの
