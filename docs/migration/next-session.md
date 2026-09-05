@@ -81,8 +81,10 @@
   cloud-initのtop-level `lock_passwd` schema、localhost hostname、Debian 13で削除された`apt_repository`/
   `apt-key`を検出して修正した。現在のVMはAnsibleでhostnameを収束済みであり、cloud-init clean/reinitは
   host keyを壊すため実行しない。
-- toolbox sourceは1.0.1へ更新したが、GHCRの`ghcr.io/koji-genba/homelab-toolbox:1.0.1`はlocal buildのみで
-  未公開である。merge後にworkflowでpublishするまで、外部端末ではlocal build/tagを使う。
+- PR #14はmain commit `aba90039b121387f647efb96732087eb73a84ffb`としてmerge済み。main validation run
+  `33952336848`とtoolbox publish run `33952336833`が成功し、GHCRの
+  `ghcr.io/koji-genba/homelab-toolbox:1.0.1`はdigest
+  `sha256:7607f2c74300504e045b2649ce4032920885c1902dd22c01b4c220fc7067dad0`で公開済み。
 - cloud-init templateの`lock_passwd`/hostname修正は、VM作成後のコード変更であり、Terraform plan/applyへ
   まだ反映していない。credentialを再投入し、保存planをreviewしてからsnippet driftをapplyする。
 - `files/infrastructure/network/README.md`と`files/infrastructure/network/config.txt`には、作業開始前からの
