@@ -47,6 +47,13 @@
 - 再起動後、hostnameは`apps`、systemd failed unitは0。7つのNFS mountはすべて`nfs4` read-onlyで、
   marker内容が一致し、mount guardはenabled/activeである。`homelab-apps`、reconcile、Healthchecks、
   legacy-address unitはdisabled/inactive、containerは0個で、IPv4は`.10.42`とDocker bridgeだけである。
+- cloud-init snippet driftは、PR #16（main commit `1171e5cbc178a9db3920ed55fa5c5058daec71f7`、validation run
+  `33952996065`）のlifecycle guardによりVM replacementなしで解消した。saved plan hashは
+  `217241ca872aaec0de7d40bd9ce45fca070369e9d3c0f5a241ea87e64d98cc47`で、machine checkは
+  `proxmox_virtual_environment_file.cloud_config`の`[delete,create]`だけ（1 add/0 change/1 destroy、VM 112差分なし）
+  だった。apply後にplanは削除し、state-backup remote先頭は`39ee06b5028ae318676c736dfb432f73404a95ca`になった。
+- live PVE snippetのschemaは`hostname: apps`、deploy userの`lock_passwd: true`、top-level `lock_passwd`なしを確認した。
+  VMは同じboot time `16:15:42`のまま稼働し、MAC/disk/config、SSH trusted keyを維持した。cloud-init clean/reinitは実行していない。
 - Kubernetesを唯一のwriterとして維持しており、legacy service IP、NFS write、Tailscale、VLAN、network
   cutoverは変更していない。Phase 2は別maintenance windowの対象で、archiveと`k8s-volumes`のsnapshotを
   取得してから開始する。
@@ -85,8 +92,8 @@
   `33952336848`とtoolbox publish run `33952336833`が成功し、GHCRの
   `ghcr.io/koji-genba/homelab-toolbox:1.0.1`はdigest
   `sha256:7607f2c74300504e045b2649ce4032920885c1902dd22c01b4c220fc7067dad0`で公開済み。
-- cloud-init templateの`lock_passwd`/hostname修正は、VM作成後のコード変更であり、Terraform plan/applyへ
-  まだ反映していない。credentialを再投入し、保存planをreviewしてからsnippet driftをapplyする。
+- cloud-init templateの`lock_passwd`/hostname修正は、PR #16のlifecycle guardを含むsaved planで反映済みである。
+  初回VMに残っていたcloud-init warningの履歴を消すためのclean/reinitは行っていない。
 - `files/infrastructure/network/README.md`と`files/infrastructure/network/config.txt`には、作業開始前からの
   ユーザー変更がある。明示的な依頼なしに編集、破棄、整形、stage、commitしない。
 - Proxmoxには上記の認証設定、VMID 112、NFS marker 7つを追加した。既存Kubernetes、NFS export、NFS既存data、
@@ -171,32 +178,31 @@ Kubernetes workerからNFS越しに内容一致を確認した。
 export範囲の最終的な`/32`化はフェーズ2以降に行う。フェーズ1ではApps VM側をread-only mountにし、
 Kubernetesを唯一のwriterとして維持する。
 
-### 5. Apps VMのTerraform plan/apply（完了、snippet driftは残作業）
+### 5. Apps VMのTerraform plan/apply（完了）
 
-資格情報を環境変数へ一時的に設定し、保存planを作る。値をshell historyへ直接書かない。初回plan/applyは
-完了済みだが、cloud-init template修正後のsnippet driftはまだこのworkflowを通していない。
+資格情報を環境変数へ一時的に設定し、保存planを作る。値をshell historyへ直接書かない。初回apply後の
+cloud-init template修正は、VM replacementを防ぐlifecycle guardを先に実装してからsaved planで反映した。
 
 ```sh
 make state-backup-preflight
 make terraform-plan
 ```
 
-次回planでは、cloud-init snippet修正以外にVMID 112のApps VM差分がないことを確認する。VMID、`.10.42`、
-bridge、VLAN tag、storageに意図しない差分があれば停止する。`terraform-apply`はユーザーがplanを確認して
-明示的に許可するまで実行しない。
+cloud-init snippet修正以外にVMID 112のApps VM差分がないことを確認した。machine checkではsnippet fileの
+delete/createだけが検出され、VM replacement差分がないことを確認してからapplyした。
 
 2026-09-05にVMID 112のplanをreviewしてapplyした。PVE role ACLの不足は`Sys.AccessNetwork`と対象
-SDN child ACLだけを追加して解消し、VMの構成を再確認した。state-backup remote先頭は
-`a209ba9f9b3cddf57de48deb9b9f9168fbd21188`である。
+SDN child ACLだけを追加して解消し、VMの構成を再確認した。snippet drift反映後のstate-backup remote先頭は
+`39ee06b5028ae318676c736dfb432f73404a95ca`である。
 
-Terraform codeへ後から入ったcloud-init template修正は、現在のVMへclean/reinitで再適用しない。次回の
-通常のcredential付きsaved-plan workflowで、snippetだけの差分であることを確認してからapplyする。
+Terraform codeへ後から入ったcloud-init template修正は、現在のVMへclean/reinitせず、snippet fileだけを
+安全に置き換えて反映済みである。初回VMのcloud-init warningの履歴を消去したことを意味しない。
 
 ### 6. フェーズ1を適用する（完了）
 
 明示的な許可後に保存planを`make terraform-apply`で適用し、Proxmox console/QEMU guest agentとOOBで
-Apps VMのSSH host key fingerprintを確認してから`known_hosts`へ登録し、Ansibleを適用した。Ansibleと
-再起動後の確認は完了済みである。今後はsnippet driftのsaved-plan review/applyだけが残る。
+Apps VMのSSH host key fingerprintを確認してから`known_hosts`へ登録し、Ansibleを適用した。Ansible、
+snippet drift反映、再起動後の確認は完了済みである。
 
 フェーズ1では次のflagをすべて`false`のままにする。
 
