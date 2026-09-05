@@ -74,7 +74,11 @@ status_result=success
 for project in $projects; do
   image_digest=$(docker compose --project-name "homelab-$project" --env-file {{ compose_env_file | quote }} \
     --file "$repo/files/services/compose/$project/compose.yaml" config --images 2>/dev/null | tr '\n' ',' || printf '%s' unknown)
-  if /usr/local/sbin/homelab-compose-up "$project"; then
+  # Compose does not recreate a container when only a bind-mounted file
+  # changes. Force recreation for every selected project so Git changes to
+  # config.yaml, Caddyfile, and similar files are applied. This also keeps
+  # normal image/compose updates on the same existing startup path.
+  if HOMELAB_FORCE_RECREATE=true /usr/local/sbin/homelab-compose-up "$project"; then
     result=success
   else
     result=failure
