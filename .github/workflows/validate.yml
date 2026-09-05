@@ -31,6 +31,8 @@ jobs:
         run: make toolbox-uid-test
       - name: Apps VM cloud-init schema regression
         run: make cloud-init-test
+      - name: Apps VM cloud-init lifecycle regression
+        run: make terraform-apps-vm-lifecycle-test
       - name: Compose configuration
         run: make compose-config
       - name: AdGuard schema-34 configuration check

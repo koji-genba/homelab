@@ -31,6 +31,11 @@ repositoryのMake targetも同じ保存plan方式を使う。`make terraform-pla
 緩すぎるmodeを拒否し、`-auto-approve`を使用せず、apply時に新しいvariableを受け付けない。保存planには
 sensitive valueが含まれる場合があるため、state fileと同様に保護し、review後に古いplanを削除する。
 
+cloud-init snippetはVM作成時にだけ消費される。`source_raw.data`の修正でsnippet fileが更新されても、
+既存VMの`initialization.user_data_file_id`だけを無視してVM replacementを防ぐ。新規作成または再作成する
+VMは、作成時点の最新snippet IDを引き続き参照する。既存VMへcloud-initをclean/reinitで再適用してはならず、
+Ansibleでruntime設定を収束させる。
+
 対象Proxmox datastoreではcontent type `Import`を有効にする。applyで使うAPI tokenには、対象node/datastore
 上で必要なstorage/VM権限だけを与える。`Sys.Audit`、`Sys.Modify`、`Datastore.AllocateTemplate`を含める。
 apply前にVMID `112`と未使用のフェーズ1 IP `192.168.10.42`を確認する。このrootは重複確認のためにIPを取得しない。
