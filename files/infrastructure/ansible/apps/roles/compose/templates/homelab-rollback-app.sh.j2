@@ -34,7 +34,9 @@ export HOMELAB_COMPOSE_ROOT="$tmp/files/services/compose"
 # Hold the automatic timer at the selected rollback until the operator has
 # reviewed the incident and removes this file manually.
 touch /var/lib/homelab/reconcile.paused
-if /usr/local/sbin/homelab-compose-up "$project"; then
+# Rollback may replace bind-mounted files too; recreate so the selected
+# container cannot retain the old bind-mount inode.
+if HOMELAB_FORCE_RECREATE=true /usr/local/sbin/homelab-compose-up "$project"; then
   result=success
 else
   result=failure

@@ -27,6 +27,8 @@ jobs:
           make ansible-check
       - name: Ansible bootstrap path regression
         run: make ansible-bootstrap-paths-test
+      - name: Compose reconcile bind-mount regression
+        run: make compose-reconcile-fixture
       - name: Toolbox arbitrary UID/GID regression
         run: make toolbox-uid-test
       - name: Apps VM cloud-init schema regression
