@@ -1,4 +1,8 @@
 ---
+- name: Set the Apps VM hostname
+  ansible.builtin.hostname:
+    name: "{{ apps_hostname }}"
+
 - name: Install host prerequisites
   ansible.builtin.apt:
     name:
@@ -17,6 +21,11 @@
     update_cache: true
     cache_valid_time: 3600
 
+- name: Install Debian bindings for deb822 repository management
+  ansible.builtin.apt:
+    name: python3-debian
+    state: present
+
 - name: Ensure the deploy account exists
   ansible.builtin.user:
     name: "{{ deploy_user }}"
@@ -25,6 +34,18 @@
     append: true
     create_home: true
     password_lock: true
+
+- name: Ensure host configuration drop-in directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - /etc/ssh/sshd_config.d
+    - /etc/sudoers.d
+    - /etc/systemd/journald.conf.d
 
 - name: Install the operator SSH key when provided
   ansible.posix.authorized_key:

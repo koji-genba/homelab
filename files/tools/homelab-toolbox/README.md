@@ -10,12 +10,14 @@ rootの`Makefile`はこれらのtoolをDocker経由で実行するため、管�
 `--check-config`の前に展開したbinaryのchecksumを検証する。
 
 正確なlocal tagを`make toolbox-build`でbuildするか、review済みimage workflowを通して同じimageを
-`ghcr.io/koji-genba/homelab-toolbox:1.0.0`としてpublishする。wrapperはrepositoryを呼び出し元のUID/GIDで
+`ghcr.io/koji-genba/homelab-toolbox:1.0.1`としてpublishする。wrapperはrepositoryを呼び出し元のUID/GIDで
 mountし、一時worktreeにはcontainer内で書込み可能な`/tmp`を使い、optional SSH agent socketをmountする。
 `AGE_IDENTITY_FILE`を設定した場合だけ、そのfileを`/run/secrets/age-identity`へread-onlyでmountする。
 hostの`~/.ssh/known_hosts`が存在する場合は、`/etc/ssh/ssh_known_hosts`としてread-onlyでmountする。
 
-wrapperはroot-owned fileがcheckout内に作られないよう、container内の書込み可能な`HOME`を設定する。age
+wrapperはroot-owned fileがcheckout内に作られないよう、container内の書込み可能な`HOME`を設定する。任意の
+host UID/GIDでもOpenSSH/Ansibleが動くよう、entrypointはそのUID/GIDだけをprivate NSS passwd/group viewへ
+追加する（`/etc/passwd`は変更しない）。age
 private keyはApps VMに置かない。初回Ansible接続前に、Proxmox consoleまたは別の信頼できるout-of-band
 channelからApps VMのhost-key fingerprintを確認し、VMが示すkeyと照合してから管理端末の`known_hosts`へ
 追加する。検証していない単独の`ssh-keyscan`結果を信頼してはならない。

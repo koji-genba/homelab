@@ -2,7 +2,7 @@
 
 - 作成日: 2026-09-05
 - 対象リポジトリ: `/home/s-sato/homelab`
-- 現在地: フェーズ1の認証・secret・NFS marker準備まで完了。Apps VM plan/applyは未実施
+- 現在地: フェーズ1のApps VM apply、Ansible bootstrap、再起動後の受入確認まで完了。Composeのwriter/cutoverは未実施
 
 この文書は、会話履歴がない次セッションでも安全に作業を再開するための引継ぎである。
 最初に[実装状況](implementation-status.md)、[実機インベントリ](../architecture/live-inventory-2026-08-30.md)、
@@ -32,12 +32,30 @@
 - AdGuard HomeはCloudflare DoHをprimary、Quad9 DoHをfallbackとし、現行相当のHaGeZi 6 feedを使う。
 - 7 projectすべてのimageはdigest固定済み。Caddy custom imageもGHCRへ公開済みである。
 
+## 2026-09-05のフェーズ1実機反映
+
+- TerraformでVMID `112`をapply済み。実機は4 vCPU、12 GiB RAM、40 GiB disk、VLAN 10の`.10.42/24`、
+  アドレスを持たないVLAN 11 NICである。Terraform state backup branchのremote先頭は
+  `a209ba9f9b3cddf57de48deb9b9f9168fbd21188`。
+- PVE roleには`Sys.AccessNetwork`と、`vmbr0/10`および`vmbr0/11`のSDN child ACLを追加してapplyを通した。
+  他の権限を広げない。PVE上のvCPU、memory、disk、bridge、VLAN設定を再確認済み。
+- VMのED25519 host keyは、信頼済みPVE access経由のQEMU guest agentから取得したfingerprintと、network上の
+  `ssh-keyscan`で独立に観測したfingerprint `SHA256:crmNjtlEWlIzTu4VKVR6/ArBqsAZV6qUW95uyOvFLUw`を照合し、
+  一致後に`known_hosts`へ追加した。未検証のkeyscan結果を信頼してはならない。
+- 初回Ansibleは`ok=61 changed=29 failed=0`、再実行は`ok=58 changed=0 failed=0`で完了した。
+  Ansibleは`apps` hostname、Docker/NFS/firewall/systemd設定を収束させた。
+- 再起動後、hostnameは`apps`、systemd failed unitは0。7つのNFS mountはすべて`nfs4` read-onlyで、
+  marker内容が一致し、mount guardはenabled/activeである。`homelab-apps`、reconcile、Healthchecks、
+  legacy-address unitはdisabled/inactive、containerは0個で、IPv4は`.10.42`とDocker bridgeだけである。
+- Kubernetesを唯一のwriterとして維持しており、legacy service IP、NFS write、Tailscale、VLAN、network
+  cutoverは変更していない。Phase 2は別maintenance windowの対象で、archiveと`k8s-volumes`のsnapshotを
+  取得してから開始する。
+
 ## 実機で確認済みの重要事項
 
 - Proxmoxへは`ssh root@192.168.10.11`で接続できる。node名は`pve1`、PVEは9.2.3。
 - `vmbr0`は`nic0`接続のVLAN-aware bridgeで、`vmpool`には約582 GiBの空きがある。
-- VMID 112は空き。`.10.42`はVM定義になく、2026-08-30時点でping応答もなかった。
-- VLAN 10のDHCP poolは`.100-.200`なので`.10.42`は範囲外だが、適用直前に再確認する。
+- VMID 112はTerraformで作成済み。`.10.42`はVLAN 10のDHCP pool（`.100-.200`）外で、現在このApps VMが使用する。
 - `vmbr0.11`には`192.18.11.11/24`が設定されている。Kubernetes側のVLAN 11は
   `192.168.11.0/24`であり不整合だが、VLAN 11は廃止予定なので現時点では変更しない。
 - 現行VIPはIngress `.11.100`、Unbound `.11.101`、Samba `.11.103`。VLAN 11のDHCP
@@ -57,11 +75,19 @@
 
 ## ワークツリーに関する注意
 
-- 移行実装はPR #7、Caddy digest固定はPR #9でmainへmerge済み。Terraform apply、Ansible apply、
-  Tailscale import/applyは未実施。
+- 移行実装はPR #7、Caddy digest固定はPR #9でmainへmerge済み。Terraform applyとAnsible applyは完了し、
+  Tailscale import/applyとapplication cutoverは未実施。
+- 今回の初回接続で、toolboxの任意UIDに対するOpenSSH passwd lookup、Debian 13の不足drop-in directory、
+  cloud-initのtop-level `lock_passwd` schema、localhost hostname、Debian 13で削除された`apt_repository`/
+  `apt-key`を検出して修正した。現在のVMはAnsibleでhostnameを収束済みであり、cloud-init clean/reinitは
+  host keyを壊すため実行しない。
+- toolbox sourceは1.0.1へ更新したが、GHCRの`ghcr.io/koji-genba/homelab-toolbox:1.0.1`はlocal buildのみで
+  未公開である。merge後にworkflowでpublishするまで、外部端末ではlocal build/tagを使う。
+- cloud-init templateの`lock_passwd`/hostname修正は、VM作成後のコード変更であり、Terraform plan/applyへ
+  まだ反映していない。credentialを再投入し、保存planをreviewしてからsnippet driftをapplyする。
 - `files/infrastructure/network/README.md`と`files/infrastructure/network/config.txt`には、作業開始前からの
   ユーザー変更がある。明示的な依頼なしに編集、破棄、整形、stage、commitしない。
-- Proxmoxには上記の認証設定とNFS marker 7つだけを追加した。既存Kubernetes、NFS export、NFS既存data、
+- Proxmoxには上記の認証設定、VMID 112、NFS marker 7つを追加した。既存Kubernetes、NFS export、NFS既存data、
   IX2215、ECW5211、Tailscaleには変更を加えていない。Discord/Healthchecks.ioは通知先とcheckだけを作成した。
 - commitやpushはユーザーの許可を得てから行い、上記network 2ファイルを選択的stageから除外する。
 
@@ -143,23 +169,32 @@ Kubernetes workerからNFS越しに内容一致を確認した。
 export範囲の最終的な`/32`化はフェーズ2以降に行う。フェーズ1ではApps VM側をread-only mountにし、
 Kubernetesを唯一のwriterとして維持する。
 
-### 5. Apps VMのTerraform planを作る
+### 5. Apps VMのTerraform plan/apply（完了、snippet driftは残作業）
 
-資格情報を環境変数へ一時的に設定し、保存planを作る。値をshell historyへ直接書かない。
+資格情報を環境変数へ一時的に設定し、保存planを作る。値をshell historyへ直接書かない。初回plan/applyは
+完了済みだが、cloud-init template修正後のsnippet driftはまだこのworkflowを通していない。
 
 ```sh
 make state-backup-preflight
 make terraform-plan
 ```
 
-planでは、Debian image download、cloud-init snippet、VMID 112のApps VM以外が変更されないことを
-確認する。VMID、`.10.42`、bridge、VLAN tag、storageに差分があれば停止する。`terraform-apply`は
-ユーザーがplanを確認して明示的に許可するまで実行しない。
+次回planでは、cloud-init snippet修正以外にVMID 112のApps VM差分がないことを確認する。VMID、`.10.42`、
+bridge、VLAN tag、storageに意図しない差分があれば停止する。`terraform-apply`はユーザーがplanを確認して
+明示的に許可するまで実行しない。
 
-### 6. フェーズ1を適用する
+2026-09-05にVMID 112のplanをreviewしてapplyした。PVE role ACLの不足は`Sys.AccessNetwork`と対象
+SDN child ACLだけを追加して解消し、VMの構成を再確認した。state-backup remote先頭は
+`a209ba9f9b3cddf57de48deb9b9f9168fbd21188`である。
 
-明示的な許可後にだけ、保存planを`make terraform-apply`で適用する。その後、Proxmox consoleで
-Apps VMのSSH host key fingerprintを確認してから`known_hosts`へ登録し、Ansibleを適用する。
+Terraform codeへ後から入ったcloud-init template修正は、現在のVMへclean/reinitで再適用しない。次回の
+通常のcredential付きsaved-plan workflowで、snippetだけの差分であることを確認してからapplyする。
+
+### 6. フェーズ1を適用する（完了）
+
+明示的な許可後に保存planを`make terraform-apply`で適用し、Proxmox console/QEMU guest agentとOOBで
+Apps VMのSSH host key fingerprintを確認してから`known_hosts`へ登録し、Ansibleを適用した。Ansibleと
+再起動後の確認は完了済みである。今後はsnippet driftのsaved-plan review/applyだけが残る。
 
 フェーズ1では次のflagをすべて`false`のままにする。
 

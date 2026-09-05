@@ -18,6 +18,7 @@ resource "proxmox_virtual_environment_file" "cloud_config" {
     data = templatefile("${path.module}/cloud-init.yaml.tftpl", {
       deploy_user    = var.deploy_user
       ssh_public_key = var.ssh_public_key
+      vm_name        = var.vm_name
     })
   }
 }
