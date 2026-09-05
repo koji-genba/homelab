@@ -29,6 +29,7 @@ legacy service IPには変更を反映していない。NFS serverにはmount gu
 - NFS exportの実path、client scope、option、一意markerを記録した手動反映契約
 - toolbox 1.0.1の任意UID/GID OpenSSH対応、Debian 13のcloud-init/Ansible bootstrap修正、
   `deb822_repository`によるDocker repository設定とそのregression fixture
+- cloud-init creation-time snippetの更新で既存VMをreplaceしないTerraform lifecycle guard
 - 2026-08-30に取得した実機インベントリ（[詳細](../architecture/live-inventory-2026-08-30.md)）
 
 ## ローカル検証済み
@@ -88,6 +89,14 @@ legacy service IPには変更を反映していない。NFS serverにはmount gu
 - 初回Ansibleは`ok=61 changed=29 failed=0`、再実行は`ok=58 changed=0 failed=0`。再起動後はhostname `apps`、
   failed unit 0、7 NFS mountが`nfs4` read-onlyでmarker一致、mount guard enabled/active、Compose/reconcile/
   Healthchecks/legacy-address unit disabled/inactive、container 0個を確認した
+- cloud-init snippet driftは、PR #16（main commit `1171e5cbc178a9db3920ed55fa5c5058daec71f7`、validation run
+  `33952996065`）のlifecycle guardによりVM replacementなしで反映済み。saved plan hashは
+  `217241ca872aaec0de7d40bd9ce45fca070369e9d3c0f5a241ea87e64d98cc47`で、machine checkは
+  `proxmox_virtual_environment_file.cloud_config`の`[delete,create]`だけ（1 add/0 change/1 destroy、VM 112差分なし）。
+  apply後にplanは削除し、state-backup remote先頭は`39ee06b5028ae318676c736dfb432f73404a95ca`になった。
+- live PVE snippetのschemaは`hostname: apps`、deploy userの`lock_passwd: true`、top-level `lock_passwd`なしを確認した。
+  VMは同じboot time `16:15:42`のまま稼働し、MAC/disk/config、SSH trusted keyを維持した。service-side IPv4は`.10.42`だけで、
+  cloud-init clean/reinitは実行していない。
 
 ## フェーズ1 apply・受入確認済み
 
@@ -107,8 +116,6 @@ legacy service IPには変更を反映していない。NFS serverにはmount gu
   `33952336848`とtoolbox publish run `33952336833`が成功し、GHCRの
   `ghcr.io/koji-genba/homelab-toolbox:1.0.1`はdigest
   `sha256:7607f2c74300504e045b2649ce4032920885c1902dd22c01b4c220fc7067dad0`で公開済み
-- cloud-init templateの`lock_passwd`/hostname修正を、credential付きsaved Terraform planでreviewし、snippet driftだけで
-  あることを確認してapplyする。現在のVMへcloud-init clean/reinitは行わない（host key risk）。
 - 実serviceのFQDN/TLS、Discord/Healthchecks通知、stateful application probeはwriter fencing後に検証する
 - Tailscaleのlive ACL/DNS/route/deviceをexportし、Terraform import先と完全なpolicy差分を確認する
 - Phase 2前にIX2215のDHCP/ARP、旧`.11.100/.101/.103`所有者、ECW5211のport/SSID mappingを記録し、
