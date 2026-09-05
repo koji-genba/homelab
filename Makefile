@@ -49,7 +49,7 @@ TOOLBOX_PROXMOX_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_PROXMOX_ENV) $(TOOLBOX_IMAGE
 TOOLBOX_TAILSCALE_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_TAILSCALE_ENV) $(TOOLBOX_IMAGE)
 
 .PHONY: toolbox-build terraform-init terraform-fmt terraform-validate terraform-validate-tailscale terraform-plan terraform-apply
-.PHONY: ansible-lint ansible-check ansible-apply ansible-bootstrap-paths-test terraform-apps-vm-lifecycle-test toolbox-uid-test cloud-init-test compose-config adguard-config-check shellcheck secrets-scan preflight
+.PHONY: ansible-lint ansible-check ansible-apply ansible-bootstrap-paths-test terraform-apps-vm-lifecycle-test toolbox-uid-test cloud-init-test compose-config adguard-config-check gatus-config-check shellcheck secrets-scan preflight
 .PHONY: state-backup-preflight state-backup-preflight-test state-backup state-backup-push state-restore state-restore-test state-backup-test rollback-app
 .PHONY: secrets-encrypt secrets-decrypt-check
 .PHONY: tailscale-init tailscale-acl-preflight tailscale-plan tailscale-apply tailscale-import-core tailscale-import-acl tailscale-import-magic-dns tailscale-import-dns tailscale-import-router tailscale-acl-path-test
@@ -167,6 +167,9 @@ compose-config:
 
 adguard-config-check:
 	$(TOOLBOX_RUN) env ADGUARD_BINARY=/usr/local/bin/adguardhome-check ./scripts/tests/adguard-config-fixture.sh
+
+gatus-config-check:
+	./scripts/tests/gatus-config-fixture.sh
 
 shellcheck:
 	$(TOOLBOX_RUN) shellcheck scripts/*.sh scripts/tests/*.sh

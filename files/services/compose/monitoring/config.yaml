@@ -12,6 +12,10 @@ endpoints:
   - name: Caddy
     group: edge
     url: http://caddy:80
+    # Caddy redirects HTTP to HTTPS; do not follow it with the Docker DNS name.
+    # The internal name has no matching TLS site/certificate.
+    client:
+      ignore-redirect: true
     conditions:
       - "[STATUS] == any(200, 308, 404)"
     alerts:
