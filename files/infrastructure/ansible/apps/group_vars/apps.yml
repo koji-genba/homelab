@@ -38,20 +38,22 @@ homelab_repo_branch: main
 acme_email: admin@kojigenba-srv.com
 
 # Restored NFS exports. Ansible mounts these paths but never changes export
-# configuration. Every .homelab-export marker must already exist remotely.
+# configuration. Every configured marker must already exist remotely. The
+# mergerfs and direct-HDD mounts use different marker names because both expose
+# the same tank-gen2/data/shared root.
 nfs_mounts:
   - name: shared
     local_path: /srv/homelab/nfs/shared
     server: 192.168.10.11
     export: /mnt/shared
-    marker: .homelab-export
+    marker: .homelab-export-shared
     marker_value: shared
     options: hard,_netdev,nfsvers=4.1,noatime,rsize=1048576,wsize=1048576,timeo=600,retrans=2,nconnect=8
   - name: shared-hdd
     local_path: /srv/homelab/nfs/shared-hdd
     server: 192.168.10.11
     export: /mnt/tank-gen2/data/shared
-    marker: .homelab-export
+    marker: .homelab-export-shared-hdd
     marker_value: shared-hdd
     options: hard,_netdev,nfsvers=4.1,noatime,rsize=1048576,wsize=1048576,timeo=600,retrans=2,nconnect=8
   - name: archive

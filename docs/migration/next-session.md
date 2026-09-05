@@ -2,7 +2,7 @@
 
 - 作成日: 2026-09-05
 - 対象リポジトリ: `/home/s-sato/homelab`
-- 現在地: フェーズ1の認証・secret準備まで完了。NFS marker作成とApps VM plan/applyは未実施
+- 現在地: フェーズ1の認証・secret・NFS marker準備まで完了。Apps VM plan/applyは未実施
 
 この文書は、会話履歴がない次セッションでも安全に作業を再開するための引継ぎである。
 最初に[実装状況](implementation-status.md)、[実機インベントリ](../architecture/live-inventory-2026-08-30.md)、
@@ -42,7 +42,8 @@
   `192.168.11.0/24`であり不整合だが、VLAN 11は廃止予定なので現時点では変更しない。
 - 現行VIPはIngress `.11.100`、Unbound `.11.101`、Samba `.11.103`。VLAN 11のDHCP
   `.100-.200`と重複しているため、フェーズ2でDHCP停止または除外が必須である。
-- NFSの4親exportとApps VMが使う7 pathは存在するが、`.homelab-export` markerは未作成。
+- NFSの4親exportとApps VMが使う7 pathは存在し、marker 7つを2026-09-05に作成済み。
+  Kubernetes worker 2台からNFS越しに全markerの内容を検証済み。
 - PVEには`terraform@pve`、`HomelabTerraform` role、`apps-vm` API tokenを作成済み。ACLは
   VMID 112、`local`、`vmpool`、`pve1`、local networkに限定し、token期限は2026-12-04 23:59 JST。
 - 管理端末の`id_ed25519.pub`をPVE登録鍵とfingerprint照合済み。SSH agent経由で接続でき、Gitは
@@ -60,8 +61,8 @@
   Tailscale import/applyは未実施。
 - `files/infrastructure/network/README.md`と`files/infrastructure/network/config.txt`には、作業開始前からの
   ユーザー変更がある。明示的な依頼なしに編集、破棄、整形、stage、commitしない。
-- Proxmoxには上記の認証設定だけを追加した。既存Kubernetes、NFS、IX2215、ECW5211、Tailscaleには
-  変更を加えていない。Discord/Healthchecks.ioは通知先とcheckだけを作成した。
+- Proxmoxには上記の認証設定とNFS marker 7つだけを追加した。既存Kubernetes、NFS export、NFS既存data、
+  IX2215、ECW5211、Tailscaleには変更を加えていない。Discord/Healthchecks.ioは通知先とcheckだけを作成した。
 - commitやpushはユーザーの許可を得てから行い、上記network 2ファイルを選択的stageから除外する。
 
 ## 次に行う作業
@@ -111,20 +112,33 @@ PVE上で利用可能なprivilegeだけを設定した。既存のGit非追跡Te
 API token、age秘密鍵、復号済みsecret、Tailscale credentialを会話、ログ、Terraform変数ファイル、
 Gitへ出力しない。
 
-### 4. NFS markerを作る
+### 4. NFS markerを作る（完了）
 
 marker作成はデータ領域への書き込みなので、ユーザーの許可を得てから行う。事前に対象path、snapshot、
-数値UID/GIDを再確認する。各`.homelab-export`の内容は次の値と完全一致させる。
+数値UID/GIDを再確認する。各markerの内容は次の値と完全一致させる。
 
 | path | marker内容 |
 | --- | --- |
-| `/mnt/shared/.homelab-export` | `shared` |
-| `/mnt/tank-gen2/data/shared/.homelab-export` | `shared-hdd` |
+| `/mnt/tank-gen2/data/shared/.homelab-export-shared`（`/mnt/shared`から参照） | `shared` |
+| `/mnt/tank-gen2/data/shared/.homelab-export-shared-hdd` | `shared-hdd` |
 | `/mnt/tank-gen1/data/archive/.homelab-export` | `archive` |
 | `/mnt/shared/koji-genba/stashPadLib/.homelab-export` | `stashpad-media` |
 | `/mnt/tank-gen2/data/k8s-volumes/sillytavern-sillytavern-data-pvc-85f01a24-9480-4341-a6ad-f44b17cbecaa/.homelab-export` | `sillytavern-data` |
 | `/mnt/tank-gen2/data/k8s-volumes/stashpad-prod-stashpad-data-pvc-c96b1813-be70-49ca-865f-989e77359a6b/.homelab-export` | `stashpad-prod-data` |
 | `/mnt/tank-gen2/data/k8s-volumes/stashpad-staging-stashpad-data-pvc-ecc8b17c-bd0a-47db-b169-248d5d98995b/.homelab-export` | `stashpad-staging-data` |
+
+2026-09-05に実施した。事前確認では全poolが`ONLINE`、4親exportとoption、7 pathの数値UID/GIDと
+modeは前回記録と一致し、ZFSは`noacl`、対象pathのxattrはなかった。現行NFS clientは
+`k8s-worker01`と`k8s-worker02`であり、Kubernetesを唯一のwriterとして維持している。
+
+当初の共通`.homelab-export`名では、mergerfs `/mnt/shared`と直接HDD exportが同じ
+`tank-gen2/data/shared` rootを見せるため期待値が衝突することを検出した。Ansibleと契約を修正し、
+`shared`と`shared-hdd`だけ固有marker名へ分離した。7 markerは`root:root`、`0644`で作成し、
+Kubernetes workerからNFS越しに内容一致を確認した。
+
+`tank-gen2/data/shared`には26 snapshotがあり、最新は`daily-2026-09-05`である。
+`tank-gen1/data/archive`と`tank-gen2/data/k8s-volumes`にはsnapshotと自動snapshot設定がない。
+フェーズ2のwriter停止後、切替前に両datasetを含む対象snapshotを必ず取得する。
 
 export範囲の最終的な`/32`化はフェーズ2以降に行う。フェーズ1ではApps VM側をread-only mountにし、
 Kubernetesを唯一のwriterとして維持する。

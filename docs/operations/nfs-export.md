@@ -1,6 +1,6 @@
 # NFS export契約
 
-- 状態: 手動反映メモ（未適用）
+- 状態: marker反映済み、export client範囲の変更は未適用
 - サーバー: Proxmox/NFS host `192.168.10.11`
 - データ復旧: このリポジトリの対象外
 - 関連設計: [目標ストレージ契約](../architecture/target-state.md#storage-contract)
@@ -59,23 +59,28 @@ cutover確認後だけApps VM側mountを`rw`へ変更する。
 ## マーカー契約
 
 誤ったexportや未mountの空directoryへcontainerが書き込むことを防ぐため、各利用pathには
-`.homelab-export` markerをserver側で作る。markerはdata copyで偶然複製されないよう、pathごとに
-一意な識別子を内容として持たせる。Apps VMのmount guardはmount typeとmarker内容の両方を検証する。
+固有markerをserver側で作る。markerはdata copyで偶然複製されないよう、pathごとに一意な識別子を
+内容として持たせる。Apps VMのmount guardはmount source、mount type、marker名、marker内容を検証する。
 
-必要なmarkerの識別子は次の7つである。2026-08-30の時点では全て未作成である。
+`/mnt/shared`は`/mnt/cache-sata:/mnt/tank-gen2/data/shared`のmergerfsであり、直接HDD exportと
+`tank-gen2/data/shared`を共有する。同じ`.homelab-export`へ異なる値を置けないため、この2 mountだけ
+固有のmarker名を使う。両markerはmover対象のcacheではなくsnapshot対象のHDD側へ直接作成する。
 
-```text
-shared
-shared-hdd
-archive
-stashpad-media
-sillytavern-data
-stashpad-prod-data
-stashpad-staging-data
-```
+必要なmarkerは次の7つである。2026-08-30の時点では全て未作成である。
+
+| server側の実体path | marker内容 |
+| --- | --- |
+| `/mnt/tank-gen2/data/shared/.homelab-export-shared` | `shared` |
+| `/mnt/tank-gen2/data/shared/.homelab-export-shared-hdd` | `shared-hdd` |
+| `/mnt/tank-gen1/data/archive/.homelab-export` | `archive` |
+| `/mnt/tank-gen2/data/shared/koji-genba/stashPadLib/.homelab-export` | `stashpad-media` |
+| `/mnt/tank-gen2/data/k8s-volumes/sillytavern-sillytavern-data-pvc-85f01a24-9480-4341-a6ad-f44b17cbecaa/.homelab-export` | `sillytavern-data` |
+| `/mnt/tank-gen2/data/k8s-volumes/stashpad-prod-stashpad-data-pvc-c96b1813-be70-49ca-865f-989e77359a6b/.homelab-export` | `stashpad-prod-data` |
+| `/mnt/tank-gen2/data/k8s-volumes/stashpad-staging-stashpad-data-pvc-ecc8b17c-bd0a-47db-b169-248d5d98995b/.homelab-export` | `stashpad-staging-data` |
 
 markerはApps VMの未mount directoryには絶対に作らない。NFS server local consoleで対象datasetとpathを
-確認して作成し、snapshot/backup対象に含める。
+確認して作成し、snapshot/backup対象に含める。`archive`と`k8s-volumes`には自動snapshotがないため、
+少なくとも移行前snapshotを別途取得してからフェーズ2へ進む。
 
 ## 手動反映の記録手順
 
