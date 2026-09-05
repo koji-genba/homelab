@@ -2,7 +2,7 @@
 
 - 作成日: 2026-09-05
 - 対象リポジトリ: `/home/s-sato/homelab`
-- 現在地: フェーズ0の実機確認とフェーズ1基盤のローカル実装が完了。実機への適用は未実施
+- 現在地: フェーズ1の認証・secret準備まで完了。NFS marker作成とApps VM plan/applyは未実施
 
 この文書は、会話履歴がない次セッションでも安全に作業を再開するための引継ぎである。
 最初に[実装状況](implementation-status.md)、[実機インベントリ](../architecture/live-inventory-2026-08-30.md)、
@@ -43,18 +43,25 @@
 - 現行VIPはIngress `.11.100`、Unbound `.11.101`、Samba `.11.103`。VLAN 11のDHCP
   `.100-.200`と重複しているため、フェーズ2でDHCP停止または除外が必須である。
 - NFSの4親exportとApps VMが使う7 pathは存在するが、`.homelab-export` markerは未作成。
-- PVEには`root@pam`しかなく、Terraform用API user/tokenは未作成。ACLも未設定。
-- 管理端末ではSSH agentが未起動で、Gitのpush URLはHTTPSのまま。
+- PVEには`terraform@pve`、`HomelabTerraform` role、`apps-vm` API tokenを作成済み。ACLは
+  VMID 112、`local`、`vmpool`、`pve1`、local networkに限定し、token期限は2026-12-04 23:59 JST。
+- 管理端末の`id_ed25519.pub`をPVE登録鍵とfingerprint照合済み。SSH agent経由で接続でき、Gitは
+  fetchをHTTPS、pushをSSHに設定済み。agent socketはsession固有なので再開時に起動し直す。
+- age identity/recipientとProxmox tokenはKeePassXCへ保存済み。実値の`runtime.sops.yaml`を作成し、
+  SOPS復号と`state-backup-preflight`に成功済み。
+- Discord webhookとHealthchecks.io `homelab-apps` check/Discord integrationは作成済み。実通知は未検証。
 - Kubernetes 3 nodeはReady。現行アプリFQDNは稼働している。
 - Unboundは旧Replica 1つで提供中。新Replicaは不正なTIF RPZでCrashLoopし、blocklist Jobも直近3回失敗している。
 - Tailscaleのlive ACL/DNS設定はAPIから未export・未import。ユーザー申告ではUnboundをglobal DNSとして使っている。
 
 ## ワークツリーに関する注意
 
-- この移行実装は未commit・未pushである。実機へのTerraform apply、Ansible apply、Tailscale import/applyも未実施。
+- 移行実装はPR #7、Caddy digest固定はPR #9でmainへmerge済み。Terraform apply、Ansible apply、
+  Tailscale import/applyは未実施。
 - `files/infrastructure/network/README.md`と`files/infrastructure/network/config.txt`には、作業開始前からの
   ユーザー変更がある。明示的な依頼なしに編集、破棄、整形、stage、commitしない。
-- 既存Kubernetes、Proxmox、NFS、IX2215、ECW5211、Tailscale、Healthchecks.ioには変更を加えていない。
+- Proxmoxには上記の認証設定だけを追加した。既存Kubernetes、NFS、IX2215、ECW5211、Tailscaleには
+  変更を加えていない。Discord/Healthchecks.ioは通知先とcheckだけを作成した。
 - commitやpushはユーザーの許可を得てから行い、上記network 2ファイルを選択的stageから除外する。
 
 ## 次に行う作業
@@ -86,7 +93,7 @@ docker buildx imagetools inspect ghcr.io/koji-genba/caddy-cloudflare:2.11.4
 確認したdigestは`sha256:e2a92e76f07428763c253e005c016b3da0515f025a30762b2f68e9ea26a21d59`である。
 `files/services/compose/edge/compose.yaml`のimageへ反映し、再検証済み。今後tagのままへ戻してはならない。
 
-### 3. 認証・state復旧経路を準備する
+### 3. 認証・state復旧経路を準備する（完了）
 
 ここからは外部状態を変更するので、作業前にユーザーへ確認する。
 
@@ -96,6 +103,10 @@ docker buildx imagetools inspect ghcr.io/koji-genba/caddy-cloudflare:2.11.4
 4. `origin`のpush URLをSSHへ変更する。fetch URLをHTTPSのまま残す構成でもよい。
 5. age identity/recipientをKeePassXCへ保存し、`runtime.yaml.example`から実値を作ってSOPS暗号化する。
 6. `make state-backup-preflight`が成功するまでTerraform applyを行わない。
+
+2026-09-05に上記を完了した。PVE 9.2.3には`VM.Monitor` privilegeが存在しないためroleへ含めず、
+PVE上で利用可能なprivilegeだけを設定した。既存のGit非追跡Terraform state 7ファイルはmode `0644`から
+`0600`へ修正した。SSH agentとtoken/identityの環境変数はshell sessionを越えて永続化しない。
 
 API token、age秘密鍵、復号済みsecret、Tailscale credentialを会話、ログ、Terraform変数ファイル、
 Gitへ出力しない。

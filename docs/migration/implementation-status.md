@@ -1,11 +1,12 @@
 # 実装状況
 
-- 状態: フェーズ0/1の基盤はローカル実装完了、フェーズ0の実機インベントリ確認済み、実機未適用
+- 状態: フェーズ0/1の基盤と認証・secret準備が完了、NFS marker未作成、Apps VM未適用
 - 更新日: 2026-09-05
 - 手順書: [KubernetesからComposeへの移行](k8s-to-compose.md)
 
 この文書は設計、ローカル実装、実機反映を区別する。現在も旧Kubernetesが本番サービスを
-提供しており、Apps VM、Tailscale、IX2215、ECW5211、Healthchecks.ioに変更は反映していない。
+提供しており、Apps VM、Tailscale、IX2215、ECW5211には変更を反映していない。Proxmoxの
+Terraform認証、SOPS/age、Discord webhook、Healthchecks.io checkは準備済みだが、実serviceからの通知は未検証である。
 
 ## Gitに実装済み
 
@@ -37,6 +38,8 @@
 - digest固定の公式Caddy 2.11.4からCloudflare module入りimageをbuildし、Caddyfileを実バイナリで検証
 - Gatus v5.36.0実コンテナで設定と10 endpointを読み込み、DNS probeの送信先解釈を検証
 - Samba設定を`testparm` で検証
+- 実際のage identityを使ったSOPS暗号化・復号と`state-backup-preflight`。既存のlocal Terraform
+  state 7ファイルはGit非追跡を確認し、modeを`0600`へ修正済み
 
 これらはローカルの構文・fixture検証であり、実データのread/writeやFQDN、TLS、Discord通知を
 検証したことを意味しない。
@@ -60,22 +63,27 @@
   手動DNS record 10件はAdGuard templateへ保持済み。OpenLDAP/phpLDAPadmin/LDAPS workload/serviceはなし
 - Tailscale `home-gateway`（VM名`tailscale-gateway`）はversion `1.98.3`、IPv4 forwarding有効、
   routeは`0.0.0.0/0`、`::/0`、`192.168.10.0/24`、`192.168.11.0/24`。exit nodeは現行機能として保持する
-- PVEは`root@pam`のみ、ACLなし、Terraform API user/tokenなし
+- PVEに`terraform@pve`、`HomelabTerraform` role、`apps-vm` API tokenを作成済み。ACLは
+  `/vms/112`、`/storage/local`、`/storage/vmpool`、`/nodes/pve1`、`/sdn/zones/localnetwork`に限定し、
+  tokenの有効期限は2026-12-04 23:59 JST
+- Discord webhookとHealthchecks.ioの`homelab-apps` check/Discord integrationを手動作成済み。
+  endpointはSOPS bundleへ格納したが、Apps VMからの通知は未検証
 
-## 初回apply前に必要な作業
+## 初回apply向けに準備済み
+
+- Caddyを含む7 projectすべてのimageを公開manifest digestへ固定済み
+- SSH公開鍵のfingerprintをPVEの`authorized_keys`と照合し、SSH agent経由のroot接続を確認済み。
+  `origin`はfetchをHTTPS、pushをSSHに設定
+- age identity/recipientとProxmox tokenをKeePassXCへ保存し、実値の`runtime.sops.yaml`を作成済み
+- `make state-backup-preflight`は2026-09-05に成功
+
+## 初回apply前に必要な残作業
 
 - `vmbr0.11`のサブネット不一致の原因と、VMID 112、`.10.42`、NIC名、bridge/VLAN tag、storage IDを確定する
 - IX2215のDHCP leaseとARP、旧`.11.100/.101/.103`所有者、ECW5211のport/SSID mappingを記録する
 - NFS server側でexportと7つのmarkerを作成し、path、UID/GID、ACL/xattr、snapshotを確認する
-- age identity/recipientをKeePassXCに格納し、`runtime.sops.yaml`を実値で暗号化する
-- 初回apply前に`AGE_RECIPIENT`、age identity、SSH agent/socket、SSH pushurl、state追跡状態を
-  `make state-backup-preflight`で検証する
 - Proxmox API tokenとSSH公開鍵を管理端末から渡し、Terraform planをレビューする
-- 7 projectすべてのimageを実機または公開manifestから`repo@sha256:<digest>`へ固定済み。
-  Caddy custom imageは2026-09-05にGitHub ActionsでGHCRへ公開し、manifest digestを
-  `edge/compose.yaml`へ固定した
 - Tailscaleのlive ACL/DNS/route/deviceをexportし、Terraform import先と完全なpolicy差分を確認する
-- Healthchecks.io check/Discord integrationとDiscord webhookを手動作成する
 
 ## 後続のゲート
 
