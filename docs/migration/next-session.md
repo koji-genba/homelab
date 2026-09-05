@@ -108,6 +108,8 @@
 
 ### ネットワーク
 
+- 管理端末のTailscaleは、Apps VM停止中にtailnet DNSへ依存しないようユーザーが切断済み。
+  作業はApps VM `192.168.10.42`とPVE `192.168.10.11`へのLAN直指定で実施した。
 - IX2215のBVI11は`192.168.11.1/25`。**この`/25`は誤りで、期待値は`/24`である。修正はPhase 4で行う。**
 - `interface BVI11`の`ip dhcp binding server_app-dhcp`を解除済み。**running-configのみで
   `write memory`は未実行。** ルータを再起動すると解除が失われる。
@@ -140,26 +142,23 @@ stashPad prod/stagingの`200`、SillyTavernの`401`、SMB 445の到達性、imag
   `dns.kojigenba-srv.com`、`status.kojigenba-srv.com`）の動作確認
 - IoT/Guest/Internetから管理UI、SSH、SMBへ到達できない隔離テスト
 
-7 FQDNの動作確認は完了申告として記録するが、操作内容の内訳は記録されていないため、下記の
-application別read/write項目を自動的に完了扱いにはしない。
-
 ユーザーの確認が必要な項目。
 
-- [ ] stashPad prod/stagingで閲覧、更新、upload、共有mediaを確認する
-- [ ] stashPad prod/stagingのmetadataが分離されている
-- [ ] SillyTavernでlogin、会話、設定保存を確認する
-- [ ] Samba 3 shareを既存userでread/writeできる
+- [x] stashPad prod/stagingで閲覧、更新、upload、共有mediaを確認する（2026-09-05、ユーザー確認）
+- [x] stashPad prod/stagingのmetadataが分離されている（2026-09-05、ユーザー確認）
+- [x] SillyTavernでlogin、会話、設定保存を確認する（2026-09-05、ユーザー確認）
+- [x] Samba 3 shareを既存userでread/writeできる（2026-09-05、ユーザー確認）
 - [x] IoT/Guest/Internetから管理UI、SSH、SMBへ到達できない（2026-09-05、ユーザー確認）
 
 サービス断を伴うため実施タイミングの合意が必要な項目。
 
-- [ ] Apps VM reboot後にmountと全serviceが自動復旧する
-- [ ] NFS未mountまたはmarker不一致ならapplicationが起動しない（fail-closed）
+- [x] Apps VM reboot後にmountと全serviceが自動復旧する（2026-09-05 21:28、boot ID変更、failed unit 0）
+- [x] NFS未mountまたはmarker不一致ならapplicationが起動しない（2026-09-05、mount namespace内で確認）
 
 発火させないと確認できない項目。
 
-- [ ] Gatusが障害と復旧をDiscordへ通知する
-- [ ] Healthchecks.ioがdead-man停止を通知する
+- [x] Gatusが障害と復旧をDiscordへ通知する（2026-09-05、Caddy/Public TLS certificateの障害・resolved通知をDiscordで受信確認）
+- [x] Healthchecks.ioがdead-man停止を通知する（2026-09-05、DOWN/UP通知をDiscordで受信確認）
 
 ### 2. 受入試験の合格後
 

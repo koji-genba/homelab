@@ -16,9 +16,9 @@ suspend、Deployment 6件のreplicas=0、MetalLB speakerの停止、3 Serviceの
 IX2215はVLAN 11のDHCP bindingを解除したが`write memory`は未実行、Tailscaleはlive ACLのexport・reviewは
 済んだがTerraformへのimportは済んでおらず`manage_tailnet=false`を維持、ECW5211とVLAN 10/20/30/40への
 再編（Phase 4）は未着手である。NFS serverのexport設定と既存dataはmount guard用marker追加以外変更していない。
-ProxmoxのTerraform認証、SOPS/age、Discord webhook、Healthchecks.io checkは準備済みだが、受入試験のうち
-実serviceからの通知確認や一部のread/write確認は未検証のまま残っている。2026-09-05にユーザーから
-7 FQDNの動作確認とIoT/Guest/Internet隔離テストの完了申告があった（詳細は「今後の残作業」）。
+ProxmoxのTerraform認証、SOPS/age、Discord webhook、Healthchecks.io checkは準備済みで、2026-09-05に
+実serviceのread/write、FQDN、隔離、再起動、fail-closed、Gatus/Healthchecks.ioのDiscord通知を含む
+application cutoverの受入試験を完了した（詳細は「今後の残作業」）。
 
 ## Gitに実装済み
 
@@ -99,7 +99,7 @@ ProxmoxのTerraform認証、SOPS/age、Discord webhook、Healthchecks.io check�
   tokenの有効期限は2026-12-04 23:59 JST。applyには`Sys.AccessNetwork`と`vmbr0/10`、`vmbr0/11`の
   SDN child ACLも必要だったため、対象へ限定して追加した
 - Discord webhookとHealthchecks.ioの`homelab-apps` check/Discord integrationを手動作成済み。
-  endpointはSOPS bundleへ格納したが、Apps VMからの通知は未検証
+  endpointはSOPS bundleへ格納し、Apps VMからのGatus障害・復旧通知とHealthchecks.ioのDOWN・UP通知を検証済み
 - NFS利用pathのmount、数値UID/GID、mode、ACL/xattr、snapshot、現行clientを再確認した。ZFSは
   `noacl`でmarker作成前のxattrはなく、Kubernetes worker 2台を現行NFS clientとして確認した。
   markerは`root:root`、`0644`で作成し、両workerからNFS越しに全内容を検証済み
@@ -214,15 +214,29 @@ mainへmergeし、Apps VMのcheckoutは`origin/main` `e272c75`と一致してい
 
 ### 受入試験の残項目
 
-- [ ] stashPad prod/stagingで閲覧・更新・upload・共有mediaを確認する（ユーザー確認）
-- [ ] stashPad prod/stagingのmetadataが分離されていることを確認する（ユーザー確認）
-- [ ] SillyTavernでlogin・会話・設定保存を確認する（ユーザー確認）
-- [ ] Samba 3 shareを既存userでread/writeできることを確認する（ユーザー確認）
+- [x] stashPad prod/stagingで閲覧・更新・upload・共有mediaを確認する（2026-09-05、ユーザー確認）
+- [x] stashPad prod/stagingのmetadataが分離されていることを確認する（2026-09-05、ユーザー確認）
+- [x] SillyTavernでlogin・会話・設定保存を確認する（2026-09-05、ユーザー確認）
+- [x] Samba 3 shareを既存userでread/writeできることを確認する（2026-09-05、ユーザー確認）
 - [x] IoT/Guest/Internetから管理UI、SSH、SMBへ到達できないことを確認する（2026-09-05、ユーザー確認）
-- [ ] Apps VM reboot後にmountと全serviceが自動復旧することを確認する（サービス断を伴う）
-- [ ] NFS未mountまたはmarker不一致でapplicationが起動しない（fail-closed）ことを確認する（サービス断を伴う）
-- [ ] Gatusが障害と復旧をDiscordへ通知することを確認する（発火が必要）
-- [ ] Healthchecks.ioがdead-man停止を通知することを確認する（発火が必要）
+- [x] Apps VM reboot後にmountと全serviceが自動復旧することを確認する（2026-09-05 21:28、failed unit 0）
+- [x] NFS未mountまたはmarker不一致でapplicationが起動しない（fail-closed）ことを確認する
+  （2026-09-05、mount namespace内で実mount/markerを変更せず確認）
+- [x] Gatusが障害と復旧をDiscordへ通知することを確認する（2026-09-05、Caddy/Public TLS certificateの障害・resolved通知をDiscordで受信確認）
+- [x] Healthchecks.ioがdead-man停止を通知することを確認する（2026-09-05、DOWN/UP通知をDiscordで受信確認）
+
+2026-09-05 21:21からCaddyだけを停止し、Gatusが3回連続失敗後にCaddyとPublic TLS certificateの
+Discord障害通知を送信するログを確認した。Caddy復旧後は2回連続成功し、両endpointのresolved通知送信ログを
+確認した。CaddyとPublic TLS certificateの障害・resolved通知はいずれもDiscordで受信確認した。21:27から
+Healthchecks timerを約10分停止し、21:37にtimer再開と即時ping成功を確認した。Healthchecks.ioは5分periodと
+grace経過後のDOWN通知、およびping復旧後のUP通知をDiscordで受信確認した。
+
+同じwindowで、Apps serviceを停止してmount namespace内だけでstashPad prod mountを非NFS mountで覆う試験と、
+markerを`/dev/null`で覆う試験を実施した。両方でmount guardとCompose起動が失敗し、container 0件を維持した。
+namespace終了後に実mount/markerが正常なことを確認した。続くApps VM rebootではboot IDが変わり、7 NFS mount
+（stashPad mediaだけro）、3 legacy service IP、7 Compose project、mount guard、reconcile timer、
+Healthchecks timerが自動復旧し、failed unitは0件だった。管理端末のTailscaleはユーザーが切断し、作業は
+Apps VM/PVEのLAN IP直指定で実施した。
 
 ### 受入試験の合格後
 
