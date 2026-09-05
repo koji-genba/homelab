@@ -19,6 +19,8 @@
    - [実装状況](implementation-status.md)
    - [KubernetesからComposeへの移行手順](k8s-to-compose.md)
    - [Apps VM復旧手順](../operations/apps-vm-recovery.md)
+   - [rollback用 状態スナップショット](k8s-rollback-state.md) — Kubernetes VM停止直前に取得した
+     Service定義、replicas、nodeSelector、Flux suspend状態、NFS open stateのベースライン
 2. worktreeとbranchを読み取り専用で確認する。protectedなnetwork 2ファイルを触らない。
 
    ```sh
@@ -105,10 +107,12 @@
   | `external-unbound-dns` | external-dns | `192.168.11.101` |
   | `samba-smb` | samba | `192.168.11.103` |
 
-  変更前の完全なService定義JSONはセッションのscratchpadにのみ存在し、恒久保存されていない。
-  必要なら`kubectl get svc -o json`で現状を再取得すること。
-- Unboundは**旧ReplicaSet `external-unbound-588bcf9d7c`（revision 129）が正常な世代**である。
-  新ReplicaSet `external-unbound-75dd79988f`（revision 288）は不正なRPZでCrashLoopする。
+  変更前後の完全なService定義JSONは[rollback用 状態スナップショット](k8s-rollback-state.md)へ
+  恒久保存済みである。Kubernetes VM停止後は`kubectl`が使えないため、そちらを参照すること。
+- Unboundは、PVC上の`rpz/hagezi-tif.txt`が不正なためscale upするとCrashLoopする。
+  **かつて記録していた「旧ReplicaSet `external-unbound-588bcf9d7c`（revision 129）が正常な世代」は誤りである。**
+  当該ReplicaSetはすでに存在せず、現存する11件はpod templateが完全に同一である。詳細と正しい復旧手順は
+  [rollback用 状態スナップショット](k8s-rollback-state.md)にある。
 
 ### ネットワーク
 
@@ -251,10 +255,13 @@ Kubernetes VMの14日保持期間を開始する前に実施する。手順は
 6. 3つのServiceのtypeを`LoadBalancer`へ戻す。`spec.loadBalancerIP`が固定してあるため
    MetalLBは同じIPを再割り当てする。
 7. ingress-nginx、samba、sillytavern、stashpad-prod/stagingを`--replicas=1`へ戻す。
-8. **Unboundは旧ReplicaSetで復旧する。** 単に`replicas=1`にすると新Podが不正なRPZで再度
-   CrashLoopする。復旧前にNFS server上で
+8. **Unboundは先にPVC上の不正なRPZファイルを退避してからscale upする。** ReplicaSetを選び直す操作は
+   不要かつ不可能である（詳細は[rollback用 状態スナップショット](k8s-rollback-state.md)）。
+   NFS server上の
    `/mnt/tank-gen2/data/k8s-volumes/external-dns-blocklist-data-pvc-8e7db6e1-.../rpz/hagezi-tif.txt`
-   を退避すること。
+   を改名で退避し、必要なら空zoneを置いたうえで`--replicas=1`へ戻す。
+   `blocklist-updater` CronJobのresumeは、downloaderがHTTPエラー本文をファイルへ保存しないよう
+   修正してから行う。修正前にresumeすると同じ事象を再発させる。
 9. Flux Kustomization 4件をresumeする。
 10. IX2215で`interface BVI11`に`ip dhcp binding server_app-dhcp`を再投入する。BVI11のprefixは
     `/24`のままでよい。rollbackで復帰する`.11.100`/`.11.101`/`.11.103`はいずれも旧`/25`の範囲内に
