@@ -2,7 +2,7 @@
 
 - 更新日: 2026-09-05
 - 対象リポジトリ: `/home/s-sato/homelab`
-- 作業ブランチ: `k8s-decommission`（`origin/main` = `c44170d`）
+- 作業ブランチ: `k8s-decommission`（`origin/main` = `e272c75`）
 - 現在地: **Phase 2B application cutover実施済み。Apps VMが唯一のwriterで、7 Compose projectが稼働中**
 
 この文書は、会話履歴がない次セッションが安全に作業を再開するための指示書である。
@@ -75,7 +75,7 @@
 - `ens19`に`192.168.11.100/24`、`192.168.11.101/24`、`192.168.11.103/24`を保持。
   `eth0`は管理用`192.168.10.42/24`のまま。
 - NFS 7 mountのうち`stashpad-media`だけが`ro`、他6つが`rw`。これが正しい状態である。
-- `/opt/homelab`は`origin/main` `c44170d`のcleanなcheckout。`homelab-app-reconcile.timer`はenabled/active。
+- `/opt/homelab`は`origin/main` `e272c75`のcleanなcheckout。`homelab-app-reconcile.timer`はenabled/active。
 - 稼働中imageのdigestはGit宣言と一致している。
 - GatusのCaddy probeは`HTTP 308`を成功として観測している。PR #20の設定変更は、旧bind mount inodeを
   保持したcontainerを手動でforce-recreateして反映した。PR #21のreconcile/rollback修正もAnsibleで
@@ -262,8 +262,8 @@ make ansible-lint ansible-check ansible-bootstrap-paths-test \
 
 ## 完了済みのGit delivery
 
-- PR #7、#9、#14、#15、#16、#17、#18、#19、#20、#21はmainへmerge済みで、各CIは成功済み。
-- `origin/main`は`c44170d`。
+- PR #7、#9、#14、#15、#16、#17、#18、#19、#20、#21、#22はmainへmerge済みで、各CIは成功済み。
+- `origin/main`は`e272c75`。
 - toolbox `ghcr.io/koji-genba/homelab-toolbox:1.0.1`は公開済み。
   digestは`sha256:7607f2c74300504e045b2649ce4032920885c1902dd22c01b4c220fc7067dad0`。
 - Caddy custom imageを含む7 projectのimageはdigest固定済み。

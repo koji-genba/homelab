@@ -207,8 +207,8 @@ prod/staging DBだけだった。
 21:09までにPR #20（Gatus Caddy probe修正）とPR #21（bind mount更新時のreconcile/rollback修正）を
 mainへmergeし、Apps VMへ反映した。Gatus containerは手動force-recreate後、Caddy probeを`HTTP 308`、
 `success=true`として観測した。Ansible適用は`failed=0`で、reconcile/rollback helper 2本を更新し、
-runtime入力に差分がなかったため全Compose projectの再作成は発生しなかった。Apps VMのcheckoutは
-`origin/main` `c44170d`と一致している。
+runtime入力に差分がなかったため全Compose projectの再作成は発生しなかった。PR #22の文書更新も
+mainへmergeし、Apps VMのcheckoutは`origin/main` `e272c75`と一致している。
 
 ## 今後の残作業
 
