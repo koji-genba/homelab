@@ -1,24 +1,31 @@
 # 実装状況
 
-- 状態: フェーズ0/1 apply・受入確認、Phase 2A読み取り専用調査に続けて、2026-09-05に
-  Phase 2B application cutoverを実施済み。**Apps VMが唯一のwriterとなり、7 Compose projectが稼働中**。
-  旧KubernetesはVMこそ起動しているがwriterではない。Phase 3（再構築性試験）と、それに続く
-  Kubernetes VM 14日保持期間はまだ開始していない
-- 更新日: 2026-09-05
+- 状態: フェーズ0/1 apply・受入確認、Phase 2A読み取り専用調査、2026-09-05のPhase 2B
+  application cutoverに続けて、2026-09-06に**Phase 3の再構築性試験を実施した**。
+  Apps VM（VMID 112）をTerraformでdestroyし、Terraform・Ansible・Gitから再構築して復旧させた。
+  **Apps VMが唯一のwriterであり、7 Compose projectが稼働中**。
+  **旧Kubernetes VM 101/102/103は2026-09-05に停止した（削除はしていない）。**
+  **受入試験は12項目すべて合格した**（自動確認5項目に加え、2026-09-06にユーザーが残り7項目を確認）。
+  **Kubernetes VM 14日保持期間は2026-09-06に開始し、2026-09-20に満了する**
+- 更新日: 2026-09-06
 - 手順書: [KubernetesからComposeへの移行](k8s-to-compose.md)
 - 関連文書: [Phase 2A事前調査結果](phase2a-inventory.md)（実測値、cutover/rollback手順）、
   [次セッションへの作業指示](next-session.md)（最新の実機状態と残作業の一次情報）
 
 この文書は設計、ローカル実装、実機反映を区別する。2026-09-05のPhase 2B application cutoverにより、
 Apps VMが唯一のwriterとなり、Caddy/AdGuard Home/Samba/stashPad prod・staging/SillyTavern/Gatusの
-7 Compose projectが稼働している。旧KubernetesはVMを起動したまま残しているが、Flux Kustomization 4件の
-suspend、Deployment 6件のreplicas=0、MetalLB speakerの停止、3 ServiceのClusterIP化によりwriterではない。
-IX2215はVLAN 11のDHCP bindingを解除したが`write memory`は未実行、Tailscaleはlive ACLのexport・reviewは
+7 Compose projectが稼働している。旧Kubernetesは、Flux Kustomization 4件のsuspend、Deployment 6件の
+replicas=0、MetalLB speakerの停止、3 ServiceのClusterIP化でwriterから降ろしたうえで、
+2026-09-05にVM 101/102/103を`qm shutdown`で停止した。VM、disk、PVC、NFS data、ZFS snapshotは
+いずれも削除しておらず、rollback時は起動して復旧できる。
+IX2215はVLAN 11のDHCP bindingを解除して`write memory`で保存済み、さらに2026-09-05にBVI11を
+`192.168.11.1/25`から`/24`へ修正し、ACL 3本（`server_app-out`、`default-out`、`guest-out`）の
+`/25`表記を`/24`へ更新して`write memory`で保存済みである。Tailscaleはlive ACLのexport・reviewは
 済んだがTerraformへのimportは済んでおらず`manage_tailnet=false`を維持、ECW5211とVLAN 10/20/30/40への
 再編（Phase 4）は未着手である。NFS serverのexport設定と既存dataはmount guard用marker追加以外変更していない。
-ProxmoxのTerraform認証、SOPS/age、Discord webhook、Healthchecks.io checkは準備済みだが、受入試験のうち
-実serviceからの通知確認や一部のread/write確認は未検証のまま残っている。2026-09-05にユーザーから
-7 FQDNの動作確認とIoT/Guest/Internet隔離テストの完了申告があった（詳細は「今後の残作業」）。
+ProxmoxのTerraform認証、SOPS/age、Discord webhook、Healthchecks.io checkは準備済みで、2026-09-05に
+実serviceのread/write、FQDN、隔離、再起動、fail-closed、Gatus/Healthchecks.ioのDiscord通知を含む
+application cutoverの受入試験を完了した（詳細は「今後の残作業」）。
 
 ## Gitに実装済み
 
@@ -99,7 +106,7 @@ ProxmoxのTerraform認証、SOPS/age、Discord webhook、Healthchecks.io check�
   tokenの有効期限は2026-12-04 23:59 JST。applyには`Sys.AccessNetwork`と`vmbr0/10`、`vmbr0/11`の
   SDN child ACLも必要だったため、対象へ限定して追加した
 - Discord webhookとHealthchecks.ioの`homelab-apps` check/Discord integrationを手動作成済み。
-  endpointはSOPS bundleへ格納したが、Apps VMからの通知は未検証
+  endpointはSOPS bundleへ格納し、Apps VMからのGatus障害・復旧通知とHealthchecks.ioのDOWN・UP通知を検証済み
 - NFS利用pathのmount、数値UID/GID、mode、ACL/xattr、snapshot、現行clientを再確認した。ZFSは
   `noacl`でmarker作成前のxattrはなく、Kubernetes worker 2台を現行NFS clientとして確認した。
   markerは`root:root`、`0644`で作成し、両workerからNFS越しに全内容を検証済み
@@ -138,9 +145,12 @@ ProxmoxのTerraform認証、SOPS/age、Discord webhook、Healthchecks.io check�
   inventoryの宣言値`kube_proxy_strict_arp: true`とdriftしており、MetalLB speakerを停止しても
   nodeが`kube-ipvs0`経由でLoadBalancer IPへのARPを返し続けたため、service IP解放にはServiceの
   ClusterIP化が別途必要だった
-- IX2215のBVI11は`192.168.11.1/25`（期待値`/24`との不一致は既知でPhase 4修正対象）で、
-  `server_app-dhcp`のDHCP leaseは実測で0件だった。影響を受けるclientがないことを確認した上で
-  `interface BVI11`の`ip dhcp binding server_app-dhcp`を解除した（`write memory`は未実行）
+- IX2215のBVI11は`192.168.11.1/25`で、`server_app-dhcp`のDHCP leaseは実測で0件だった
+  （Phase 2A調査時点の観測値。歴史的記録として残す）。影響を受けるclientがないことを確認した上で
+  `interface BVI11`の`ip dhcp binding server_app-dhcp`を解除した。2026-09-05にユーザーが
+  `write memory`を実行し、解除後のrunning-configをstartup-configへ保存済みである。同日、
+  BVI11の`ip address`を`/25`から`/24`へ修正済みである（詳細は後述の
+  「IX2215構成ドリフトの解消（2026-09-05）」）
 
 ## フェーズ1 apply・受入確認済み
 
@@ -207,43 +217,353 @@ prod/staging DBだけだった。
 21:09までにPR #20（Gatus Caddy probe修正）とPR #21（bind mount更新時のreconcile/rollback修正）を
 mainへmergeし、Apps VMへ反映した。Gatus containerは手動force-recreate後、Caddy probeを`HTTP 308`、
 `success=true`として観測した。Ansible適用は`failed=0`で、reconcile/rollback helper 2本を更新し、
-runtime入力に差分がなかったため全Compose projectの再作成は発生しなかった。Apps VMのcheckoutは
-`origin/main` `c44170d`と一致している。
+runtime入力に差分がなかったため全Compose projectの再作成は発生しなかった。PR #22の文書更新も
+mainへmergeし、Apps VMのcheckoutは`origin/main` `e272c75`と一致している。
+
+## IX2215構成ドリフトの解消（2026-09-05）
+
+2026-09-05にユーザーがIX2215のCLIで次を実施し、`write memory`まで完了した。
+
+1. `interface BVI11`の`ip address`を`192.168.11.1/25`から`/24`へ変更した。新しい`ip address`の
+   投入で上書きされ、`no ip address`は不要だった。`show ip route`で
+   `C 192.168.11.0/24 ... BVI11`を確認した。
+2. ACL 3本の`192.168.11.0/25`を`/24`へ更新した。`server_app-out`（srcの5エントリ）、
+   `default-out`（destの1エントリ）、`guest-out`（destの1エントリ）。`iot-out`、`main-out`、
+   `server-out`は元から`/24`で無変更だった。
+3. **IX2215のACLは投入順に末尾追加され、エントリ単位のシーケンス番号や途中挿入の構文がない。**
+   そのため個別エントリを`no`で消して再投入すると、末尾の`permit ip src any dest any`の後ろに
+   回り、永久に評価されなくなる。実際に`default-out`と`guest-out`でこれが発生し、VLAN 63 →
+   VLAN 11とGuest VLAN 40 → VLAN 11のdenyが一時的に無効化された。変更前は`/25`のdenyが
+   `permit any`より前にあって有効だったため、**一時的にcutover前より弱い状態を作った**。
+4. 復旧方法（`server_app-out`では最初からこの方法を用いた）は次の順序である。インターフェースから
+   `ip filter`のバインドを外す → `no ip access-list <名前>`でリストごと削除する →
+   `option optimize`を先頭に、正しい順序で全エントリを再投入する → `ip filter`を再バインドする。
+   フィルタを先に外すのは、空または未定義のACLを`ip filter`が参照した場合の挙動をNEC公式資料で
+   確認できなかったため、無フィルタ＝素通りという既知の状態に倒して通信断を避ける意図である。
+5. 事後確認として、BVI63に`ip filter default-out 10 in`、BVI40に`ip filter guest-out 10 in`が
+   戻っていることと、Guest VLAN 40の端末から`192.168.11.100`へ到達できないことをユーザーが
+   実測した。そのうえで`write memory`を実行した。
+6. 実機のソフトウェアバージョンは**10.11.6**（`Compiled May 22-Thu-2025`）であり、記録上の
+   10.7.18とドリフトしていた。`config.txt`と`README.md`を10.11.6へ更新済みである。
+7. 実機にある`system interfaces bvi 64`が記録に無かったため`config.txt`へ追加した。`sflow`の
+   2行は実機にも存在し、記録上の位置だけがずれていたので実機の順序へ移動した。
+8. 実機の`show running-config`全文を`config.txt`と照合した。注釈コメントと`!`の区切り行を
+   除く293行は、両者で行の集合が完全に一致する。
+9. 照合の過程で、`config.txt`に実機へ存在しない`interface GigaEthernet2.0`の重複定義
+   （`no ip address`と`shutdown`のみを持つblock）が残っていることが判明したため削除した。
+   実機のGigaEthernet2.0は`bridge-group 63`かつ`no shutdown`である。**この重複を残したまま
+   `config.txt`を実機へ投入すると、untaggedポートを`shutdown`する危険があった。**
+10. `config.txt`は注釈付きの記録であり、`show running-config`の逐語dumpではない。内容は一致するが
+    blockの並び順が3箇所で異なる。`device GigaEthernet2`内のsflowとvlan-groupの順、
+    `interface GigaEthernet2.0`の位置、`interface GigaEthernet2:1.0`から`2:6.0`までの位置である。
+    次回照合する際は行の並びではなく行の集合として比較すること。
+11. `interface BVI11`の`ip dhcp binding server_app-dhcp`は解除済みのまま（今回変更していない）。
+    `ip dhcp profile server_app-dhcp`の定義自体は残してある。
+12. BVI11が`/24`になったことで、MetalLB pool（`.100-.200`）が`/25`を超えているという既知の
+    不整合は解消した。
+
+## Kubernetes VMの停止（2026-09-05）
+
+Phase 2B application cutoverの受入試験と、IX2215構成ドリフトの解消が完了したため、
+Kubernetes VM 3台を停止した。**停止のみであり、VM、disk、PVC、NFS data、ZFS snapshotは削除していない。**
+Phase 3の再構築試験に合格するまで削除しない。
+
+### 停止前に取得したもの
+
+停止すると`kubectl`が使えなくなるため、rollbackに必要な値を
+[rollback用 状態スナップショット](k8s-rollback-state.md)へ恒久保存した。Service 3件の完全なJSON、
+Deployment replicas、`metallb-speaker`のnodeSelector、Flux suspend状態、PVC/PV一覧、
+NFS open stateのベースラインを含む。それまで変更前のService定義はセッションのscratchpadにしか
+存在せず、恒久保存されていなかった。
+
+あわせて、これまでの記録にあった**Unbound復旧手順の誤りを訂正した**。「旧ReplicaSet
+`external-unbound-588bcf9d7c`（revision 129）が正常な世代」という記述は誤りである。
+Deploymentの`revisionHistoryLimit`は`10`で、当該ReplicaSetはとうに回収されて存在しない。
+現存する11件（revision 278〜288）はpod templateが完全に同一であり、差分は
+`kubectl.kubernetes.io/restartedAt` annotationと`pod-template-hash`だけである
+（template本体のhashは全件`edb261e79bf9d3d6`、imageは全件`ghcr.io/koji-genba/external-unbound:v1.8`）。
+CrashLoopの原因はReplicaSetではなくPVC上の`rpz/hagezi-tif.txt`であり、中身はRPZ zoneではなく
+GitHub側のサイズ超過エラー文（143 bytes）だった。`blocklist-updater`のdownloaderがHTTPエラー本文を
+そのままファイルへ保存したことが原因である。正しい復旧手順はスナップショット文書に記載した。
+
+### 停止前のベースライン（すべて合格）
+
+- Compose 7 containerすべて`Up`、`homelab-apps.service`は`active`、failed unit 0件
+- `ens19`に`192.168.11.100` `.101` `.103`を保持
+- 7 FQDNのHTTPS: stashPad prod/staging系4件が`200`、SillyTavern `401`、dns `302`、status `401`。
+  TLS検証は全件`ssl_verify_result=0`
+- DNS: 外部名前解決、内部record（`prod.stashpad` → `192.168.11.100`）、ブロック
+  （`ads.doubleclick.net`と`analytics.google.com`がNXDOMAIN）すべて正常
+- SMB `192.168.11.103:445`到達可
+- VM 101/102/103は`Ready`、QEMU guest agentが3台とも応答
+
+**apexの`doubleclick.net`はブロックされず実IPを返すが、これは正常である。**
+hagezi側でapexが許可されているためであり、ブロック機能の確認には
+`ads.doubleclick.net`など実際にリストへ載るFQDNを使うこと。
+
+### 停止の実施
+
+worker → control planeの順で`qm shutdown --timeout 180`を実行した。guest agentが応答したため
+3台ともクリーンに停止し、`qm stop`による強制停止は不要だった。
+
+| 順 | VMID | name | 所要 |
+| --- | --- | --- | --- |
+| 1 | 103 | `k8s-worker02` | 約16秒 |
+| 2 | 102 | `k8s-worker01` | 約4秒 |
+| 3 | 101 | `k8s-master01` | 約4秒 |
+
+### 停止後の確認（すべて合格）
+
+- VM 101/102/103が`stopped`。112 `apps`、105、110、111は`running`のまま
+- Compose 7 containerは再起動なしで`Up`を継続。failed unit 0件、service IP 3つを保持
+- 7 FQDNのHTTPSは停止前と同一の結果（`200`×4、`401`、`302`、`401`、TLS検証すべて`0`）
+- DNSの外部解決・内部record・ブロックいずれも停止前と同一
+- SMB 445到達可
+
+### NFS open stateの扱い（想定と異なるが正常）
+
+停止後もworker01/02のclient entryと`rpz/hagezi-pro.txt`へのread-only openが`states`に残る。
+これはLinux nfsdの**courteous server**によるもので、`info`の`status`が`confirmed`から
+`courtesy`へ遷移している。lease期限を過ぎてもread openやdelegationしか持たないclientは
+即座にexpireせず、最大24時間保持される仕様である。
+
+| client | 停止前 | 停止後 | open |
+| --- | --- | --- | --- |
+| `192.168.10.42` apps | `confirmed`、callback UP | `confirmed`、callback UP | stashPad prod/staging DBのrw open + write delegation 計20件 |
+| `192.168.10.22` k8s-worker01 | すでに`courtesy`（last renewから17896秒） | `courtesy` | `rpz/hagezi-pro.txt`へのread-only open 6件 |
+| `192.168.10.23` k8s-worker02 | `confirmed` | `courtesy` | `rpz/hagezi-pro.txt`へのread-only open 4件 |
+
+worker01は停止前の時点ですでに`courtesy`だった。つまりこのstateは今回の停止で生じたものではなく、
+以前scale downした旧Unbound Podが残したものである。いずれもread-onlyでdataへの影響はなく、
+競合するアクセスがあればnfsdがrevokeする。**`ctl`への書き込みによる強制expireは行っていない。**
+24時間以内に自然消滅するため、`states`から消えたことの確認はPhase 3の作業時に行えばよい。
+
+### 併せて判明したこと（停止とは無関係の既存事象）
+
+Apps VMのhost側resolverは`systemd-resolved`で、`eth0`のuplink DNSが`192.168.10.1`と`1.1.1.1`に
+なっている。`192.168.10.1`はTCP/UDP 53を`connection refused`で拒否し、`1.1.1.1`は内部recordを
+持たないため、**Apps VM自身のhost namespaceからは`*.kojigenba-srv.com`を解決できない。**
+`192.168.11.101`のAdGuardへ明示的に問い合わせれば正しく解決する。
+
+これはKubernetes VMの停止によるものではない。いずれのuplinkもKubernetesに依存していないためである。
+実害も現時点ではない。Gatusはcontainer名（`http://caddy:80`等）で監視し、Docker内のcontainerは
+public名の解決だけをhost resolverに依存するためである。**ただしhost側でFQDNを解決する運用スクリプトを
+追加する場合はこの前提が崩れる。** Phase 4でApps VMを`192.168.10.101`へ集約し
+global nameserverを移す際に解消される見込みである。
+
+## Phase 3: 再構築性の証明（2026-09-06、全項目合格）
+
+Apps VM（VMID 112）をTerraformで実際にdestroyし、Terraform・Ansible・Gitから再構築した。
+snapshot restoreは使っていない。**受入試験12項目すべてに合格し、
+2026-09-06をKubernetes VM 14日保持期間の開始日とした。満了は2026-09-20である。**
+ただしこの試験は、**「GitとIaCだけから復旧できる」という前提が現状では成立しないこと**も
+明らかにした。詳細は後述。
+
+### 着手前のゲート（すべて充足を実測した）
+
+| ゲート | 実測結果 |
+| --- | --- |
+| maintenance window合意 | ユーザーが2026-09-06に合意 |
+| `ssh_public_key` | `~/.ssh/id_ed25519.pub`が実機の`authorized_keys`とpve1のcloud-init snippetに完全一致（`SHA256:sO3YKq4n3xcYwpcA0ODswjoJ+YnlK/JEaW4V5/7Vtw0`） |
+| `proxmox_api_token` | ユーザーが`/dev/shm`の一時ファイルで供給。`terraform plan`が実機3 resourceをrefreshし`No changes`となることで有効性を確認してからdestroyへ進んだ |
+| age秘密鍵 | `~/.config/sops/age/keys.txt`（mode 600）。recipientと一致することをroundtripで確認 |
+| `make state-backup-preflight` | `AGE_RECIPIENT`・`AGE_IDENTITY_FILE`・`SSH_AUTH_SOCK`を与えてexit 0 |
+| `make state-backup` | `origin/state-backup`にserial 11の現行stateが退避済みであることを、復号比較（`state-backup unchanged at 39ee06b5`）で確認 |
+| ZFS snapshot | `@pre-compose-cutover-20260905`が4 datasetに現存 |
+| rollback可能性 | VM 101/102/103とそのdiskが現存 |
+
+### writerの解放
+
+`homelab-apps.service`と`homelab-app-reconcile.timer`と`homelab-service-addresses`を停止し、
+`ens19`から`.11.x`が消えたことを確認した。この時点でNFS serverの`states`からApps VMの
+rw open 6件とwrite delegation 6件が消え、marker等へのread delegation 8件だけが残った。
+NFS 7 mountをすべてumountすると、`/proc/fs/nfsd/clients/`からApps VMのclient entryごと消滅した。
+残ったのはk8s worker 2台の`courtesy`エントリのみで、全stateが`access: r-`だった。
+その後`@pre-phase3-20260906`を4 datasetへ取得した。
+
+### destroy
+
+`terraform plan -destroy`を保存し、対象が次の3件だけであること（`0 to add, 0 to change, 3 to destroy`）、
+`vm_id`が112、`node_name`が`pve1`であることをplan fileのJSONから確認してからapplyした。
+
+destroyの前に、Debian cloud imageのURLがpve1から`200`で取得でき、`Content-Length`が
+pve1上の現物と完全一致（340262912 bytes）することを確認した。消してから再downloadできない事態を避けるためである。
+
+destroy後、VMID 112のconfig・disk（`vmpool/vm-112-*`）・cloud-init snippet・importしたimageがすべて
+消滅し、VM 101/102/103のdiskは無傷であることをpve1で確認した。
+
+### 再構築（1回目は失敗、原因は後述）
+
+ACL復旧後、`make terraform-plan`（VM 112のcreate 1件のみ、image/snippetは`no-op`）→
+`make terraform-apply`で成功した。`terraform-apply`は内部で`state-backup-preflight` → apply →
+plan file削除 → `state-backup`を実行し、stateは`origin/state-backup`へpushされた（`39ee06b..b215ff2`）。
+
+SSH host keyは変わった。`known_hosts`の旧エントリを`ssh-keygen -R`で削除し（**文書には25・26行目と
+記録していたが、実際は25・26・27行目の3エントリだった**）、新しい鍵をQEMU guest agent経由と
+network上の`ssh-keyscan`の2経路で独立に取得し、一致を確認してから登録した
+（`SHA256:9U1BvsqDUUQASaGfCqLSei5HdOV17gkNUsUa1ahEpys`）。
+
+`make ansible-check`（syntax）に続けて`make ansible-apply`を実行し、
+`ok=82 changed=49 unreachable=0 failed=0 skipped=6`で完了した。
+`group_vars/apps.yml`のcutover flagは現在値（true/true/true/false）を維持している。
+
+### 再構築で変わったもの
+
+NICのMACアドレスは想定どおり変わった。
+
+| NIC | 旧 | 新 |
+| --- | --- | --- |
+| `net0`（eth0、VLAN 10） | `BC:24:11:9E:9B:29` | `BC:24:11:D7:47:A2` |
+| `net1`（ens19、VLAN 11） | `BC:24:11:84:F3:EA` | `BC:24:11:2E:FB:64` |
+
+管理IPはcloud-initの静的設定のため影響を受けていない。MACに紐づくDHCP予約やルールは使っていない。
+
+### 受入試験（12項目すべて合格）
+
+- 7 Compose projectが稼働し、稼働imageのdigestがGit宣言と7/7一致。`/opt/homelab`は`origin/main` `e272c75`のclean checkout
+- NFS 7 mountが復旧し、`stashpad-media`だけが`ro`、他6つが`rw`
+- `ens19`に`.11.100`/`.11.101`/`.11.103`、`eth0`に`192.168.10.42/24`
+- 7 FQDNがHTTPS `200`×4、SillyTavern `401`、dns `302`、status `401`。TLS検証も成功。
+  **証明書はLet's Encryptから再取得されたもの**（`prod.stashpad`の有効期限は2026-12-05）で、
+  Cloudflare DNS-01によるACME経路がIaCだけから復元されたことを示す
+- DNSは4種すべて期待どおり。通常解決、内部rewrite（`dnsTestRecord.kojigenba-srv.com` → `192.168.63.254`）、
+  上流フィルタによるblock（`blocking_mode: nxdomain`のとおりNXDOMAIN）、allowlist（`t.co`がNOERROR）。
+  **`doubleclick.net`と`googleadservices.com`はHaGeZi Proに完全一致ルール（`||doubleclick.net^`等）が
+  存在しないため解決するのが正しい。** これらをblockの判定に使わないこと
+- SMB 445が到達可能
+- NFS未mountでapplicationが起動しないことを確認した。NFSを1つumountして
+  `systemctl start homelab-apps.service`を試みると`homelab-compose-up`が
+  `homelab mount guard: /srv/homelab/nfs/shared source is , expected 192.168.10.11:/mnt/shared`で拒否し、
+  containerは1つも起動しなかった。**`homelab-mount-guard.service`は`RemainAfterExit=yes`のoneshotのため
+  稼働中のumountでは再実行されないが、`homelab-compose-up`自身が起動のたびにmountを検証しているため
+  保護は成立している。**
+- reboot後にmountと全serviceが自動復旧した。boot IDが変化し、上記で手動umountしたmountもfstabから
+  復旧し、7 container稼働、failed unit 0
+- NFS serverでwrite openを持つclientはApps VM（`192.168.10.42`）だけであり、
+  k8s worker 2台のwrite openは0件
+
+`homelab-healthchecks-ping.service`は断の最中（12:30:55）に一度失敗し12:32:02に成功へ復帰した。
+dead-man監視が意図どおり発火したことを示す。復帰後のfailed unitは0件である。
+
+副次的に、PR #19で修正した「Ansible templateの改行消失によりsystemd directiveが無効化される」不具合が
+再構築後も再発していないことを、`systemctl show`が`PartOf=docker.service`と
+`Wants=network-online.target`を正しく返すことで確認した。
+
+### この試験が明らかにした欠陥（Proxmox権限がIaCの外にある）
+
+**`terraform destroy`でVMID 112を削除した際、Proxmoxが`/vms/112`のACLエントリをVMと一緒に自動削除した。**
+その結果、直後の`terraform apply`によるVM再作成が
+`error creating VM: received an HTTP 403 response - Reason: Permission check failed`で失敗した。
+image download（`proxmox_download_file`）とcloud-init snippet作成（`proxmox_virtual_environment_file`）は
+成功しており、`VM.Allocate`を要するVM createだけが拒否された。role `HomelabTerraform`自体は
+`VM.Allocate`を保持していたが、それを与えるpathが消えていたことが原因である。
+
+復旧はユーザーがpve1で
+`pveum acl modify /vms/112 --user terraform@pve --role HomelabTerraform`を実行して行った。
+削除前と同一スコープであり、権限拡大はしていない。
+
+Proxmoxのuser `terraform@pve`、role `HomelabTerraform`、API token `terraform@pve!apps-vm`、
+7 ACL pathはいずれもGitにもTerraformにも宣言されておらず、手動作成である。
+**したがって「Proxmoxインストール済みの状態からGitとIaCだけで再構築できる」という前提は、
+現状では成立していない。** 前提条件と復旧手順は
+[Apps VM復旧手順の「Terraform実行前のProxmox側準備」](../operations/apps-vm-recovery.md)へ明文化した。
+恒久対策（Proxmox側の権限をTerraformまたは冪等なスクリプトで宣言する）は未実施である。
+
+### ユーザー確認項目（2026-09-06、すべて合格）
+
+自動確認できない次の項目を、ユーザーがTailscale再接続後に確認して合格を申告した。
+
+- [x] stashPad prod/stagingで閲覧・更新・upload・共有mediaを確認する（2026-09-06、ユーザー確認）
+- [x] stashPad prod/stagingのmetadataが分離されている（2026-09-06、ユーザー確認）
+- [x] SillyTavernでlogin・会話・設定保存を確認する（2026-09-06、ユーザー確認）
+- [x] Samba 3 shareを既存userでread/writeできる（2026-09-06、ユーザー確認）
+- [x] Tailscaleから既存FQDN/TLSへ接続できる（2026-09-06、ユーザー確認）
+- [x] IoT/Guest/Internetから管理UI、SSH、SMBへ到達できない（2026-09-06、ユーザー確認）
+- [x] GatusとHealthchecks.ioのDiscord通知が届いている（2026-09-06、ユーザー確認）
+
+### 合格の確定と14日保持期間
+
+**Phase 3は2026-09-06に全項目合格した。** これによりKubernetes VM 14日保持期間が
+同日から開始し、**2026-09-20に満了する**。満了日までにrollbackが発生していなければ、
+Phase 5の廃止作業へ進める。
+
+**満了日までは、VM 101/102/103、そのdisk、PVC、NFS data、ZFS snapshot
+（`@pre-compose-cutover-20260905`と`@pre-phase3-20260906`）のいずれも削除しない。**
 
 ## 今後の残作業
 
 ### 受入試験の残項目
 
-- [ ] stashPad prod/stagingで閲覧・更新・upload・共有mediaを確認する（ユーザー確認）
-- [ ] stashPad prod/stagingのmetadataが分離されていることを確認する（ユーザー確認）
-- [ ] SillyTavernでlogin・会話・設定保存を確認する（ユーザー確認）
-- [ ] Samba 3 shareを既存userでread/writeできることを確認する（ユーザー確認）
+- [x] stashPad prod/stagingで閲覧・更新・upload・共有mediaを確認する（2026-09-05、ユーザー確認）
+- [x] stashPad prod/stagingのmetadataが分離されていることを確認する（2026-09-05、ユーザー確認）
+- [x] SillyTavernでlogin・会話・設定保存を確認する（2026-09-05、ユーザー確認）
+- [x] Samba 3 shareを既存userでread/writeできることを確認する（2026-09-05、ユーザー確認）
 - [x] IoT/Guest/Internetから管理UI、SSH、SMBへ到達できないことを確認する（2026-09-05、ユーザー確認）
-- [ ] Apps VM reboot後にmountと全serviceが自動復旧することを確認する（サービス断を伴う）
-- [ ] NFS未mountまたはmarker不一致でapplicationが起動しない（fail-closed）ことを確認する（サービス断を伴う）
-- [ ] Gatusが障害と復旧をDiscordへ通知することを確認する（発火が必要）
-- [ ] Healthchecks.ioがdead-man停止を通知することを確認する（発火が必要）
+- [x] Apps VM reboot後にmountと全serviceが自動復旧することを確認する（2026-09-05 21:28、failed unit 0）
+- [x] NFS未mountまたはmarker不一致でapplicationが起動しない（fail-closed）ことを確認する
+  （2026-09-05、mount namespace内で実mount/markerを変更せず確認）
+- [x] Gatusが障害と復旧をDiscordへ通知することを確認する（2026-09-05、Caddy/Public TLS certificateの障害・resolved通知をDiscordで受信確認）
+- [x] Healthchecks.ioがdead-man停止を通知することを確認する（2026-09-05、DOWN/UP通知をDiscordで受信確認）
+
+2026-09-05 21:21からCaddyだけを停止し、Gatusが3回連続失敗後にCaddyとPublic TLS certificateの
+Discord障害通知を送信するログを確認した。Caddy復旧後は2回連続成功し、両endpointのresolved通知送信ログを
+確認した。CaddyとPublic TLS certificateの障害・resolved通知はいずれもDiscordで受信確認した。21:27から
+Healthchecks timerを約10分停止し、21:37にtimer再開と即時ping成功を確認した。Healthchecks.ioは5分periodと
+grace経過後のDOWN通知、およびping復旧後のUP通知をDiscordで受信確認した。
+
+同じwindowで、Apps serviceを停止してmount namespace内だけでstashPad prod mountを非NFS mountで覆う試験と、
+markerを`/dev/null`で覆う試験を実施した。両方でmount guardとCompose起動が失敗し、container 0件を維持した。
+namespace終了後に実mount/markerが正常なことを確認した。続くApps VM rebootではboot IDが変わり、7 NFS mount
+（stashPad mediaだけro）、3 legacy service IP、7 Compose project、mount guard、reconcile timer、
+Healthchecks timerが自動復旧し、failed unitは0件だった。管理端末のTailscaleはユーザーが切断し、作業は
+Apps VM/PVEのLAN IP直指定で実施した。
 
 ### 受入試験の合格後
 
-- [ ] IX2215で`write memory`を実行し、DHCP binding解除を保存する
-- [ ] Kubernetes VMを停止する（削除はしない。安定を確認してからでよい）
+- [x] IX2215で`write memory`を実行し、DHCP binding解除を保存する（2026-09-05、ユーザー実行）
+- [x] Kubernetes VMを停止する（削除はしない）（2026-09-05実施。上記「Kubernetes VMの停止」を参照）
 
-### Phase 3: 再構築性の証明
+### Phase 3: 再構築性の証明（2026-09-06、全項目合格）
 
-Kubernetes VMの14日保持期間を開始する前に実施する。手順は
-[k8s-to-compose.mdのフェーズ3](k8s-to-compose.md)に従い、snapshot restoreで代替しない。
-**合格した日が、Kubernetes VM 14日保持期間の開始日である。この14日はまだ開始していない。**
+**実施し、受入試験12項目すべてに合格した。** 経緯・実測値・判明した欠陥は上記
+「[Phase 3: 再構築性の証明（2026-09-06、自動確認範囲は合格）](#phase-3-再構築性の証明2026-09-06自動確認範囲は合格)」にある。
+**Kubernetes VM 14日保持期間は合格日2026-09-06に開始し、2026-09-20に満了する。**
+
+以下は着手前の2026-09-06にリポジトリを調査して記録した事実である。実施後も有効な前提として残す。
+
+- **`make`にdestroy targetは存在しない。** `Makefile`と`scripts/`のどこにも`destroy`の文字列がない。
+  破壊試験は`terraform -chdir=files/infrastructure/terraform/apps-vm destroy`を手動で実行する。
+- Apps VMのTerraform stateは**ローカルbackend**（`backend`ブロックなし）で、実体は
+  `files/infrastructure/terraform/apps-vm/terraform.tfstate`（mode 0600、git管理外）である。
+  退避先branch`state-backup`はoriginに存在する。復旧は`make state-restore`。
+- このstateに含まれるresourceは`proxmox_virtual_environment_vm.apps`、
+  `proxmox_virtual_environment_file.cloud_config`、`proxmox_download_file.debian_cloud_image`の
+  3件だけである。Tailscaleは別rootかつ別stateなので巻き込まれない。
+  **`debian_cloud_image`も破棄されるため、再applyでcloud imageの再downloadが走る。**
+- `prevent_destroy`は設定されていない。`main.tf`の`lifecycle`は
+  `ignore_changes = [initialization[0].user_data_file_id]`のみである。
+- **`default`を持たない必須変数は`proxmox_api_token`と`ssh_public_key`の2つだけである。**
+  この作業環境に`terraform.tfvars`は存在しないため、前回のapplyは`TF_VAR_*`で供給されたとみられる。
+  **供給できることをdestroyの前に確認しないと再構築できなくなる。**
+- `make state-backup-preflight`は現状の作業環境ではそのままでは失敗する。
+  `AGE_RECIPIENT`、`AGE_IDENTITY_FILE`、`SSH_AUTH_SOCK`がいずれもunsetだからである。
+  age秘密鍵自体は`~/.config/sops/age/keys.txt`に存在する。
+- 再構築でNICのMACアドレスとSSH host keyが変わる。現在のMACは`eth0`（VLAN 10）が
+  `BC:24:11:9E:9B:29`、`ens19`（VLAN 11）が`BC:24:11:84:F3:EA`である。管理IPは
+  cloud-initの静的設定なのでDHCPには依存しない。
+- Apps VMのhost resolverが内部FQDNを解決できない件は、Terraformの`dns_servers`既定値が
+  `["192.168.10.1", "1.1.1.1"]`であることに由来する宣言どおりの結果であり、ドリフトではない。
+  **Phase 3では直さない。** 解消はPhase 4で行う。
 
 ### Phase 4: ネットワーク移行
 
 別のmaintenance windowで実施し、application cutoverへ混ぜない。含まれるのは次である。
 
-- BVI11の`/25`→`/24`修正と、それに伴うACL（`server_app-out`）の更新
-- `files/infrastructure/network/README.md`と`config.txt`の反映（ユーザー管理。本作業では触っていない）
+- `files/infrastructure/network/README.md`と`config.txt`の反映（ユーザー管理）。BVI11の`/24`化と
+  実機バージョン整合は2026-09-05に反映済みのため、Phase 4で残るのはVLAN 10/20/30/40再編に伴う
+  変更に限る
 - Tailscale live ACLのTerraform import、global nameserverの`192.168.10.101`への変更
 - VLAN 10/20/30/40への再編、ECW5211の設定、Apps VMの`192.168.10.101`への集約
-- MetalLB pool（`.100-.200`）が`/25`を超えている不整合の解消（MetalLB廃止で自然に解消）
 
 ### Phase 5: 廃止
 
@@ -254,12 +574,12 @@ orphan directory 7件（openldap 3世代、旧blocklist 2世代、旧stashpad pr
 ## 後続のゲート
 
 Phase 3の再構築性試験（Apps VMをTerraform/Ansible/Gitから実際に削除・再構築する試験）に
-合格した日から14日間の安定稼働を確認してからKubernetesを廃止する。**この14日保持期間は
-まだ開始していない。** application flagをfalseへ戻すrollbackが必要な場合は、Apps VMの
+合格した日から14日間の安定稼働を確認してからKubernetesを廃止する。
+**合格日は2026-09-06であり、保持期間は2026-09-20に満了する。** application flagをfalseへ戻すrollbackが必要な場合は、Apps VMの
 `homelab-apps.service`停止とservice IP解放、NFS open state 0件の確認、MetalLB/Service/Flux/
 Unboundの復旧を、新旧を同時にwriterにしないことを最優先して行う。手順の詳細は
 [next-session.mdのrollback手順](next-session.md)を参照。
 
-VLAN 10/20/30/40への再編（Phase 4）は別maintenance windowで実施する。BVI11の`/25`→`/24`修正、
+VLAN 10/20/30/40への再編（Phase 4）は別maintenance windowで実施する。
 Tailscale live ACLのimport、Apps VMの最終`.10.101`への統合、ECW5211の設定はいずれも未着手であり、
 現時点では期待状態と手順のみがGit管理されている。

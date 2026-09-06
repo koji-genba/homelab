@@ -424,9 +424,9 @@ mountする。データのコピーは発生しない。
 ### 9.2 cutover後のユーザー確認（2026-09-05）
 
 ユーザーから、7 FQDN（stashPad prod/stagingの正式名と短縮alias、SillyTavern、DNS、status）の動作確認と、
-IoT/Guest/Internetから管理UI、SSH、SMBへ到達できない隔離テストの完了申告があった。FQDN確認で実施した
-application操作の内訳は記録されていないため、stashPadの更新/upload/metadata分離、SillyTavernの
-会話・設定保存、Samba 3 shareのread/writeは個別の受入項目として残す。
+IoT/Guest/Internetから管理UI、SSH、SMBへ到達できない隔離テストの完了申告があった。その後、stashPad
+prod/stagingの閲覧・更新・upload・共有media・metadata分離、SillyTavernのlogin・会話・設定保存、
+Samba 3 shareの既存userによるread/writeもすべて確認済みとの追加申告があった。
 
 ## 10. 未解決事項
 

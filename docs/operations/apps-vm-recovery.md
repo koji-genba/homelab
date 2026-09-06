@@ -18,6 +18,81 @@ Exportのclient scope、option、markerは[NFS export契約](nfs-export.md)に�
 
 age private keyはApps VMへコピーしない。secretの復号は管理端末で行う。
 
+## Terraform実行前のProxmox側準備
+
+Proxmoxのuser・role・API token・ACLはGitにもTerraformにも宣言されておらず、Proxmox側へ手動で
+用意しておく必要がある。これらが揃っていない、または欠落した状態で`terraform apply`を実行すると
+`error creating VM: received an HTTP 403 response - Reason: Permission check failed`で失敗する。
+
+### 用意が必要なもの
+
+- user `terraform@pve`
+- role `HomelabTerraform`（権限は後述）
+- API token `terraform@pve!apps-vm`（現在の有効期限は2026-12-04 23:59 JST。期限切れでも同様に403で失敗する）。
+  現行tokenは`privsep=0`で作成されており、user `terraform@pve`のACLをそのまま継承する。`privsep=1`で
+  作り直すとtoken自身へのACL付与が別途必要になるため、下記のACLだけでは足りなくなる。
+- 次の7 ACL path。`/vms/112`と`/nodes/pve1`はVM操作、`/storage/local`と`/storage/vmpool`はimage/disk
+  配置、`/sdn/zones/localnetwork`とその子2件はNIC割当に必要。
+  - `/vms/112`
+  - `/storage/local`
+  - `/storage/vmpool`
+  - `/nodes/pve1`
+  - `/sdn/zones/localnetwork`
+  - `/sdn/zones/localnetwork/vmbr0/10`
+  - `/sdn/zones/localnetwork/vmbr0/11`
+
+### role `HomelabTerraform`の権限一覧
+
+2026-09-06時点で実機のroleが保持している権限は次の20件である。この一覧でVM作成まで到達できることは
+確認済みだが、最小権限であることまでは検証していない。
+
+```text
+Datastore.Allocate, Datastore.AllocateSpace, Datastore.AllocateTemplate, Datastore.Audit,
+SDN.Use, Sys.AccessNetwork, Sys.Audit, Sys.Modify,
+VM.Allocate, VM.Audit, VM.Config.CDROM, VM.Config.CPU, VM.Config.Cloudinit,
+VM.Config.Disk, VM.Config.HWType, VM.Config.Memory, VM.Config.Network,
+VM.Config.Options, VM.GuestAgent.Audit, VM.PowerMgmt
+```
+
+### 投入コマンド例
+
+pve1のシェルで次を実行する（値は例。tokenのsecretは作成時に一度しか表示されないため、
+表示された値をKeePassXCなど安全な場所へ即座に保管する）。
+
+```sh
+pveum role add HomelabTerraform -privs "Datastore.Allocate,Datastore.AllocateSpace,Datastore.AllocateTemplate,Datastore.Audit,SDN.Use,Sys.AccessNetwork,Sys.Audit,Sys.Modify,VM.Allocate,VM.Audit,VM.Config.CDROM,VM.Config.CPU,VM.Config.Cloudinit,VM.Config.Disk,VM.Config.HWType,VM.Config.Memory,VM.Config.Network,VM.Config.Options,VM.GuestAgent.Audit,VM.PowerMgmt"
+pveum user add terraform@pve
+pveum user token add terraform@pve apps-vm --expire <unixtime> --output-format json
+pveum acl modify /vms/112 --user terraform@pve --role HomelabTerraform
+pveum acl modify /storage/local --user terraform@pve --role HomelabTerraform
+pveum acl modify /storage/vmpool --user terraform@pve --role HomelabTerraform
+pveum acl modify /nodes/pve1 --user terraform@pve --role HomelabTerraform
+pveum acl modify /sdn/zones/localnetwork --user terraform@pve --role HomelabTerraform
+pveum acl modify /sdn/zones/localnetwork/vmbr0/10 --user terraform@pve --role HomelabTerraform
+pveum acl modify /sdn/zones/localnetwork/vmbr0/11 --user terraform@pve --role HomelabTerraform
+```
+
+### 罠: destroyはACLを道連れに削除する
+
+**VMIDを`terraform destroy`で削除すると、Proxmoxは`/vms/<vmid>`のACLエントリをVMと一緒に自動削除する。**
+2026-09-06のPhase 3再構築試験で実際にこの罠にかかり、`terraform destroy`でVMID 112を削除した直後の
+`terraform apply`が上記の403で失敗した。image download（`proxmox_download_file`）とcloud-init snippet
+作成（`proxmox_virtual_environment_file`）は成功しており、VM create（`VM.Allocate`が必要な操作）だけが
+拒否された。role自体は`VM.Allocate`を保持していたが、それを与えるpath `/vms/112`が消えていたことが原因である。
+
+したがって、destroyしてから同じVMIDへ再applyする手順では、**apply前に`/vms/<vmid>`のACLを
+`pveum acl modify`で再付与する**工程を必ず挟む。
+
+### 403 `Permission check failed`が出たときの診断手順
+
+1. `pveum acl list`で対象pathへのACLエントリが存在するか確認する。
+2. pve1上で`grep -E '^(acl|token):' /etc/pve/user.cfg`を実行し、user.cfgの生データからも
+   ACLとtokenの存在を確認する。
+3. 上記7 pathのいずれかが欠けていれば、該当pathへ`pveum acl modify <path> --user terraform@pve --role HomelabTerraform`
+   で再付与する。
+4. ACLが揃っているのに403が続く場合は、tokenの有効期限切れを疑う。`pveum user token list terraform@pve`で
+   期限を確認し、切れていれば新しいtokenを発行してsecretを差し替える。
+
 ## 復旧フロー
 
 1. repositoryをcloneし、復旧対象のcommitをcheckoutする。
