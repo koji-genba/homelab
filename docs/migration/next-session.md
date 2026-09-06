@@ -10,8 +10,10 @@
   destroyし、Terraform・Ansible・Gitから再構築して復旧させた。**Apps VMが唯一のwriterで、
   7 Compose projectが稼働中。** IX2215の構成ドリフトは2026-09-05に解消済み。
   Kubernetes VM 3台は2026-09-05に停止済み（削除はしていない）。
-- **自動確認できる受入項目はすべて合格したが、ユーザー確認を要する7項目が未了である。
-  したがってKubernetes VM 14日保持期間はまだ開始していない。次の作業はその7項目の消化である。**
+- **受入試験は12項目すべて合格した**（自動確認5項目と、2026-09-06にユーザーが確認した7項目）。
+  **Kubernetes VM 14日保持期間は2026-09-06に開始し、2026-09-20に満了する。**
+- **次の作業はPhase 4のネットワーク移行である。** 別のmaintenance windowで実施する。
+  満了日までにrollbackが発生しなければ、その後にPhase 5の廃止へ進む。
 - **Phase 3は、Proxmoxのuser・role・API token・ACLがGitにもTerraformにも宣言されておらず、
   しかも`/vms/<vmid>`のACLはVMのdestroyで道連れに消えることを明らかにした。
   「GitとIaCだけから復旧できる」という前提は現状では成立していない。** 詳細は
@@ -38,9 +40,9 @@
    ```
 
 3. 実機の現在状態を読み取り専用で確認する（後述の「現在のシステム状態」と一致するか）。
-4. 次の作業は、Phase 3で残ったユーザー確認7項目の消化である。**破壊的な操作は不要である。**
-   7項目が揃った日がKubernetes VM 14日保持期間の開始日になる。
-   **Phase 3自体は2026-09-06に実施済みであり、再実施しない。**
+4. 次の作業はPhase 4のネットワーク移行である。**着手にはユーザーとのmaintenance window合意が必須である。**
+   **Phase 1〜3はすべて完了しており、再実施しない。**
+   **2026-09-20の満了日まで、Kubernetes VM・disk・PVC・NFS data・ZFS snapshotを削除しない。**
 
 ## 目的とフェーズ境界
 
@@ -49,7 +51,7 @@
 - NFS上の既存dataを最優先で保護し、新旧を同時writerにしない。
 - VLAN 10/20/30/40への再編（Phase 4）は別windowで行う。application cutoverへ混ぜない。
 - **Apps VMの削除・IaC再構築試験（Phase 3）に合格した日から14日間は旧Kubernetes VMを保持する。**
-  この14日はまだ開始していない。
+  合格日は2026-09-06であり、**保持期間は2026-09-20に満了する**。
 - `stashPadDev`（VMID 111）は作業用VMであり、この移行の対象外とする。
 
 ## 絶対に維持する安全条件
@@ -60,7 +62,7 @@
   Flux Kustomization 4件はsuspend、対象Deployment 6件はreplicas=0、MetalLB speakerは停止、
   3つのLoadBalancer ServiceはClusterIP化されている。この状態を維持する。
 - **Kubernetes VM 101/102/103は2026-09-05に停止した。削除はしていない。**
-  Phase 3の再構築試験に合格し、そこから14日が経過するまでVM、disk、PVC、NFS data、
+  Phase 3は2026-09-06に合格したため、**2026-09-20の満了日まで**VM、disk、PVC、NFS data、
   ZFS snapshotのいずれも削除しない。**rollback以外の目的でVMを起動しない。**
   起動した場合も、Fluxをresumeせず、Deploymentをscale upせず、ServiceをLoadBalancerへ戻さない。
 - 次のAnsible flagは現在の値を維持する。`network_migration_complete`をtrueにしない。
@@ -177,10 +179,10 @@ pve1のroot crontabにある`/usr/local/bin/mover.sh`（05:00）は`tank-gen2/da
 
 ## 次に行う作業
 
-**1〜4はすべて完了済みの記録である。再実施しない。次の作業は、4に残ったユーザー確認7項目の
-消化である（「[次に行うこと: ユーザー確認7項目](#次に行うこと-ユーザー確認7項目)」）。**
+**1〜4はすべて完了済みの記録である。再実施しない。次の作業は5のPhase 4である。**
 1〜4には、今後も守るべき手順や注意（IX2215のACL編集手順、NFS open stateの扱い、
-再びApps VMをdestroyする場合の前提）が含まれているので読み飛ばさないこと。
+再びApps VMをdestroyする場合の前提、Proxmox権限がIaCの外にあること）が含まれているので
+読み飛ばさないこと。
 
 ### 1. 受入試験の結果（合格、2026-09-05）
 
@@ -278,10 +280,12 @@ NFS dataも消さない。実施内容と確認結果の全記録は
 `states`から消えたことの確認はPhase 3の作業時に行えばよい。write openを持つのはApps VMだけであり、
 「新旧が同時にwriterになりうる状態」は観測されていない。
 
-### 4. Phase 3: 再構築性の証明（2026-09-06実施済み、自動確認範囲は合格）
+### 4. Phase 3: 再構築性の証明（2026-09-06、全項目合格）
 
-**実施済みである。再実施しない。** Apps VM（VMID 112）をTerraformで実際にdestroyし、
-Terraform・Ansible・Gitから再構築して復旧させた。snapshot restoreは使っていない。
+**実施済みであり、受入試験12項目すべてに合格した。再実施しない。**
+Apps VM（VMID 112）をTerraformで実際にdestroyし、Terraform・Ansible・Gitから再構築して
+復旧させた。snapshot restoreは使っていない。
+**合格日2026-09-06からKubernetes VM 14日保持期間が始まり、2026-09-20に満了する。**
 実測値と全経緯は[実装状況の「Phase 3: 再構築性の証明」](implementation-status.md)にある。
 ここには、次セッションが知っておくべき結論だけを残す。
 
@@ -314,23 +318,21 @@ Terraform・Ansible・Gitから再構築して復旧させた。snapshot restore
 **恒久対策（Proxmox側の権限をTerraformまたは冪等なスクリプトで宣言する）は未実施であり、
 Phase 4以降で扱う課題として残っている。**
 
-#### 次に行うこと: ユーザー確認7項目
+#### ユーザー確認7項目（2026-09-06、すべて合格）
 
-自動確認できないため未了である。**これが揃った日がKubernetes VM 14日保持期間の開始日になる。**
-管理端末のTailscaleは試験中に切断していたため、再接続してから確認する。
+管理端末のTailscaleを再接続したうえで、ユーザーが次を確認して合格を申告した。
 
-- [ ] stashPad prod/stagingで閲覧、更新、upload、共有mediaを確認する
-- [ ] stashPad prod/stagingのmetadataが分離されている
-- [ ] SillyTavernでlogin、会話、設定保存を確認する
-- [ ] Samba 3 shareを既存userでread/writeできる
-- [ ] Tailscaleから既存FQDN/TLSへ接続できる
-- [ ] IoT/Guest/Internetから管理UI、SSH、SMBへ到達できない
-- [ ] GatusとHealthchecks.ioのDiscord通知が届いている
-      （試験中の断で発火しているはずである。`homelab-healthchecks-ping.service`が
-      12:30:55に失敗し12:32:02に成功へ復帰したことは観測済みで、復帰後のfailed unitは0件である）
+- [x] stashPad prod/stagingで閲覧、更新、upload、共有mediaを確認する
+- [x] stashPad prod/stagingのmetadataが分離されている
+- [x] SillyTavernでlogin、会話、設定保存を確認する
+- [x] Samba 3 shareを既存userでread/writeできる
+- [x] Tailscaleから既存FQDN/TLSへ接続できる
+- [x] IoT/Guest/Internetから管理UI、SSH、SMBへ到達できない
+- [x] GatusとHealthchecks.ioのDiscord通知が届いている
+      （試験中の断で発火した。`homelab-healthchecks-ping.service`が12:30:55に失敗し
+      12:32:02に成功へ復帰したことも観測済みで、復帰後のfailed unitは0件である）
 
-全項目が合格したら、その日を14日保持期間の開始日として
-[実装状況](implementation-status.md)とこの文書に記録する。
+**これで受入試験12項目すべてが合格し、2026-09-06が14日保持期間の開始日となった。**
 
 #### 再びApps VMをdestroyする場合の注意
 
@@ -382,7 +384,8 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
 
 ### 6. Phase 5: 廃止
 
-再構築試験から14日経過し、rollbackが発生していないことを条件とする。詳細は移行手順書に従う。
+**2026-09-20（Phase 3合格日2026-09-06から14日）を経過し、rollbackが発生していないことを
+条件とする。** それ以前に着手しない。詳細は移行手順書に従う。
 `k8s-volumes`配下のorphan directory 7件（`openldap-*` 3世代、旧`external-dns-blocklist-*` 2世代、
 旧stashpad prod/staging各1世代）の削除判断もここで行う。
 
@@ -428,7 +431,7 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
 - state backup preflight、SSH host key、NFS source/fstype/mode/markerのいずれかを検証できない。
 - imageがdigest固定されていない、または宣言digestと公開manifestが一致しない。
 - Tailscale live ACL全体をexport・reviewせずに`manage_tailnet=true`へ変更しようとしている。
-- **ユーザー確認7項目が未了、または14日保持期間が満了していないのにKubernetes VMを削除しようとしている。**
+- **2026-09-20の14日保持期間満了前にKubernetes VMを削除しようとしている。**
 - rollback手順、OOB access、maintenance window、ユーザーの明示許可のいずれかがない。
 - Apps VMをdestroyしようとしているのに、次のいずれかを満たしていない。
   - `proxmox_api_token`と`ssh_public_key`を供給できることを確認していない。

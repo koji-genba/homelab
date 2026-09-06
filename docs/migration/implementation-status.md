@@ -5,8 +5,8 @@
   Apps VM（VMID 112）をTerraformでdestroyし、Terraform・Ansible・Gitから再構築して復旧させた。
   **Apps VMが唯一のwriterであり、7 Compose projectが稼働中**。
   **旧Kubernetes VM 101/102/103は2026-09-05に停止した（削除はしていない）。**
-  自動確認できる受入項目はすべて合格したが、ユーザー確認を要する7項目が未了のため
-  **Kubernetes VM 14日保持期間はまだ開始していない**
+  **受入試験は12項目すべて合格した**（自動確認5項目に加え、2026-09-06にユーザーが残り7項目を確認）。
+  **Kubernetes VM 14日保持期間は2026-09-06に開始し、2026-09-20に満了する**
 - 更新日: 2026-09-06
 - 手順書: [KubernetesからComposeへの移行](k8s-to-compose.md)
 - 関連文書: [Phase 2A事前調査結果](phase2a-inventory.md)（実測値、cutover/rollback手順）、
@@ -351,11 +351,13 @@ public名の解決だけをhost resolverに依存するためである。**た�
 追加する場合はこの前提が崩れる。** Phase 4でApps VMを`192.168.10.101`へ集約し
 global nameserverを移す際に解消される見込みである。
 
-## Phase 3: 再構築性の証明（2026-09-06、自動確認範囲は合格）
+## Phase 3: 再構築性の証明（2026-09-06、全項目合格）
 
 Apps VM（VMID 112）をTerraformで実際にdestroyし、Terraform・Ansible・Gitから再構築した。
-snapshot restoreは使っていない。**再構築そのものは成功したが、この試験は
-「GitとIaCだけから復旧できる」という前提が現状では成立しないことを明らかにした。** 詳細は後述。
+snapshot restoreは使っていない。**受入試験12項目すべてに合格し、
+2026-09-06をKubernetes VM 14日保持期間の開始日とした。満了は2026-09-20である。**
+ただしこの試験は、**「GitとIaCだけから復旧できる」という前提が現状では成立しないこと**も
+明らかにした。詳細は後述。
 
 ### 着手前のゲート（すべて充足を実測した）
 
@@ -416,7 +418,7 @@ NICのMACアドレスは想定どおり変わった。
 
 管理IPはcloud-initの静的設定のため影響を受けていない。MACに紐づくDHCP予約やルールは使っていない。
 
-### 受入試験（自動確認できる範囲は全項目合格）
+### 受入試験（12項目すべて合格）
 
 - 7 Compose projectが稼働し、稼働imageのdigestがGit宣言と7/7一致。`/opt/homelab`は`origin/main` `e272c75`のclean checkout
 - NFS 7 mountが復旧し、`stashpad-media`だけが`ro`、他6つが`rw`
@@ -467,17 +469,26 @@ Proxmoxのuser `terraform@pve`、role `HomelabTerraform`、API token `terraform@
 [Apps VM復旧手順の「Terraform実行前のProxmox側準備」](../operations/apps-vm-recovery.md)へ明文化した。
 恒久対策（Proxmox側の権限をTerraformまたは冪等なスクリプトで宣言する）は未実施である。
 
-### 残っている確認（ユーザー確認待ち）
+### ユーザー確認項目（2026-09-06、すべて合格）
 
-自動確認できない次の項目が未了であり、**Kubernetes VM 14日保持期間はまだ開始していない。**
+自動確認できない次の項目を、ユーザーがTailscale再接続後に確認して合格を申告した。
 
-- [ ] stashPad prod/stagingで閲覧・更新・upload・共有mediaを確認する
-- [ ] stashPad prod/stagingのmetadataが分離されている
-- [ ] SillyTavernでlogin・会話・設定保存を確認する
-- [ ] Samba 3 shareを既存userでread/writeできる
-- [ ] Tailscaleから既存FQDN/TLSへ接続できる（試験中は管理端末のTailscaleを切断していた）
-- [ ] IoT/Guest/Internetから管理UI、SSH、SMBへ到達できない
-- [ ] GatusとHealthchecks.ioのDiscord通知が届いている
+- [x] stashPad prod/stagingで閲覧・更新・upload・共有mediaを確認する（2026-09-06、ユーザー確認）
+- [x] stashPad prod/stagingのmetadataが分離されている（2026-09-06、ユーザー確認）
+- [x] SillyTavernでlogin・会話・設定保存を確認する（2026-09-06、ユーザー確認）
+- [x] Samba 3 shareを既存userでread/writeできる（2026-09-06、ユーザー確認）
+- [x] Tailscaleから既存FQDN/TLSへ接続できる（2026-09-06、ユーザー確認）
+- [x] IoT/Guest/Internetから管理UI、SSH、SMBへ到達できない（2026-09-06、ユーザー確認）
+- [x] GatusとHealthchecks.ioのDiscord通知が届いている（2026-09-06、ユーザー確認）
+
+### 合格の確定と14日保持期間
+
+**Phase 3は2026-09-06に全項目合格した。** これによりKubernetes VM 14日保持期間が
+同日から開始し、**2026-09-20に満了する**。満了日までにrollbackが発生していなければ、
+Phase 5の廃止作業へ進める。
+
+**満了日までは、VM 101/102/103、そのdisk、PVC、NFS data、ZFS snapshot
+（`@pre-compose-cutover-20260905`と`@pre-phase3-20260906`）のいずれも削除しない。**
 
 ## 今後の残作業
 
@@ -512,11 +523,11 @@ Apps VM/PVEのLAN IP直指定で実施した。
 - [x] IX2215で`write memory`を実行し、DHCP binding解除を保存する（2026-09-05、ユーザー実行）
 - [x] Kubernetes VMを停止する（削除はしない）（2026-09-05実施。上記「Kubernetes VMの停止」を参照）
 
-### Phase 3: 再構築性の証明（2026-09-06実施済み）
+### Phase 3: 再構築性の証明（2026-09-06、全項目合格）
 
-**実施した。** 経緯・実測値・判明した欠陥は上記
+**実施し、受入試験12項目すべてに合格した。** 経緯・実測値・判明した欠陥は上記
 「[Phase 3: 再構築性の証明（2026-09-06、自動確認範囲は合格）](#phase-3-再構築性の証明2026-09-06自動確認範囲は合格)」にある。
-**ユーザー確認を要する7項目が未了のため、Kubernetes VM 14日保持期間はまだ開始していない。**
+**Kubernetes VM 14日保持期間は合格日2026-09-06に開始し、2026-09-20に満了する。**
 
 以下は着手前の2026-09-06にリポジトリを調査して記録した事実である。実施後も有効な前提として残す。
 
@@ -563,8 +574,8 @@ orphan directory 7件（openldap 3世代、旧blocklist 2世代、旧stashpad pr
 ## 後続のゲート
 
 Phase 3の再構築性試験（Apps VMをTerraform/Ansible/Gitから実際に削除・再構築する試験）に
-合格した日から14日間の安定稼働を確認してからKubernetesを廃止する。**この14日保持期間は
-まだ開始していない。** application flagをfalseへ戻すrollbackが必要な場合は、Apps VMの
+合格した日から14日間の安定稼働を確認してからKubernetesを廃止する。
+**合格日は2026-09-06であり、保持期間は2026-09-20に満了する。** application flagをfalseへ戻すrollbackが必要な場合は、Apps VMの
 `homelab-apps.service`停止とservice IP解放、NFS open state 0件の確認、MetalLB/Service/Flux/
 Unboundの復旧を、新旧を同時にwriterにしないことを最優先して行う。手順の詳細は
 [next-session.mdのrollback手順](next-session.md)を参照。
