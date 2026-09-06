@@ -1,9 +1,12 @@
 # 実装状況
 
-- 状態: フェーズ0/1 apply・受入確認、Phase 2A読み取り専用調査に続けて、2026-09-05に
-  Phase 2B application cutoverを実施済み。**Apps VMが唯一のwriterとなり、7 Compose projectが稼働中**。
+- 状態: フェーズ0/1 apply・受入確認、Phase 2A読み取り専用調査、2026-09-05のPhase 2B
+  application cutoverに続けて、2026-09-06に**Phase 3の再構築性試験を実施した**。
+  Apps VM（VMID 112）をTerraformでdestroyし、Terraform・Ansible・Gitから再構築して復旧させた。
+  **Apps VMが唯一のwriterであり、7 Compose projectが稼働中**。
   **旧Kubernetes VM 101/102/103は2026-09-05に停止した（削除はしていない）。**
-  Phase 3（再構築性試験）と、それに続くKubernetes VM 14日保持期間はまだ開始していない
+  自動確認できる受入項目はすべて合格したが、ユーザー確認を要する7項目が未了のため
+  **Kubernetes VM 14日保持期間はまだ開始していない**
 - 更新日: 2026-09-06
 - 手順書: [KubernetesからComposeへの移行](k8s-to-compose.md)
 - 関連文書: [Phase 2A事前調査結果](phase2a-inventory.md)（実測値、cutover/rollback手順）、
@@ -348,6 +351,134 @@ public名の解決だけをhost resolverに依存するためである。**た�
 追加する場合はこの前提が崩れる。** Phase 4でApps VMを`192.168.10.101`へ集約し
 global nameserverを移す際に解消される見込みである。
 
+## Phase 3: 再構築性の証明（2026-09-06、自動確認範囲は合格）
+
+Apps VM（VMID 112）をTerraformで実際にdestroyし、Terraform・Ansible・Gitから再構築した。
+snapshot restoreは使っていない。**再構築そのものは成功したが、この試験は
+「GitとIaCだけから復旧できる」という前提が現状では成立しないことを明らかにした。** 詳細は後述。
+
+### 着手前のゲート（すべて充足を実測した）
+
+| ゲート | 実測結果 |
+| --- | --- |
+| maintenance window合意 | ユーザーが2026-09-06に合意 |
+| `ssh_public_key` | `~/.ssh/id_ed25519.pub`が実機の`authorized_keys`とpve1のcloud-init snippetに完全一致（`SHA256:sO3YKq4n3xcYwpcA0ODswjoJ+YnlK/JEaW4V5/7Vtw0`） |
+| `proxmox_api_token` | ユーザーが`/dev/shm`の一時ファイルで供給。`terraform plan`が実機3 resourceをrefreshし`No changes`となることで有効性を確認してからdestroyへ進んだ |
+| age秘密鍵 | `~/.config/sops/age/keys.txt`（mode 600）。recipientと一致することをroundtripで確認 |
+| `make state-backup-preflight` | `AGE_RECIPIENT`・`AGE_IDENTITY_FILE`・`SSH_AUTH_SOCK`を与えてexit 0 |
+| `make state-backup` | `origin/state-backup`にserial 11の現行stateが退避済みであることを、復号比較（`state-backup unchanged at 39ee06b5`）で確認 |
+| ZFS snapshot | `@pre-compose-cutover-20260905`が4 datasetに現存 |
+| rollback可能性 | VM 101/102/103とそのdiskが現存 |
+
+### writerの解放
+
+`homelab-apps.service`と`homelab-app-reconcile.timer`と`homelab-service-addresses`を停止し、
+`ens19`から`.11.x`が消えたことを確認した。この時点でNFS serverの`states`からApps VMの
+rw open 6件とwrite delegation 6件が消え、marker等へのread delegation 8件だけが残った。
+NFS 7 mountをすべてumountすると、`/proc/fs/nfsd/clients/`からApps VMのclient entryごと消滅した。
+残ったのはk8s worker 2台の`courtesy`エントリのみで、全stateが`access: r-`だった。
+その後`@pre-phase3-20260906`を4 datasetへ取得した。
+
+### destroy
+
+`terraform plan -destroy`を保存し、対象が次の3件だけであること（`0 to add, 0 to change, 3 to destroy`）、
+`vm_id`が112、`node_name`が`pve1`であることをplan fileのJSONから確認してからapplyした。
+
+destroyの前に、Debian cloud imageのURLがpve1から`200`で取得でき、`Content-Length`が
+pve1上の現物と完全一致（340262912 bytes）することを確認した。消してから再downloadできない事態を避けるためである。
+
+destroy後、VMID 112のconfig・disk（`vmpool/vm-112-*`）・cloud-init snippet・importしたimageがすべて
+消滅し、VM 101/102/103のdiskは無傷であることをpve1で確認した。
+
+### 再構築（1回目は失敗、原因は後述）
+
+ACL復旧後、`make terraform-plan`（VM 112のcreate 1件のみ、image/snippetは`no-op`）→
+`make terraform-apply`で成功した。`terraform-apply`は内部で`state-backup-preflight` → apply →
+plan file削除 → `state-backup`を実行し、stateは`origin/state-backup`へpushされた（`39ee06b..b215ff2`）。
+
+SSH host keyは変わった。`known_hosts`の旧エントリを`ssh-keygen -R`で削除し（**文書には25・26行目と
+記録していたが、実際は25・26・27行目の3エントリだった**）、新しい鍵をQEMU guest agent経由と
+network上の`ssh-keyscan`の2経路で独立に取得し、一致を確認してから登録した
+（`SHA256:9U1BvsqDUUQASaGfCqLSei5HdOV17gkNUsUa1ahEpys`）。
+
+`make ansible-check`（syntax）に続けて`make ansible-apply`を実行し、
+`ok=82 changed=49 unreachable=0 failed=0 skipped=6`で完了した。
+`group_vars/apps.yml`のcutover flagは現在値（true/true/true/false）を維持している。
+
+### 再構築で変わったもの
+
+NICのMACアドレスは想定どおり変わった。
+
+| NIC | 旧 | 新 |
+| --- | --- | --- |
+| `net0`（eth0、VLAN 10） | `BC:24:11:9E:9B:29` | `BC:24:11:D7:47:A2` |
+| `net1`（ens19、VLAN 11） | `BC:24:11:84:F3:EA` | `BC:24:11:2E:FB:64` |
+
+管理IPはcloud-initの静的設定のため影響を受けていない。MACに紐づくDHCP予約やルールは使っていない。
+
+### 受入試験（自動確認できる範囲は全項目合格）
+
+- 7 Compose projectが稼働し、稼働imageのdigestがGit宣言と7/7一致。`/opt/homelab`は`origin/main` `e272c75`のclean checkout
+- NFS 7 mountが復旧し、`stashpad-media`だけが`ro`、他6つが`rw`
+- `ens19`に`.11.100`/`.11.101`/`.11.103`、`eth0`に`192.168.10.42/24`
+- 7 FQDNがHTTPS `200`×4、SillyTavern `401`、dns `302`、status `401`。TLS検証も成功。
+  **証明書はLet's Encryptから再取得されたもの**（`prod.stashpad`の有効期限は2026-12-05）で、
+  Cloudflare DNS-01によるACME経路がIaCだけから復元されたことを示す
+- DNSは4種すべて期待どおり。通常解決、内部rewrite（`dnsTestRecord.kojigenba-srv.com` → `192.168.63.254`）、
+  上流フィルタによるblock（`blocking_mode: nxdomain`のとおりNXDOMAIN）、allowlist（`t.co`がNOERROR）。
+  **`doubleclick.net`と`googleadservices.com`はHaGeZi Proに完全一致ルール（`||doubleclick.net^`等）が
+  存在しないため解決するのが正しい。** これらをblockの判定に使わないこと
+- SMB 445が到達可能
+- NFS未mountでapplicationが起動しないことを確認した。NFSを1つumountして
+  `systemctl start homelab-apps.service`を試みると`homelab-compose-up`が
+  `homelab mount guard: /srv/homelab/nfs/shared source is , expected 192.168.10.11:/mnt/shared`で拒否し、
+  containerは1つも起動しなかった。**`homelab-mount-guard.service`は`RemainAfterExit=yes`のoneshotのため
+  稼働中のumountでは再実行されないが、`homelab-compose-up`自身が起動のたびにmountを検証しているため
+  保護は成立している。**
+- reboot後にmountと全serviceが自動復旧した。boot IDが変化し、上記で手動umountしたmountもfstabから
+  復旧し、7 container稼働、failed unit 0
+- NFS serverでwrite openを持つclientはApps VM（`192.168.10.42`）だけであり、
+  k8s worker 2台のwrite openは0件
+
+`homelab-healthchecks-ping.service`は断の最中（12:30:55）に一度失敗し12:32:02に成功へ復帰した。
+dead-man監視が意図どおり発火したことを示す。復帰後のfailed unitは0件である。
+
+副次的に、PR #19で修正した「Ansible templateの改行消失によりsystemd directiveが無効化される」不具合が
+再構築後も再発していないことを、`systemctl show`が`PartOf=docker.service`と
+`Wants=network-online.target`を正しく返すことで確認した。
+
+### この試験が明らかにした欠陥（Proxmox権限がIaCの外にある）
+
+**`terraform destroy`でVMID 112を削除した際、Proxmoxが`/vms/112`のACLエントリをVMと一緒に自動削除した。**
+その結果、直後の`terraform apply`によるVM再作成が
+`error creating VM: received an HTTP 403 response - Reason: Permission check failed`で失敗した。
+image download（`proxmox_download_file`）とcloud-init snippet作成（`proxmox_virtual_environment_file`）は
+成功しており、`VM.Allocate`を要するVM createだけが拒否された。role `HomelabTerraform`自体は
+`VM.Allocate`を保持していたが、それを与えるpathが消えていたことが原因である。
+
+復旧はユーザーがpve1で
+`pveum acl modify /vms/112 --user terraform@pve --role HomelabTerraform`を実行して行った。
+削除前と同一スコープであり、権限拡大はしていない。
+
+Proxmoxのuser `terraform@pve`、role `HomelabTerraform`、API token `terraform@pve!apps-vm`、
+7 ACL pathはいずれもGitにもTerraformにも宣言されておらず、手動作成である。
+**したがって「Proxmoxインストール済みの状態からGitとIaCだけで再構築できる」という前提は、
+現状では成立していない。** 前提条件と復旧手順は
+[Apps VM復旧手順の「Terraform実行前のProxmox側準備」](../operations/apps-vm-recovery.md)へ明文化した。
+恒久対策（Proxmox側の権限をTerraformまたは冪等なスクリプトで宣言する）は未実施である。
+
+### 残っている確認（ユーザー確認待ち）
+
+自動確認できない次の項目が未了であり、**Kubernetes VM 14日保持期間はまだ開始していない。**
+
+- [ ] stashPad prod/stagingで閲覧・更新・upload・共有mediaを確認する
+- [ ] stashPad prod/stagingのmetadataが分離されている
+- [ ] SillyTavernでlogin・会話・設定保存を確認する
+- [ ] Samba 3 shareを既存userでread/writeできる
+- [ ] Tailscaleから既存FQDN/TLSへ接続できる（試験中は管理端末のTailscaleを切断していた）
+- [ ] IoT/Guest/Internetから管理UI、SSH、SMBへ到達できない
+- [ ] GatusとHealthchecks.ioのDiscord通知が届いている
+
 ## 今後の残作業
 
 ### 受入試験の残項目
@@ -379,16 +510,15 @@ Apps VM/PVEのLAN IP直指定で実施した。
 ### 受入試験の合格後
 
 - [x] IX2215で`write memory`を実行し、DHCP binding解除を保存する（2026-09-05、ユーザー実行）
-- [ ] Kubernetes VMを停止する（削除はしない。安定を確認してからでよい）
+- [x] Kubernetes VMを停止する（削除はしない）（2026-09-05実施。上記「Kubernetes VMの停止」を参照）
 
-### Phase 3: 再構築性の証明
+### Phase 3: 再構築性の証明（2026-09-06実施済み）
 
-Kubernetes VMの14日保持期間を開始する前に実施する。手順は
-[k8s-to-compose.mdのフェーズ3](k8s-to-compose.md)に従い、snapshot restoreで代替しない。
-**合格した日が、Kubernetes VM 14日保持期間の開始日である。この14日はまだ開始していない。**
+**実施した。** 経緯・実測値・判明した欠陥は上記
+「[Phase 3: 再構築性の証明（2026-09-06、自動確認範囲は合格）](#phase-3-再構築性の証明2026-09-06自動確認範囲は合格)」にある。
+**ユーザー確認を要する7項目が未了のため、Kubernetes VM 14日保持期間はまだ開始していない。**
 
-実施手順とゲートは[次セッションへの作業指示](next-session.md)にまとめた。2026-09-06に
-リポジトリを調査して判明した、着手前に知っておくべき事実を以下に記録する。
+以下は着手前の2026-09-06にリポジトリを調査して記録した事実である。実施後も有効な前提として残す。
 
 - **`make`にdestroy targetは存在しない。** `Makefile`と`scripts/`のどこにも`destroy`の文字列がない。
   破壊試験は`terraform -chdir=files/infrastructure/terraform/apps-vm destroy`を手動で実行する。
