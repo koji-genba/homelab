@@ -2,10 +2,9 @@
 
 - 更新日: 2026-09-06
 - 対象リポジトリ: `/home/s-sato/homelab`
-- 作業ブランチ: `k8s-decommission`（`origin/main` = `e272c75`）
-- 未pushのcommit: `k8s-decommission`は`origin/k8s-decommission`より先行している。
-  内容は文書と`files/infrastructure/network/`の記録のみで、実機の挙動を変えるコードは含まない。
-  pushとPRはユーザーの指示を受けてから行う。
+- 作業ブランチ: `k8s-decommission`（`origin/main` = `da78f05`）
+- **未pushのcommitはない。** 2026-09-06にPR #23としてmainへmerge済みである。
+  以後の作業でcommitした場合、pushとPRはユーザーの指示を受けてから行う。
 - 現在地: **Phase 3の再構築性試験を2026-09-06に実施した。** Apps VM（VMID 112）をTerraformで
   destroyし、Terraform・Ansible・Gitから再構築して復旧させた。**Apps VMが唯一のwriterで、
   7 Compose projectが稼働中。** IX2215の構成ドリフトは2026-09-05に解消済み。
@@ -490,13 +489,24 @@ make ansible-lint ansible-check ansible-bootstrap-paths-test \
 
 ## 完了済みのGit delivery
 
-- PR #7、#9、#14、#15、#16、#17、#18、#19、#20、#21、#22はmainへmerge済みで、各CIは成功済み。
-- `origin/main`は`e272c75`。
+- PR #7、#9、#14〜#23はmainへmerge済みで、各CIは成功済み。
+- **PR #23**（2026-09-06 merge）はPhase 3再構築試験の結果、Proxmox権限の欠陥、
+  IX2215ドリフト解消の記録である。文書と`files/infrastructure/network/`の記録のみで、
+  実機の挙動を変えるコードは含まない。
+- **PR #8**（2026-09-06 merge）はDependabotによる`actions/checkout` 4.2.2 → 7.0.1である。
+  移行作業とは無関係。v7の破壊的変更は`pull_request_target`と`workflow_run`での
+  fork PR checkoutに関するもので、本リポジトリの4 workflowはいずれも該当trigger を使っていない。
+  この変更で`.github/workflows/caddy-image.yml`自身が変わったため、Caddy imageの再ビルドが
+  走った。**compose.yamlはdigest固定のため稼働containerへの影響はない。**
+- `origin/main`は`da78f05`。
 - toolbox `ghcr.io/koji-genba/homelab-toolbox:1.0.1`は公開済み。
-  digestは`sha256:7607f2c74300504e045b2649ce4032920885c1902dd22c01b4c220fc7067dad0`。
+  **Makefileはtagではなくdigest `sha256:9da8408a19624df8b4da2fbcde93d64eddd5c6414e77e59c0e0e6f51b7ec8037`で
+  固定して実行する。** publish workflowは自身の変更でも起動して同じtagを上書きするため、
+  tag参照では引かれるimageが再現しないためである。PR #8のmergeで、Dockerfileが変わっていないのに
+  tagが旧digest `sha256:7607f2c7...`からこの値へ移った。旧digestもregistryに残存している。
+  更新手順は[toolbox README](../../files/tools/homelab-toolbox/README.md)にある。
 - Caddy custom imageを含む7 projectのimageはdigest固定済み。
-- 上記より後の`k8s-decommission`上の6 commitは未pushで、mainへも未反映である。
-  cutover後の実機確認結果、監視修正の記録、IX2215構成ドリフトの解消を含む。
+- `k8s-decommission`と`origin/main`の間に未反映の差分はない。
 
 ## cutover以降の実機確認で判明した実装バグ（PR #19、#20、#21で修正済み）
 
