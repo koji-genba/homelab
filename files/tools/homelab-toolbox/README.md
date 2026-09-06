@@ -10,7 +10,21 @@ rootの`Makefile`はこれらのtoolをDocker経由で実行するため、管�
 `--check-config`の前に展開したbinaryのchecksumを検証する。
 
 正確なlocal tagを`make toolbox-build`でbuildするか、review済みimage workflowを通して同じimageを
-`ghcr.io/koji-genba/homelab-toolbox:1.0.1`としてpublishする。wrapperはrepositoryを呼び出し元のUID/GIDで
+`ghcr.io/koji-genba/homelab-toolbox:1.0.1`としてpublishする。
+
+**Makefileはtoolboxをtagではなくdigestで固定して実行する。** publish workflowは
+`.github/workflows/toolbox-image.yml`自身の変更でも起動し、同じ`:1.0.1`タグを上書きするため、
+タグ参照では引かれるimageが再現しない。2026-09-06のPR #8（`actions/checkout`のbump）は
+Dockerfileを変えていないのにタグを`sha256:7607f2c7...`から`sha256:9da8408a...`へ移した。
+`compose.yaml`が全imageをdigest固定するのと同じ規律をtoolboxにも適用している。
+
+- 実行に使う参照は`TOOLBOX_IMAGE`（`TOOLBOX_IMAGE_REPO@TOOLBOX_IMAGE_DIGEST`）である。
+- `make toolbox-build`がlocalに付けるtagは`TOOLBOX_BUILD_IMAGE`（`TOOLBOX_IMAGE_REPO:TOOLBOX_IMAGE_TAG`）で、
+  実行用の参照とは分離してある。
+- imageを更新するときは、workflowのpublish後に
+  `docker buildx imagetools inspect ghcr.io/koji-genba/homelab-toolbox:1.0.1`で新しいdigestを確認し、
+  Makefileの`TOOLBOX_IMAGE_DIGEST`を差し替える。
+- localでbuildしたimageを試すときは`make TOOLBOX_IMAGE=$(TOOLBOX_BUILD_IMAGE) <target>`のように上書きする。wrapperはrepositoryを呼び出し元のUID/GIDで
 mountし、一時worktreeにはcontainer内で書込み可能な`/tmp`を使い、optional SSH agent socketをmountする。
 `AGE_IDENTITY_FILE`を設定した場合だけ、そのfileを`/run/secrets/age-identity`へread-onlyでmountする。
 hostの`~/.ssh/known_hosts`が存在する場合は、`/etc/ssh/ssh_known_hosts`としてread-onlyでmountする。

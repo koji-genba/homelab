@@ -15,7 +15,19 @@ TAILSCALE_VAR_ARGS := $(if $(MANAGE_TAILNET),-var="manage_tailnet=$(MANAGE_TAILN
 	$(if $(ENABLE_ADGUARD_DNS),-var="enable_adguard_dns=$(ENABLE_ADGUARD_DNS)",) \
 	$(if $(ADGUARD_READY),-var="adguard_ready=$(ADGUARD_READY)",) \
 	$(if $(ACL_POLICY_FILE),-var="acl_policy_file=$(TAILSCALE_ACL_POLICY_CONTAINER)",)
-TOOLBOX_IMAGE ?= ghcr.io/koji-genba/homelab-toolbox:1.0.1
+# toolboxはdigestで固定して実行する。publish workflowは`.github/workflows/toolbox-image.yml`
+# 自身の変更でも起動し、同じ`:1.0.1`タグを上書きするため、タグ参照では引かれるimageが再現しない。
+# 2026-09-06のPR #8（actions/checkoutのbump）はDockerfileを変えていないのにtagを
+# sha256:7607f2c7...からsha256:9da8408a...へ移した。compose.yamlが全imageをdigest固定するのと
+# 同じ規律をtoolboxにも適用する。
+# imageを更新するときは、workflowのpublish後に`docker buildx imagetools inspect`で
+# 新しいdigestを確認し、TOOLBOX_IMAGE_DIGESTを差し替える。
+# ローカルでビルドしたimageを試すときは`make TOOLBOX_IMAGE=$(TOOLBOX_BUILD_IMAGE) <target>`のように上書きする。
+TOOLBOX_IMAGE_REPO ?= ghcr.io/koji-genba/homelab-toolbox
+TOOLBOX_IMAGE_TAG ?= 1.0.1
+TOOLBOX_IMAGE_DIGEST ?= sha256:9da8408a19624df8b4da2fbcde93d64eddd5c6414e77e59c0e0e6f51b7ec8037
+TOOLBOX_IMAGE ?= $(TOOLBOX_IMAGE_REPO)@$(TOOLBOX_IMAGE_DIGEST)
+TOOLBOX_BUILD_IMAGE ?= $(TOOLBOX_IMAGE_REPO):$(TOOLBOX_IMAGE_TAG)
 TOOLBOX_USERNAME ?= homelab-toolbox
 TOOLBOX_USER := $(shell id -u):$(shell id -g)
 TOOLBOX_SSH_MOUNT := $(if $(SSH_AUTH_SOCK),-v "$(SSH_AUTH_SOCK):/run/ssh-agent" -e SSH_AUTH_SOCK=/run/ssh-agent,)
@@ -55,7 +67,7 @@ TOOLBOX_TAILSCALE_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_TAILSCALE_ENV) $(TOOLBOX_I
 .PHONY: tailscale-init tailscale-acl-preflight tailscale-plan tailscale-apply tailscale-import-core tailscale-import-acl tailscale-import-magic-dns tailscale-import-dns tailscale-import-router tailscale-acl-path-test
 
 toolbox-build:
-	docker build --tag $(TOOLBOX_IMAGE) files/tools/homelab-toolbox
+	docker build --tag $(TOOLBOX_BUILD_IMAGE) files/tools/homelab-toolbox
 
 terraform-init:
 	$(TOOLBOX_RUN) terraform -chdir=$(TERRAFORM_ROOT) init -input=false
