@@ -2,8 +2,10 @@
 
 - 更新日: 2026-09-06
 - 対象リポジトリ: `/home/s-sato/homelab`
-- 作業ブランチ: `k8s-decommission`（`origin/main` = `da78f05`）
-- **未pushのcommitはない。** 2026-09-06にPR #23としてmainへmerge済みである。
+- 作業ブランチ: **`main`**（`origin/main` = `6929950`）。`k8s-decommission`はPR #23として
+  mainへmerge済みであり、以後の作業ブランチではない。新しい作業は`origin/main`から
+  branchを切って行う。
+- **未pushのcommitはない。** 2026-09-06にPR #23と#24をmainへmerge済みである。
   以後の作業でcommitした場合、pushとPRはユーザーの指示を受けてから行う。
 - 現在地: **Phase 3の再構築性試験を2026-09-06に実施した。** Apps VM（VMID 112）をTerraformで
   destroyし、Terraform・Ansible・Gitから再構築して復旧させた。**Apps VMが唯一のwriterで、
@@ -101,7 +103,7 @@
 - `ens19`に`192.168.11.100/24`、`192.168.11.101/24`、`192.168.11.103/24`を保持。
   `eth0`は管理用`192.168.10.42/24`のまま。
 - NFS 7 mountのうち`stashpad-media`だけが`ro`、他6つが`rw`。これが正しい状態である。
-- `/opt/homelab`は`origin/main` `e272c75`のcleanなcheckout。`homelab-app-reconcile.timer`はenabled/active。
+- `/opt/homelab`は`origin/main` `6929950`のcleanなcheckout。`homelab-app-reconcile.timer`はenabled/active。
 - 稼働中imageのdigestはGit宣言と7/7一致している。
 - **2026-09-06のPhase 3で再構築されたVMである。** 次の値が変わった。
   - NICのMAC。`net0`（eth0、VLAN 10）が`BC:24:11:D7:47:A2`、`net1`（ens19、VLAN 11）が`BC:24:11:2E:FB:64`。
@@ -489,7 +491,7 @@ make ansible-lint ansible-check ansible-bootstrap-paths-test \
 
 ## 完了済みのGit delivery
 
-- PR #7、#9、#14〜#23はmainへmerge済みで、各CIは成功済み。
+- PR #7、#9、#14〜#24はmainへmerge済みで、各CIは成功済み。
 - **PR #23**（2026-09-06 merge）はPhase 3再構築試験の結果、Proxmox権限の欠陥、
   IX2215ドリフト解消の記録である。文書と`files/infrastructure/network/`の記録のみで、
   実機の挙動を変えるコードは含まない。
@@ -498,15 +500,27 @@ make ansible-lint ansible-check ansible-bootstrap-paths-test \
   fork PR checkoutに関するもので、本リポジトリの4 workflowはいずれも該当trigger を使っていない。
   この変更で`.github/workflows/caddy-image.yml`自身が変わったため、Caddy imageの再ビルドが
   走った。**compose.yamlはdigest固定のため稼働containerへの影響はない。**
-- `origin/main`は`da78f05`。
+- **PR #24**（2026-09-06 merge）はtoolbox imageをtagではなくdigestで固定して実行する変更である。
+  背景は下記のtoolboxの項を参照。digest固定のimageでCI相当19 targetが通ることを確認済み。
+- `origin/main`は`6929950`。
 - toolbox `ghcr.io/koji-genba/homelab-toolbox:1.0.1`は公開済み。
   **Makefileはtagではなくdigest `sha256:9da8408a19624df8b4da2fbcde93d64eddd5c6414e77e59c0e0e6f51b7ec8037`で
-  固定して実行する。** publish workflowは自身の変更でも起動して同じtagを上書きするため、
-  tag参照では引かれるimageが再現しないためである。PR #8のmergeで、Dockerfileが変わっていないのに
-  tagが旧digest `sha256:7607f2c7...`からこの値へ移った。旧digestもregistryに残存している。
+  固定して実行する（PR #24）。** publish workflowは`files/tools/homelab-toolbox/**`と
+  `.github/workflows/toolbox-image.yml`自身の変更で起動し、毎回同じ`:1.0.1`タグを上書きするため、
+  tag参照では引かれるimageが再現しないためである。
+  **2026-09-06だけでtagは3つのdigestを指した。** `sha256:7607f2c7...`（当初）→
+  `sha256:9da8408a...`（PR #8のmergeでworkflowファイルが変わったため）→
+  `sha256:63c9c090...`（PR #24でtoolbox READMEを変えたため）。いずれもDockerfileは変わっていない。
+  **digest固定後はtagがどこへ動いてもMakefileが引くimageは変わらない。**
+  旧digestはいずれもregistryに残存している。
   更新手順は[toolbox README](../../files/tools/homelab-toolbox/README.md)にある。
+- **image workflowの`paths`から自分自身を外す案は採らなかった。** digest固定さえしてあれば
+  再ビルド自体は無害であり、またcommitしている最中の再ビルドは原因が明らかで、
+  何もしていない時の突然の停止とは性質が違うためである（ユーザー判断、2026-09-06）。
+  なお`compose.yaml`が7 projectすべてをdigest固定しているため、Caddy imageの`:2.11.4`タグが
+  上書きされても稼働containerは再作成されず、サービスは止まらない。
 - Caddy custom imageを含む7 projectのimageはdigest固定済み。
-- `k8s-decommission`と`origin/main`の間に未反映の差分はない。
+- ローカルの`main`と`origin/main`の間に未反映の差分はない。
 
 ## cutover以降の実機確認で判明した実装バグ（PR #19、#20、#21で修正済み）
 
