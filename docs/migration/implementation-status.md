@@ -2,17 +2,19 @@
 
 - 状態: フェーズ0/1 apply・受入確認、Phase 2A読み取り専用調査に続けて、2026-09-05に
   Phase 2B application cutoverを実施済み。**Apps VMが唯一のwriterとなり、7 Compose projectが稼働中**。
-  旧KubernetesはVMこそ起動しているがwriterではない。Phase 3（再構築性試験）と、それに続く
-  Kubernetes VM 14日保持期間はまだ開始していない
-- 更新日: 2026-09-05
+  **旧Kubernetes VM 101/102/103は2026-09-05に停止した（削除はしていない）。**
+  Phase 3（再構築性試験）と、それに続くKubernetes VM 14日保持期間はまだ開始していない
+- 更新日: 2026-09-06
 - 手順書: [KubernetesからComposeへの移行](k8s-to-compose.md)
 - 関連文書: [Phase 2A事前調査結果](phase2a-inventory.md)（実測値、cutover/rollback手順）、
   [次セッションへの作業指示](next-session.md)（最新の実機状態と残作業の一次情報）
 
 この文書は設計、ローカル実装、実機反映を区別する。2026-09-05のPhase 2B application cutoverにより、
 Apps VMが唯一のwriterとなり、Caddy/AdGuard Home/Samba/stashPad prod・staging/SillyTavern/Gatusの
-7 Compose projectが稼働している。旧KubernetesはVMを起動したまま残しているが、Flux Kustomization 4件の
-suspend、Deployment 6件のreplicas=0、MetalLB speakerの停止、3 ServiceのClusterIP化によりwriterではない。
+7 Compose projectが稼働している。旧Kubernetesは、Flux Kustomization 4件のsuspend、Deployment 6件の
+replicas=0、MetalLB speakerの停止、3 ServiceのClusterIP化でwriterから降ろしたうえで、
+2026-09-05にVM 101/102/103を`qm shutdown`で停止した。VM、disk、PVC、NFS data、ZFS snapshotは
+いずれも削除しておらず、rollback時は起動して復旧できる。
 IX2215はVLAN 11のDHCP bindingを解除して`write memory`で保存済み、さらに2026-09-05にBVI11を
 `192.168.11.1/25`から`/24`へ修正し、ACL 3本（`server_app-out`、`default-out`、`guest-out`）の
 `/25`表記を`/24`へ更新して`write memory`で保存済みである。Tailscaleはlive ACLのexport・reviewは
@@ -384,6 +386,33 @@ Apps VM/PVEのLAN IP直指定で実施した。
 Kubernetes VMの14日保持期間を開始する前に実施する。手順は
 [k8s-to-compose.mdのフェーズ3](k8s-to-compose.md)に従い、snapshot restoreで代替しない。
 **合格した日が、Kubernetes VM 14日保持期間の開始日である。この14日はまだ開始していない。**
+
+実施手順とゲートは[次セッションへの作業指示](next-session.md)にまとめた。2026-09-06に
+リポジトリを調査して判明した、着手前に知っておくべき事実を以下に記録する。
+
+- **`make`にdestroy targetは存在しない。** `Makefile`と`scripts/`のどこにも`destroy`の文字列がない。
+  破壊試験は`terraform -chdir=files/infrastructure/terraform/apps-vm destroy`を手動で実行する。
+- Apps VMのTerraform stateは**ローカルbackend**（`backend`ブロックなし）で、実体は
+  `files/infrastructure/terraform/apps-vm/terraform.tfstate`（mode 0600、git管理外）である。
+  退避先branch`state-backup`はoriginに存在する。復旧は`make state-restore`。
+- このstateに含まれるresourceは`proxmox_virtual_environment_vm.apps`、
+  `proxmox_virtual_environment_file.cloud_config`、`proxmox_download_file.debian_cloud_image`の
+  3件だけである。Tailscaleは別rootかつ別stateなので巻き込まれない。
+  **`debian_cloud_image`も破棄されるため、再applyでcloud imageの再downloadが走る。**
+- `prevent_destroy`は設定されていない。`main.tf`の`lifecycle`は
+  `ignore_changes = [initialization[0].user_data_file_id]`のみである。
+- **`default`を持たない必須変数は`proxmox_api_token`と`ssh_public_key`の2つだけである。**
+  この作業環境に`terraform.tfvars`は存在しないため、前回のapplyは`TF_VAR_*`で供給されたとみられる。
+  **供給できることをdestroyの前に確認しないと再構築できなくなる。**
+- `make state-backup-preflight`は現状の作業環境ではそのままでは失敗する。
+  `AGE_RECIPIENT`、`AGE_IDENTITY_FILE`、`SSH_AUTH_SOCK`がいずれもunsetだからである。
+  age秘密鍵自体は`~/.config/sops/age/keys.txt`に存在する。
+- 再構築でNICのMACアドレスとSSH host keyが変わる。現在のMACは`eth0`（VLAN 10）が
+  `BC:24:11:9E:9B:29`、`ens19`（VLAN 11）が`BC:24:11:84:F3:EA`である。管理IPは
+  cloud-initの静的設定なのでDHCPには依存しない。
+- Apps VMのhost resolverが内部FQDNを解決できない件は、Terraformの`dns_servers`既定値が
+  `["192.168.10.1", "1.1.1.1"]`であることに由来する宣言どおりの結果であり、ドリフトではない。
+  **Phase 3では直さない。** 解消はPhase 4で行う。
 
 ### Phase 4: ネットワーク移行
 
