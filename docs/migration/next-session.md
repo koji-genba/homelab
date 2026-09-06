@@ -178,6 +178,17 @@
   `write memory`を実行し、解除後のrunning-configをstartup-configへ保存した。
 - VLAN 11のDHCP leaseは解除前から0件で、影響を受けるclientはない。
 - `vmbr0.11`は`192.18.11.11/24`のまま（記録のみ、修正しない）。
+- **Apps VMはTailscaleノードではない。** 2026-09-06に実測で確認した。`tailscale`コマンドも
+  `tailscaled`も存在せず、`100.x`のアドレスも持たない。tailnetに居るのは別VMの
+  `tailscale-gateway`（VMID 105、`192.168.10.30`、VLAN 10。**tailnet上のhostnameは
+  `home-gateway`**でありPVEのVM名とは異なる）であり、これがsubnet routerとしてLANを代理している。
+- **したがって、外部からSMB・HTTPS・DNSへ届くための唯一の経路は
+  `home-gateway`のAdvertiseRoutesである。** 現行の広告は`0.0.0.0/0`、`::/0`、
+  `192.168.10.0/24`、`192.168.11.0/24`の4件である。
+  **`192.168.10.0/24`と`192.168.11.0/24`を外すと、tailnet越しに宅内サービスへ到達できなくなる。**
+  名前解決はAdGuardが担うのでDNSは成功し続け、接続だけがtimeoutするという分かりにくい壊れ方をする。
+- **exit node（`0.0.0.0/0`、`::/0`）はsubnet routeの代替にならない。** exit nodeはclientが
+  明示的に選択したときだけ全traffic を流す機能であり、常用の接続でLAN宛が流れるわけではない。
 
 ### ZFS snapshot
 
@@ -403,6 +414,11 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
 
 #### この作業の性質
 
+- **Phase 4は「決めた設計を反映する」だけの作業ではない。ネットワーク設計そのものを
+  決め直す段である。** [ADR-0003](../adr/0003-four-network-zones.md)と
+  [目標ゾーン設計](../network/target-zones.md)は2026-08-29時点の承認済み設計だが、
+  ACLの具体、Tailscaleのroute構成、ECW5211のSSID割当は未確定のまま残っている。
+  後述の「決めるべき設計判断」を先に片付けてから反映へ進む。
 - **Phase 4は独立した破壊的変更の集合であり、1つの窓で全部やる作業ではない。**
   Tailscaleのimport、Apps VMのIP集約、IX2215のACL再編、ECW5211の設定は互いに独立している。
   段階ごとに区切り、各段階の後で到達性を確認してから次へ進む。
@@ -491,6 +507,52 @@ bridge-group、ACL（`server-out`、`main-out`、`iot-out`、`guest-out`、`defa
 - `iot-out`はVLAN 10（Server）へ全deny。目標はDNS/NTP/controllerのみ許可で、**allow例外の追加が要る**。
 - `guest-out`はほぼ目標どおり（deny all、internetのみ許可）。
 
+#### 決めるべき設計判断（いずれも未決、2026-09-06時点）
+
+反映作業へ進む前にユーザーと決める。ここを曖昧にしたまま手を動かさない。
+
+**1. AdvertiseRoutesから`192.168.11.0/24`をいつ外すか。**
+Phase 4はVLAN 11を廃止するため、移行後この広告は宛先のないrouteになる。
+ただしこれは掃除ではなく、**順序を誤ると外部からの到達性を失う操作**である。正しい順序は次のとおり。
+
+1. Apps VMを`192.168.10.101`へ集約する。
+2. **tailnet越しに`192.168.10.101`のSMB・HTTPS・DNSが使えることを確認する。**
+3. その後で`192.168.11.0/24`をAdvertiseRoutesから外す。
+
+`192.168.10.0/24`は現行の広告に最初から含まれているため、1が終われば2は通るはずである。
+逆順にするとVLAN 11上のserviceへ外から届かなくなる。
+
+**2. 同一LAN内のclientがgatewayを経由してしまう問題。**
+`--accept-routes`を有効にしたclientは、広告されたsubnet宛のrouteをtailscale interfaceへ入れる。
+そのため**宅内に居るclientでも、自分が直接繋がっていないsubnet宛のtrafficは
+`home-gateway`を経由する**ことになる。4ゾーン化後はTrusted（VLAN 20）のclientから
+Server（VLAN 10）のApps VMへ行くtrafficがこれに該当し、本来はIX2215が1 hopで捌けるものを
+gateway VM経由のWireGuard通信にしてしまう。gateway VMがintra-LAN trafficの
+ボトルネック兼単一障害点になる。
+
+**これは2026-09-06時点で未計測の仮説である。** 実際に起きるかは各clientの`--accept-routes`設定と
+Tailscaleがdirectly-connected subnetをどう扱うかに依存する。**Phase 4では、まず宅内clientから
+`traceroute`相当で経路を実測し、hairpinが起きているかを確認すること。** 起きていれば、
+subnet routeを必要とするのは宅外clientだけなので、宅内clientでは`--accept-routes`を
+使わない運用にするなどの対処を検討する。
+
+**3. VLAN 20/30/40のCIDRを広告するか。**
+`advertised_routes`の既定値にこれらは含まれていない。ADR-0003も
+「AdvertiseRoutesの整理（Serverサブネット以外を削減するか）は利用実態を確認してから判断する」と
+留保している。ゾーンポリシーでは**Tailscale clientはTrusted相当でServerへ許可、
+Trusted/IoT/Guestへはrouteしない**としているため、既定値のままServerだけを広告する方針が
+ポリシーと整合する。広げるなら理由をGitへ記録する。
+
+**4. IX2215のACLをどこまで厳格化するか。**
+現行と[目標ゾーン設計](../network/target-zones.md)の差分は次の3点である。
+`guest-out`はほぼ目標どおりなので、実質2点を決めることになる。
+
+| ACL | 現行 | 目標 | 決めること |
+| --- | --- | --- | --- |
+| `server-out`/`server_app-out` | VLAN 20へ無条件permit | 明示許可のみ | 何を明示許可として残すか |
+| `iot-out` | VLAN 10へ全deny | DNS/NTP/controllerのみ許可 | どのcontrollerを、どのportで通すか |
+| `guest-out` | deny all、internetのみ | 同左 | 変更不要 |
+
 #### 推奨する段階分け
 
 各段階の後で到達性を確認し、問題があればその段階だけをrollbackする。
@@ -507,7 +569,11 @@ bridge-group、ACL（`server-out`、`main-out`、`iot-out`、`guest-out`、`defa
 4. **Tailscaleのnameserver切り替え。** Apps VMが`.10.101`で稼働していることを確認してから
    `enable_adguard_dns=true`で`tailscale-import-dns`→plan review→apply。
    **順序を逆にするとtailnetのDNSが落ちる。**
+   この段階で**tailnet越しに`.10.101`のSMB・HTTPS・DNSが使えることを実測する。**
+   ここを確認するまで`192.168.11.0/24`をAdvertiseRoutesから外さない。
 5. **IX2215のACL再編とVLAN 11/63の撤去。** 後述のACL編集手順を必ず守る。
+   VLAN 11の撤去に合わせて`192.168.11.0/24`をAdvertiseRoutesから外す
+   （段階4の到達性確認が済んでいることが前提）。
 6. **ECW5211の設定。** SSIDのVLAN 20/30/40への割り当て、AP管理のVLAN 10への移動。
 7. **受入試験。** 各zoneのallow/deny試験、LAN/Tailscaleからのservice試験、Guest isolation。
    [目標ゾーン設計](../network/target-zones.md)末尾の「手動変更記録」表を埋める。
