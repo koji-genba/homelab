@@ -2,10 +2,11 @@
 
 - 更新日: 2026-09-06
 - 対象リポジトリ: `/home/s-sato/homelab`
-- 作業ブランチ: **`main`**（`origin/main` = `6929950`）。`k8s-decommission`はPR #23として
-  mainへmerge済みであり、以後の作業ブランチではない。新しい作業は`origin/main`から
-  branchを切って行う。
-- **未pushのcommitはない。** 2026-09-06にPR #23と#24をmainへmerge済みである。
+- 作業ブランチ: **`main`**。`k8s-decommission`はPR #23としてmainへmerge済みであり、
+  以後の作業ブランチではない。新しい作業は`origin/main`からbranchを切って行う。
+  **この文書にSHAを固定で書かない。** merge のたびに陳腐化して罠になるためである。
+  現在地は`git log --oneline origin/main -1`で確認する。
+- **未pushのcommitはない。** 2026-09-06にPR #23、#24、#25をmainへmerge済みである。
   以後の作業でcommitした場合、pushとPRはユーザーの指示を受けてから行う。
 - 現在地: **Phase 3の再構築性試験を2026-09-06に実施した。** Apps VM（VMID 112）をTerraformで
   destroyし、Terraform・Ansible・Gitから再構築して復旧させた。**Apps VMが唯一のwriterで、
@@ -41,9 +42,12 @@
    ```
 
 3. 実機の現在状態を読み取り専用で確認する（後述の「現在のシステム状態」と一致するか）。
-4. 次の作業はPhase 4のネットワーク移行である。**着手にはユーザーとのmaintenance window合意が必須である。**
+4. 次の作業はPhase 4のネットワーク移行である。**「Phase 4: ネットワーク移行」の
+   「着手前のゲート」を先に読み、ゲートを1つでも満たせないなら破壊的な操作へ進まない。**
    **Phase 1〜3はすべて完了しており、再実施しない。**
    **2026-09-20の満了日まで、Kubernetes VM・disk・PVC・NFS data・ZFS snapshotを削除しない。**
+5. Phase 4は複数の独立した破壊的変更の集合である。**一度の窓で全部やろうとしない。**
+   後述の段階分けに従い、各段階の後で到達性を確認してから次へ進む。
 
 ## 目的とフェーズ境界
 
@@ -57,7 +61,8 @@
 
 ## 絶対に維持する安全条件
 
-**writerの向きがcutoverで反転した。以下は2026-09-05時点の状態を前提とする。**
+**以下は2026-09-06のPhase 3合格後の状態を前提とする。Phase 4で意図的に変更するものを除き、
+すべて維持する。**
 
 - **Apps VMが唯一のwriterである。Kubernetes側のworkloadを再開させない。**
   Flux Kustomization 4件はsuspend、対象Deployment 6件はreplicas=0、MetalLB speakerは停止、
@@ -72,8 +77,13 @@
   - `application_cutover_confirmed: true`
   - `network_migration_complete: false`
 - Tailscaleはlive設定の完全なexport、review、importが終わるまで`manage_tailnet=false`を維持する。
-  global nameserverは`192.168.11.101`のままであり、Terraform宣言の`192.168.10.101`はPhase 4の期待値である。
-  **今applyするとtailnet全体のDNSが解決不能になる。**
+  global nameserverの実機値は`192.168.11.101`であり、Terraform変数`final_apps_ip`の
+  `192.168.10.101`はPhase 4の期待値である（`variables.tf`のvalidationでこの値に固定されている）。
+  **Apps VMが`192.168.10.101`で稼働を始める前に`enable_adguard_dns=true`でapplyすると、
+  tailnet全体のDNSが即座に解決不能になる。**
+- **`files/infrastructure/terraform/tailscale/`にはstateが存在しない。** このrootは一度も
+  applyもimportもされていない。他のroot（apps-vm、tailscale-gateway、elastiflow、
+  stashpad-dev、k8s-cluster）にはstateがある。**いきなりapplyせず、importから始める。**
 - Apps VMのcloud-init warning履歴を消す目的で`cloud-init clean`やreinitを行わない。
 - Terraform planにVMID 112のreplace、想定外resource、Apps VM以外の変更が出たらapplyしない。
 - secret、API token、age秘密鍵、復号済み設定、Terraform stateの実値を会話、ログ、Git、tfvarsへ出力しない。
@@ -103,7 +113,11 @@
 - `ens19`に`192.168.11.100/24`、`192.168.11.101/24`、`192.168.11.103/24`を保持。
   `eth0`は管理用`192.168.10.42/24`のまま。
 - NFS 7 mountのうち`stashpad-media`だけが`ro`、他6つが`rw`。これが正しい状態である。
-- `/opt/homelab`は`origin/main` `6929950`のcleanなcheckout。`homelab-app-reconcile.timer`はenabled/active。
+- `/opt/homelab`は`origin/main`のcleanなcheckoutである。`homelab-app-reconcile.timer`は
+  enabled/activeで、15分間隔でmainへfast-forwardする。**Compose定義に差分が無ければ
+  containerは再作成されない**（PR #21で、bind mountしたファイルだけが変わった場合に
+  選択projectをforce-recreateするよう修正済み）。追従先の確認は
+  `git -C /opt/homelab rev-parse HEAD`を`origin/main`と突き合わせる。
 - 稼働中imageのdigestはGit宣言と7/7一致している。
 - **2026-09-06のPhase 3で再構築されたVMである。** 次の値が変わった。
   - NICのMAC。`net0`（eth0、VLAN 10）が`BC:24:11:D7:47:A2`、`net1`（ens19、VLAN 11）が`BC:24:11:2E:FB:64`。
@@ -164,6 +178,17 @@
   `write memory`を実行し、解除後のrunning-configをstartup-configへ保存した。
 - VLAN 11のDHCP leaseは解除前から0件で、影響を受けるclientはない。
 - `vmbr0.11`は`192.18.11.11/24`のまま（記録のみ、修正しない）。
+- **Apps VMはTailscaleノードではない。** 2026-09-06に実測で確認した。`tailscale`コマンドも
+  `tailscaled`も存在せず、`100.x`のアドレスも持たない。tailnetに居るのは別VMの
+  `tailscale-gateway`（VMID 105、`192.168.10.30`、VLAN 10。**tailnet上のhostnameは
+  `home-gateway`**でありPVEのVM名とは異なる）であり、これがsubnet routerとしてLANを代理している。
+- **したがって、外部からSMB・HTTPS・DNSへ届くための唯一の経路は
+  `home-gateway`のAdvertiseRoutesである。** 現行の広告は`0.0.0.0/0`、`::/0`、
+  `192.168.10.0/24`、`192.168.11.0/24`の4件である。
+  **`192.168.10.0/24`と`192.168.11.0/24`を外すと、tailnet越しに宅内サービスへ到達できなくなる。**
+  名前解決はAdGuardが担うのでDNSは成功し続け、接続だけがtimeoutするという分かりにくい壊れ方をする。
+- **exit node（`0.0.0.0/0`、`::/0`）はsubnet routeの代替にならない。** exit nodeはclientが
+  明示的に選択したときだけ全traffic を流す機能であり、常用の接続でLAN宛が流れるわけではない。
 
 ### ZFS snapshot
 
@@ -180,10 +205,17 @@ pve1のroot crontabにある`/usr/local/bin/mover.sh`（05:00）は`tank-gen2/da
 
 ## 次に行う作業
 
-**1〜4はすべて完了済みの記録である。再実施しない。次の作業は5のPhase 4である。**
-1〜4には、今後も守るべき手順や注意（IX2215のACL編集手順、NFS open stateの扱い、
-再びApps VMをdestroyする場合の前提、Proxmox権限がIaCの外にあること）が含まれているので
-読み飛ばさないこと。
+**1〜4はすべて完了済みの記録である。再実施しない。次の作業は
+[5のPhase 4](#5-phase-4-ネットワーク移行次作業)である。**
+
+1〜4は進捗の羅列ではなく、**今後も守るべき手順と、繰り返してはならない失敗の記録**である。
+特に次はPhase 4で直接使うので読み飛ばさないこと。全経緯は
+[実装状況](implementation-status.md)にある。
+
+- **2のIX2215のACL編集手順。** Phase 4のACL再編でそのまま使う。
+- **3のNFS courtesy stateの扱い。** 想定外のwriterと見誤らないため。
+- **4の再びApps VMをdestroyする場合の注意と、Proxmox権限がIaCの外にあること。**
+  Phase 4のApps VM IP変更でTerraform applyを行うため、403の診断手順を知っておく必要がある。
 
 ### 1. 受入試験の結果（合格、2026-09-05）
 
@@ -373,15 +405,185 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
 後述のrollback手順を実行する。VMもdiskもPVCもNFS dataも残っている。
 
 
-### 5. Phase 4: ネットワーク移行
+### 5. Phase 4: ネットワーク移行（次作業）
 
-別のmaintenance windowで実施する。application cutoverへ混ぜない。含まれるのは次である。
+別のmaintenance windowで実施する。**着手にはユーザーとのmaintenance window合意が必須である。**
+手順の骨子は[移行手順書のフェーズ4](k8s-to-compose.md)に、目標ポリシーは
+[目標ゾーン設計](../network/target-zones.md)にある。ここには、2026-09-06に
+リポジトリを調査して判明した実態と、実施順序・ゲートを記す。
 
-- `files/infrastructure/network/README.md`と`config.txt`の反映（ユーザー管理。勝手に触らない）。
-  BVI11の`/24`化と実機バージョン整合は2026-09-05に反映済みのため、Phase 4で残るのは
-  VLAN 10/20/30/40再編に伴う変更に限る
-- Tailscale live ACLのexport、Terraform import、global nameserverの`192.168.10.101`への変更
-- VLAN 10/20/30/40への再編、ECW5211の設定、Apps VMの`192.168.10.101`への集約
+#### この作業の性質
+
+- **Phase 4は「決めた設計を反映する」だけの作業ではない。ネットワーク設計そのものを
+  決め直す段である。** [ADR-0003](../adr/0003-four-network-zones.md)と
+  [目標ゾーン設計](../network/target-zones.md)は2026-08-29時点の承認済み設計だが、
+  ACLの具体、Tailscaleのroute構成、ECW5211のSSID割当は未確定のまま残っている。
+  後述の「決めるべき設計判断」を先に片付けてから反映へ進む。
+- **Phase 4は独立した破壊的変更の集合であり、1つの窓で全部やる作業ではない。**
+  Tailscaleのimport、Apps VMのIP集約、IX2215のACL再編、ECW5211の設定は互いに独立している。
+  段階ごとに区切り、各段階の後で到達性を確認してから次へ進む。
+- **管理経路を失う操作が複数ある。** Apps VMの管理IPを`.10.42`から`.10.101`へ変える操作、
+  IX2215のACL変更、Tailscaleのnameserver変更はいずれも作業中の自分の足元を崩しうる。
+  IX2215のconsole接続とPVEのLAN直結access（`192.168.10.11`）を必ず確保してから着手する。
+- `192.168.11.101`のDNSは、Apps VMを`.10.101`へ集約する段階で移動する。
+  **管理端末のTailscaleは、tailnetのglobal nameserverを切り替え終えるまで切断しておく。**
+
+#### 着手前のゲート（すべて満たすまで何も破壊しない）
+
+- [ ] ユーザーとmaintenance windowを合意した。**合意なく着手しない。**
+- [ ] **IX2215のconsole access（OOB）を確保した。** ACL変更で管理経路を失っても復旧できること。
+- [ ] IX2215のrunning-config全文のバックアップを取得した。
+- [ ] **ECW5211の設定バックアップを取得し、管理IPを確定した。**
+      **現状リポジトリにECW5211の設定・手順・期待状態を記述したファイルは一切存在しない。**
+      [Phase 2A事前調査結果](phase2a-inventory.md)に「ユーザー判断によりPhase 4へ延期」
+      「未取得・Phase 4の前提条件」と記録されている。管理IPも未確定である
+      （`192.168.10.51`はARP観測されただけの候補にすぎない）。**ここがPhase 4最大の未知である。**
+- [ ] **Tailscale live ACLを新たにexportした。** 過去に取得した記録はあるが、保存先
+      `files/infrastructure/terraform/tailscale/acl-policy.live.json`は`.gitignore`対象で、
+      **現在ファイルシステム上に存在しない。exportからやり直す前提で計画する。**
+- [ ] `TAILSCALE_OAUTH_CLIENT_ID`と`TAILSCALE_OAUTH_CLIENT_SECRET`（または`TAILSCALE_API_KEY`）を
+      供給できる。credentialはtfvarsへ書かない設計である（`providers.tf`）。
+- [ ] `proxmox_api_token`を供給できる。Apps VMのIP変更でTerraform applyが必要になる。
+- [ ] `make state-backup-preflight`が通り、`make state-backup`でstateを退避した。
+      `AGE_RECIPIENT`は`files/infrastructure/secrets/runtime.sops.yaml`のヘッダにある公開recipient、
+      `AGE_IDENTITY_FILE`は`~/.config/sops/age/keys.txt`でよい。ssh-agentに鍵を登録しておく。
+- [ ] IPv6の無効化状態（RA、DHCPv6、forwarding）を実機で確認した。
+      **`config.txt`には明示的な無効化記述が見当たらず、設定不在＝無効とは断定できない。**
+
+#### リポジトリ調査で判明した実態（2026-09-06、静的調査）
+
+**Ansible側はすでに実装済みで、追加のコード変更は要らない。**
+`network_migration_complete`を`true`にすると、次がすべて`192.168.10.101`へ集約される。
+
+| ファイル | 切り替わるもの |
+| --- | --- |
+| `roles/compose/templates/compose.env.j2` | `EDGE_BIND_IP`、`DNS_BIND_IP`、`SMB_BIND_IP`、`CADDY_TRUSTED_NETWORKS`から`.11.0/24`を除外 |
+| `roles/secrets/templates/AdGuardHome.yaml.j2` | `web_ip`、`smb_ip`、`ldaps_ip` |
+| `roles/compose/templates/healthchecks-ping.sh.j2` | dead-man監視のendpoint |
+| `roles/firewall/templates/homelab.nft.j2` | `trusted_networks`から`.11.0/24`を除外 |
+
+**`site.yml`のpre-task assertは、flagの単独変更を拒否する。**
+`network_migration_complete: true`にするなら、同時に
+`legacy_service_addresses_enabled: false`と`legacy_service_cutover_confirmed: false`を
+セットで変更しなければplaybookが通らない。3つを1つのcommitで変える。
+
+**Terraform apps-vm rootで変えるのは2つだけである。**
+
+| 変数 | 現在 | Phase 4 |
+| --- | --- | --- |
+| `management_ip` | `192.168.10.42/24` | `192.168.10.101/24` |
+| `legacy_service_nic` | `true` | `false`（VLAN 11 NICの撤去） |
+
+`management_vlan_id`は`10`のまま変更しない。Apps VMの最終アドレスはVLAN 10（Server）内である。
+`lifecycle`の`ignore_changes`は`initialization[0].user_data_file_id`だけなので、上記2つは
+Terraformに差分として検出される。**VM replaceではなくin-place updateになる見込みだが、
+これは`lifecycle`宣言からの推測であり`terraform plan`で確認していない。
+planでVMID 112のreplaceが出たら中止する。**
+
+なお`outputs.tf`の`planned_final_management_address`は**リポジトリ内のどこからも参照されていない。**
+記録目的の出力にすぎず、切り替えを駆動する仕組みではない。`management_ip`変数そのものを書き換える。
+
+**Tailscale rootはstateが無く、一度もimport/applyされていない。**
+resourceはすべて`count`で条件生成される。
+
+| resource | 生成条件 |
+| --- | --- |
+| `tailscale_acl.policy` | `manage_tailnet` |
+| `tailscale_dns_preferences.magic_dns` | `manage_tailnet` |
+| `tailscale_dns_nameservers.adguard` | `manage_tailnet` かつ `enable_adguard_dns` |
+| `tailscale_device_tags.subnet_router`、`tailscale_device_subnet_routes.subnet_router` | `manage_tailnet` かつ `manage_subnet_router` |
+
+`advertised_routes`の既定値は`0.0.0.0/0`、`::/0`、`192.168.10.0/24`、`192.168.11.0/24`である。
+**VLAN 20/30/40のCIDRは含まれていない。** 新VLANへrouteを広げるかは別途判断する。
+exit node機能は現行機能として保持する。
+
+**IX2215のVLAN 10/20/30/40はすでに実機で稼働している。** `config.txt`にBVI10/20/30/40、
+bridge-group、ACL（`server-out`、`main-out`、`iot-out`、`guest-out`、`default-out`）が定義済みである。
+つまりPhase 4の「VLAN 10/20/30/40への再編」の実体は、**新規VLAN作成ではなく
+既存VLANに対するACLポリシーの見直しと、VLAN 11/63の撤去**である。
+[目標ゾーン設計](../network/target-zones.md)との差分は次の3点である。
+
+- `server-out`/`server_app-out`はVLAN 20（Trusted）へ無条件permit。目標は明示許可のみで、**厳格化が要る**。
+- `iot-out`はVLAN 10（Server）へ全deny。目標はDNS/NTP/controllerのみ許可で、**allow例外の追加が要る**。
+- `guest-out`はほぼ目標どおり（deny all、internetのみ許可）。
+
+#### 決めるべき設計判断（いずれも未決、2026-09-06時点）
+
+反映作業へ進む前にユーザーと決める。ここを曖昧にしたまま手を動かさない。
+
+**1. AdvertiseRoutesから`192.168.11.0/24`をいつ外すか。**
+Phase 4はVLAN 11を廃止するため、移行後この広告は宛先のないrouteになる。
+ただしこれは掃除ではなく、**順序を誤ると外部からの到達性を失う操作**である。正しい順序は次のとおり。
+
+1. Apps VMを`192.168.10.101`へ集約する。
+2. **tailnet越しに`192.168.10.101`のSMB・HTTPS・DNSが使えることを確認する。**
+3. その後で`192.168.11.0/24`をAdvertiseRoutesから外す。
+
+`192.168.10.0/24`は現行の広告に最初から含まれているため、1が終われば2は通るはずである。
+逆順にするとVLAN 11上のserviceへ外から届かなくなる。
+
+**2. 同一LAN内のclientがgatewayを経由してしまう問題。**
+`--accept-routes`を有効にしたclientは、広告されたsubnet宛のrouteをtailscale interfaceへ入れる。
+そのため**宅内に居るclientでも、自分が直接繋がっていないsubnet宛のtrafficは
+`home-gateway`を経由する**ことになる。4ゾーン化後はTrusted（VLAN 20）のclientから
+Server（VLAN 10）のApps VMへ行くtrafficがこれに該当し、本来はIX2215が1 hopで捌けるものを
+gateway VM経由のWireGuard通信にしてしまう。gateway VMがintra-LAN trafficの
+ボトルネック兼単一障害点になる。
+
+**これは2026-09-06時点で未計測の仮説である。** 実際に起きるかは各clientの`--accept-routes`設定と
+Tailscaleがdirectly-connected subnetをどう扱うかに依存する。**Phase 4では、まず宅内clientから
+`traceroute`相当で経路を実測し、hairpinが起きているかを確認すること。** 起きていれば、
+subnet routeを必要とするのは宅外clientだけなので、宅内clientでは`--accept-routes`を
+使わない運用にするなどの対処を検討する。
+
+**3. VLAN 20/30/40のCIDRを広告するか。**
+`advertised_routes`の既定値にこれらは含まれていない。ADR-0003も
+「AdvertiseRoutesの整理（Serverサブネット以外を削減するか）は利用実態を確認してから判断する」と
+留保している。ゾーンポリシーでは**Tailscale clientはTrusted相当でServerへ許可、
+Trusted/IoT/Guestへはrouteしない**としているため、既定値のままServerだけを広告する方針が
+ポリシーと整合する。広げるなら理由をGitへ記録する。
+
+**4. IX2215のACLをどこまで厳格化するか。**
+現行と[目標ゾーン設計](../network/target-zones.md)の差分は次の3点である。
+`guest-out`はほぼ目標どおりなので、実質2点を決めることになる。
+
+| ACL | 現行 | 目標 | 決めること |
+| --- | --- | --- | --- |
+| `server-out`/`server_app-out` | VLAN 20へ無条件permit | 明示許可のみ | 何を明示許可として残すか |
+| `iot-out` | VLAN 10へ全deny | DNS/NTP/controllerのみ許可 | どのcontrollerを、どのportで通すか |
+| `guest-out` | deny all、internetのみ | 同左 | 変更不要 |
+
+#### 推奨する段階分け
+
+各段階の後で到達性を確認し、問題があればその段階だけをrollbackする。
+
+1. **調査と準備（非破壊）。** ECW5211のバックアップと管理IP確定、Tailscale live ACLのexportとreview、
+   IPv6状態の確認、IX2215 running-configのバックアップ。**ここだけで1つの窓を使ってよい。**
+2. **Tailscaleのimport（非破壊）。** `tailscale-import-core`（ACLとMagic DNS）まで。
+   各importの後に`make tailscale-plan`をreviewし、差分が無いことを確認する。
+   **`enable_adguard_dns`はこの段階ではまだfalseのままにする。**
+3. **Apps VMの`.10.101`集約。** Terraform 2変数の変更 → plan全文review（replaceが出たら中止）→ apply。
+   Ansibleのflag 3つを1commitで変更 → `make ansible-check` → `make ansible-apply`。
+   **SSH host keyとinventoryの`ansible_host`の扱いを先に決めておく。**
+   この段階で`.11.100`/`.11.101`/`.11.103`が消え、すべて`.10.101`になる。
+4. **Tailscaleのnameserver切り替え。** Apps VMが`.10.101`で稼働していることを確認してから
+   `enable_adguard_dns=true`で`tailscale-import-dns`→plan review→apply。
+   **順序を逆にするとtailnetのDNSが落ちる。**
+   この段階で**tailnet越しに`.10.101`のSMB・HTTPS・DNSが使えることを実測する。**
+   ここを確認するまで`192.168.11.0/24`をAdvertiseRoutesから外さない。
+5. **IX2215のACL再編とVLAN 11/63の撤去。** 後述のACL編集手順を必ず守る。
+   VLAN 11の撤去に合わせて`192.168.11.0/24`をAdvertiseRoutesから外す
+   （段階4の到達性確認が済んでいることが前提）。
+6. **ECW5211の設定。** SSIDのVLAN 20/30/40への割り当て、AP管理のVLAN 10への移動。
+7. **受入試験。** 各zoneのallow/deny試験、LAN/Tailscaleからのservice試験、Guest isolation。
+   [目標ゾーン設計](../network/target-zones.md)末尾の「手動変更記録」表を埋める。
+
+#### Phase 4で直すもの
+
+Apps VMのhost resolverが`*.kojigenba-srv.com`を解決できない件は、Terraformの`dns_servers`既定値が
+`["192.168.10.1", "1.1.1.1"]`であることに由来する。Phase 3では宣言どおりの結果として直さなかった。
+**`.10.101`集約とglobal nameserver変更に合わせて、ここで解消する。**
+
 
 ### 6. Phase 5: 廃止
 
@@ -442,6 +644,15 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
     以外のresourceが含まれている。
   - Debian cloud imageのURLが生きていることを確認していない。
 - destroy後のapplyが403で失敗しているのに、ACL `/vms/112`の欠落を確認せず別の原因を探している。
+- **Phase 4で、Apps VMが`192.168.10.101`で稼働を始める前に
+  `enable_adguard_dns=true`のTailscale applyを行おうとしている。** tailnet全体のDNSが落ちる。
+- **Phase 4で、Tailscale rootをimportせずにいきなりapplyしようとしている。**
+  このrootにはstateが無く、applyは既存のlive設定を上書きする。
+- **Phase 4で、live ACLをexport・reviewせずに`manage_tailnet=true`にしようとしている。**
+- **Phase 4で、IX2215のconsole accessまたはECW5211のバックアップを確保していない。**
+- **Phase 4で、Ansibleの`network_migration_complete`を、
+  `legacy_service_addresses_enabled`と`legacy_service_cutover_confirmed`をfalseにせずに
+  trueへ変えようとしている。** `site.yml`のassertが拒否するが、そもそも設計を誤解している。
 
 ## 作業対象外・worktree保護
 
@@ -454,15 +665,15 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
 編集、破棄、整形、stage、commitしない。選択的にstageし、commit前に
 `git diff --cached --name-only`で対象を確認する。
 
-次も現時点では行わない。
+次も現時点では行わない。**Phase 4はこれらのうちいくつかを解禁するが、
+解禁されるのはユーザーとmaintenance windowを合意し、着手前のゲートを全部満たした後だけである。**
 
-- Kubernetes VM、PVC、NFS data、ZFS dataset、cutover snapshotの削除。
-  **Apps VM（VMID 112）のdestroyだけはPhase 3の試験対象であり例外だが、
-  「着手前のゲート」を全部満たし、ユーザーとmaintenance windowを合意してからに限る。**
-- IX2215、ECW5211、VLAN、DHCPの追加変更（2026-09-05に承認済みwindowで実施したBVI11 prefix変更・
-  ACL更新と、`write memory`を除く）
-- `vmbr0.11`の修正・削除
-- Tailscale DNS/ACL/routeのapply
+- Kubernetes VM、PVC、NFS data、ZFS dataset、snapshot 2世代の削除。
+  **2026-09-20の14日保持期間満了までは、いかなる理由でも削除しない。**
+- IX2215、ECW5211、VLAN、DHCPの変更。**Phase 4の対象だが、window合意前には行わない。**
+- `vmbr0.11`の修正・削除（記録のみ。`192.18.11.11/24`のtypoも直さない）
+- Tailscale DNS/ACL/routeのapply。**Phase 4の対象だが、live ACLのexportとreviewを
+  終える前には行わない。stateが無いのでimportが先である。**
 - `stashPadDev`（VMID 111）の変更
 
 コード変更が必要な作業と、まとまった調査は、ユーザーの希望により可能な限りsonnetの補助agentへ
@@ -502,7 +713,8 @@ make ansible-lint ansible-check ansible-bootstrap-paths-test \
   走った。**compose.yamlはdigest固定のため稼働containerへの影響はない。**
 - **PR #24**（2026-09-06 merge）はtoolbox imageをtagではなくdigestで固定して実行する変更である。
   背景は下記のtoolboxの項を参照。digest固定のimageでCI相当19 targetが通ることを確認済み。
-- `origin/main`は`6929950`。
+- `origin/main`の現在地は`git log --oneline origin/main -1`で確認する。
+  **この文書はSHAを固定しない。**
 - toolbox `ghcr.io/koji-genba/homelab-toolbox:1.0.1`は公開済み。
   **Makefileはtagではなくdigest `sha256:9da8408a19624df8b4da2fbcde93d64eddd5c6414e77e59c0e0e6f51b7ec8037`で
   固定して実行する（PR #24）。** publish workflowは`files/tools/homelab-toolbox/**`と
