@@ -177,7 +177,9 @@ show ip access-list zz-probe
 - `deny`が`permit`より**前**に表示された → シーケンス番号による挿入が使える（**挿入可**）
 - `deny`が後ろに付いた、または構文エラー → 挿入できない（**挿入不可**）
 
-どちらでも次へ進める。結果をこの文書の6章へ記録し、捨てリストを消す。
+**2026-09-13の実機判定は「挿入不可」だった**（`% Warning: Sequence number 5 has been ignored.`）。
+再投入時に再判定する必要はないが、ファームウェアを更新した場合は確かめ直す。
+判定後は捨てリストを消す。
 
 ```
 no ip access-list zz-probe
@@ -434,16 +436,8 @@ clear ip ufs-cache
 **`ip access-list iot-out deny ...`と打つだけでは戻らない。** 末尾の`permit any any`の後ろに付き、
 評価されないからである。段階1の予備検証の結果に応じて方法を選ぶ。
 
-**挿入可だった場合**（シーケンス番号が効く）:
-
-```
-ip access-list iot-out 15 deny ip src 192.168.30.0/24 dest 192.168.20.0/24
-show ip access-list iot-out
-```
-
-番号は`deny 30→10`と`deny 30→40`の間に入る値を`show`で確かめてから決める。
-
-**挿入不可だった場合**（リストを作り直す）:
+**2026-09-13の実機判定により、この機体ではシーケンス番号が無視される（6章の項目4）。
+したがって下のリスト再作成が唯一の方法である。**
 
 ```
 no ip access-list iot-out
@@ -460,8 +454,7 @@ IoTゾーンの扱い（全通過か全廃棄か）は未確認である。IoT�
 不安なら先に`interface BVI30`で`no ip filter iot-out 10 in`してから作り直し、最後に付け直す
 （その間IoTは無フィルタになる）。
 
-どちらの方法でも、最後に`show ip access-list iot-out`で**`deny 30→20`が`permit any any`より前に
-あること**を必ず目視する。
+最後に`show ip access-list iot-out`で**`deny 30→20`が`permit any any`より前にあること**を必ず目視する。
 
 ### 5.3 最終手段
 
@@ -479,10 +472,16 @@ VLAN撤去まで反映済みなので、reloadしてもVLAN 11/63は戻らない
    この挙動に依存している。** 段階3の直後、Trusted→Serverの既存セッションが生き残るかが最初の関門。
 3. **自装置宛パケットが動的キャッシュを生成するか。** 自装置「発」（DDNS更新）は公式事例で確認できたが、
    自装置「宛」は記載が無い。だから1.6の救済permitと運用ルールを併記している。
-4. **シーケンス番号によるACL行の挿入が使えるか。** 段階1の予備検証（`zz-probe`）で判定する。
-   結果をここに記録する。rollbackで`iot-out`のdenyを戻す方法（5.4）がこれで変わる。
+4. **シーケンス番号によるACL行の挿入が使えるか → 使えない（2026-09-13に実機で判定済み）。**
 
-   - 判定日: ____  結果: 挿入可 / 挿入不可
+   ```
+   IX2215-HOME(config)# ip access-list zz-probe 5 deny ip src 192.168.20.1/32 dest any
+   % Warning: Sequence number 5 has been ignored.
+   ```
+
+   `show ip access-list zz-probe`でも`deny`は`permit`の**後ろ**に表示された。
+   **ACLの行は常に末尾へ追加される。** したがってrollbackで`iot-out`のdenyを戻すには
+   リストごと作り直すしかない（5.4）。既存ACLへ行を足す変更は、この機体では成立しない。
 
 5. **`option optimize`がACL行の評価順に影響するか。** 既存4本には付いているが新設3本には付けない。
    評価が上から順（first-match）であることは既存ACLの構成と矛盾しないが、マニュアルでの明示を
