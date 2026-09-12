@@ -61,7 +61,7 @@ variable "legacy_service_nic" {
 variable "management_ip" {
   description = "Phase 1 management address; .42 avoids the current .100-.200 DHCP pool"
   type        = string
-  default     = "192.168.10.42/24"
+  default     = "192.168.10.101/24"
 }
 
 variable "management_gateway" {

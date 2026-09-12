@@ -13,9 +13,9 @@ Apps VMの`homelab-app-reconcile.timer`は15分ごとに`origin/main`をfetchし
 ともに追記される。確認には次を使う。
 
 ```sh
-ssh deploy@192.168.10.42 sudo systemctl status homelab-app-reconcile.timer
-ssh deploy@192.168.10.42 sudo journalctl -u homelab-app-reconcile.service -n 100
-ssh deploy@192.168.10.42 sudo tail -n 100 /var/lib/homelab/deployments.log
+ssh deploy@192.168.10.101 sudo systemctl status homelab-app-reconcile.timer
+ssh deploy@192.168.10.101 sudo journalctl -u homelab-app-reconcile.service -n 100
+ssh deploy@192.168.10.101 sudo tail -n 100 /var/lib/homelab/deployments.log
 ```
 
 ## stashPad stagingとproduction
@@ -50,7 +50,7 @@ downgradeは行わない。projectと1つ前の既知commitを指定する。
 ```sh
 PROJECT=stashpad-staging \
 ROLLBACK_SHA=<known-good-commit> \
-APPS_HOST=192.168.10.42 \
+APPS_HOST=192.168.10.101 \
 make rollback-app
 ```
 
@@ -62,8 +62,8 @@ retryは重複排除する。原因の修正、mainの希望状態、data/schema
 projectを必ず再適用するため、rollback状態が意図せず残らない。
 
 ```sh
-ssh deploy@192.168.10.42 sudo rm /var/lib/homelab/reconcile.paused
-ssh deploy@192.168.10.42 sudo systemctl start homelab-app-reconcile.service
+ssh deploy@192.168.10.101 sudo rm /var/lib/homelab/reconcile.paused
+ssh deploy@192.168.10.101 sudo systemctl start homelab-app-reconcile.service
 ```
 
 アプリを停止してread-onlyへ戻す場合は、先に`homelab-apps.service`を停止する。

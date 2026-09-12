@@ -2,7 +2,7 @@
 # Non-secret desired state for the Debian 13 Apps VM. Runtime credentials are
 # intentionally absent from Git and are loaded from runtime.sops.yaml only
 # after the cutover gate is enabled.
-apps_management_ip: 192.168.10.42
+apps_management_ip: 192.168.10.101
 apps_final_management_ip: 192.168.10.101
 apps_hostname: apps
 network_migration_complete: false

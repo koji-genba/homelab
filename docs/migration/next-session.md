@@ -97,7 +97,7 @@
 
 ## 現在のシステム状態（2026-09-06 再確認、Phase 3再構築後）
 
-### Apps VM（VMID 112、`192.168.10.42`）
+### Apps VM（VMID 112、`192.168.10.101`）
 
 - 7 Compose projectがすべて稼働。`homelab-apps.service`は`active`。
 
@@ -112,7 +112,7 @@
   | monitoring | `homelab-monitoring-gatus-1` | 稼働 |
 
 - `ens19`に`192.168.11.100/24`、`192.168.11.101/24`、`192.168.11.103/24`を保持。
-  `eth0`は管理用`192.168.10.42/24`のまま。
+  `eth0`は管理用`192.168.10.101/24`（2026-09-12にPhase 4で`.42`から変更）。
 - NFS 7 mountのうち`stashpad-media`だけが`ro`、他6つが`rw`。これが正しい状態である。
 - `/opt/homelab`は`origin/main`のcleanなcheckoutである。`homelab-app-reconcile.timer`は
   enabled/activeで、15分間隔でmainへfast-forwardする。**Compose定義に差分が無ければ
@@ -126,7 +126,7 @@
   - SSH host key。現在の値は`SHA256:9U1BvsqDUUQASaGfCqLSei5HdOV17gkNUsUa1ahEpys`で、
     QEMU guest agent経由と`ssh-keyscan`の2経路で一致を確認して`known_hosts`へ登録した。
   - TLS証明書。Let's Encryptから再取得された（`prod.stashpad`の有効期限は2026-12-05）。
-- Apps VMへのSSHは`deploy@192.168.10.42`である（`files/infrastructure/ansible/apps/inventory/hosts.yml`の
+- Apps VMへのSSHは`deploy@192.168.10.101`である（`files/infrastructure/ansible/apps/inventory/hosts.yml`の
   `ansible_user`）。秘密鍵の指定はなく、既定の`~/.ssh/id_ed25519`とssh-agentに委ねる設計である。
 - GatusのCaddy probeは`HTTP 308`を成功として観測している。PR #20の設定変更は、旧bind mount inodeを
   保持したcontainerを手動でforce-recreateして反映した。PR #21のreconcile/rollback修正もAnsibleで
@@ -423,9 +423,9 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
 | IX2215の採取 | 完了（2026-09-06）。console loginも確認済み |
 | ECW5211 | 完了。management VLAN tagged 10、SSID→VLAN 20/30/40、station isolation、config backup |
 | Tailscale import | 完了（2026-09-12）。ACLとMagicDNSをimportし、整形差分をapply済み。state-backup取得済み |
-| 実機のnetwork変更 | DHCP縮小、gateway `.102`、ElastiFlow `.103`が完了（2026-09-12）。残りはApps VM |
+| 実機のnetwork変更 | DHCP縮小、gateway `.102`、ElastiFlow `.103`、Apps VM管理IP `.101`が完了（2026-09-12） |
 
-次にやること: 下の「残りの手順」の5（Apps VMの管理IPを`.10.101`へ）から。
+次にやること: 下の「残りの手順」の6（Apps serviceを`.10.101`へ集約）から。
 
 #### 残りの手順
 
@@ -455,11 +455,11 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
    Elasticsearchは`0.0.0.0`、Kibanaは`0.0.0.0`、flowcollは`*:6343`で待ち受けていたため、
    IP変更でserviceは壊れなかった。IXの`sflow collector`を`.103`へ変更し、実際にsFlowv5の着信を確認済み。
    Kibanaは`http://192.168.10.103:5601`になった。
-5. **Apps VMの管理IPを`.10.101`へ。** 同じTerraform手順（rootは`apps-vm`、変数は`management_ip`）。
-   ただしApps VMだけは事前に2点を見ておく。**cloud-initが新instanceとして再実行されるので、
-   apps-vmのuser-dataの中身を先に読む**こと（gatewayは再実行しても安全な内容だった）。それと
-   **SSH host鍵が変わるのでAnsibleのknown_hostsとinventoryの`ansible_host`を同時に直す**こと。
-   `legacy_service_nic=true`は維持し、planでVMID 112のreplaceが出たら中止する。
+5. **Apps VMの管理IPを`.10.101`へ。** 完了（2026-09-12）。段階3と同じ手順で`0 added, 1 changed,
+   0 destroyed`。再起動後、`eth0`は`.101`、`ens19`の`.11.100/.101/.103`は`homelab-service-addresses`
+   unitが付け直し、NFS 7本と全7コンテナが自動復帰した。NFS exportは`192.168.10.0/24`単位なので
+   export側の変更は不要だった。Ansibleの`ansible_host`と`apps_management_ip`、運用文書の参照も`.101`へ
+   更新済み。なおこのVMはICMPを塞いでいるのでpingでの死活確認はできない（SSHで確認する）。
 6. **Apps serviceを`.10.101`へ集約。** Ansibleのflag 3つを1commitで変更し、`make ansible-check`→
    `make ansible-apply`。`.11.100`/`.11.101`/`.11.103`が消える。集約後にTerraformで
    `legacy_service_nic=false`としてVLAN 11 NICを外す。
@@ -592,7 +592,7 @@ Tailscale global nameserverの変更はApps VM自身には作用せず、Terrafo
 1. Apps VMで`homelab-apps.service`を停止し、全Compose projectがdownしたことを確認する。
 2. `systemctl stop homelab-service-addresses`でservice IPを外し、
    `ip -4 addr show dev ens19`に`.11.x`がないことを確認する。
-3. NFS serverで`/proc/fs/nfsd/clients/*/states`を確認し、Apps VM（`192.168.10.42`）の
+3. NFS serverで`/proc/fs/nfsd/clients/*/states`を確認し、Apps VM（`192.168.10.101`）の
    open stateが0件であることを確認する。
 4. Apps VM側で発生したwriteを記録し、旧側へ戻すdata/schemaの扱いを決める。
 5. `metallb-speaker` DaemonSetの`nodeSelector`を`{"kubernetes.io/os":"linux"}`へ戻す。
