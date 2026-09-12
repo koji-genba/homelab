@@ -424,9 +424,10 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
 | ECW5211 | 完了。management VLAN tagged 10、SSID→VLAN 20/30/40、station isolation、config backup |
 | Tailscale import | 完了（2026-09-12）。ACLとMagicDNSをimportし、整形差分をapply済み。state-backup取得済み |
 | 実機のnetwork変更 | DHCP縮小、VM 3台のrenumber、Apps serviceの`.10.101`集約、Tailscale nameserver切替が完了（2026-09-12） |
-| 残り | `.11.0/24`広告の撤去、IX ACL再編、untaggedのGuest化、VLAN 11撤去、受入試験 |
+| `.11.0/24`広告の撤去 | 完了（2026-09-12） |
+| 残り | IX ACL再編、untaggedのGuest化、VLAN 11撤去、受入試験 |
 
-次にやること: 下の「残りの手順」の8（`192.168.11.0/24`の広告撤去）から。
+次にやること: 下の「残りの手順」の8（IX2215のstateful ACL再編）から。Phase 4で唯一、事前にoffline手順書を作る段階である。
 
 #### 残りの手順
 
@@ -470,7 +471,14 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
    最初これを忘れてfirewallだけ適用された中途半端な状態で止まった。
 7. **Tailscale nameserverの切り替え。** 完了（2026-09-12）。`tailscale-import-dns`でimportし、
    planは`nameservers`が`192.168.11.101 -> 192.168.10.101`の1件だけだった。apply後、tailnet経由の
-   名前解決をユーザーが確認済み。
+   名前解決をユーザーが確認済み。あわせて`192.168.11.0/24`の広告も外した。gateway VMで
+   `sudo tailscale set --advertise-routes=192.168.10.0/24 --advertise-exit-node`を実行し、
+   Terraformの`advertised_routes`既定値も揃えてある。**ノードが広告するrouteはguestのprefsで、
+   Terraformの`advertised_routes`はcontrol plane側の承認リストなので層が別である**
+   （[#29](https://github.com/koji-genba/homelab/issues/29)）。
+   `192.168.10.0/24`の広告は残す。Apps VMはtailnetノードではないため、宅外からのSMB/HTTPS/DNSと
+   global nameserver `.10.101`への到達がこのrouteに依存している。hairpinはclient側の`accept-routes`で
+   制御する（構造的な代替案は[#30](https://github.com/koji-genba/homelab/issues/30)）。
 8. **IX2215のstateful ACL再編。** Phase 4で唯一、事前にofflineの手順書（投入・確認・rollbackコマンドと
    期待出力）を用意する段階である。現行ACLはTrusted→ServerとServer→Trustedをstatic permitしている
    だけでstatefulではない。逆方向のpermitを単に消すと応答も落ちるので、動的フィルタを入れてから
