@@ -428,12 +428,11 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
 | Tailscale import | 完了（2026-09-12）。ACLとMagicDNSをimportし、整形差分をapply済み。state-backup取得済み |
 | 実機のnetwork変更 | DHCP縮小、VM 3台のrenumber、Apps serviceの`.10.101`集約、Tailscale nameserver切替が完了（2026-09-12） |
 | `.11.0/24`広告の撤去 | 完了（2026-09-12） |
-| VLAN 11/63の撤去とuntaggedのGuest化 | 完了（2026-09-13）。**IXは`write memory`未実施** |
+| VLAN 11/63の撤去とuntaggedのGuest化 | 完了（2026-09-13）。`write memory`と再起動まで実施済み |
 | 残り | IX ACL再編（stateful化）、受入試験 |
 
-次にやること: **まずIXで`write memory`を実行する**（未保存のまま再起動すると、DHCP poolが`.100-.200`へ
-戻って`.101-.103`と衝突する）。そのうえで「残りの手順」の8（IX2215のstateful ACL再編）へ進む。
-Phase 4で唯一、事前にoffline手順書を作る段階である。
+次にやること: 「残りの手順」の8（IX2215のstateful ACL再編）。Phase 4で唯一、事前にoffline手順書を
+作る段階である。書き換えるのは`server-out`と`main-out`の2本だけになった。
 
 #### 残りの手順
 
@@ -498,6 +497,8 @@ Phase 4で唯一、事前にoffline手順書を作る段階である。
    k8s VM・PVC・NFS data・ZFS snapshotは削除していない。**Kubernetesへrollbackする場合は、
    VLAN 11（`BVI11`、tagged subif、`server_app-dhcp`、ACL）の再投入が先に必要になる。**
    投入内容はGitの`config.txt`履歴から復元できる。
+   2026-09-13に`write memory`と再起動を実施し、再起動後にIX/PVE/ECW/Apps/gateway/ElastiFlowへの
+   到達、HTTPS 200、インターネット、tailnetのexit node、sFlow受信、NFS 7本と7コンテナを確認した。
 11. **受入試験。** 各zoneのallow/deny、LAN/tailnetからのservice、Guest isolation。結果を
     [目標ゾーン設計](../network/target-zones.md)の「手動変更記録」へ記入する。
 
