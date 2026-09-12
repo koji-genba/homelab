@@ -94,18 +94,18 @@ http-server ip enable
 !
 !
 sflow agent ip 192.168.10.1
-sflow collector ip 192.168.10.40
+sflow collector ip 192.168.10.103
 !
 !
 !
 !
 ip dhcp profile server-dhcp
-  assignable-range 192.168.10.100 192.168.10.200
+  assignable-range 192.168.10.250 192.168.10.254
   subnet-mask 255.255.255.0
   default-gateway 192.168.10.1
   dns-server 1.1.1.1 8.8.8.8
   domain-name kojigenba-srv.com
-  lease-time 86400
+  lease-time 3600
 !
 ip dhcp profile main-dhcp
   assignable-range 192.168.20.100 192.168.20.200

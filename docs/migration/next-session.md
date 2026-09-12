@@ -423,9 +423,9 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
 | IX2215の採取 | 完了（2026-09-06）。console loginも確認済み |
 | ECW5211 | 完了。management VLAN tagged 10、SSID→VLAN 20/30/40、station isolation、config backup |
 | Tailscale import | 完了（2026-09-12）。ACLとMagicDNSをimportし、整形差分をapply済み。state-backup取得済み |
-| 実機のnetwork変更 | DHCP縮小とTailscale gatewayの`.102`移動が完了（2026-09-12）。残りはElastiFlowとApps VM |
+| 実機のnetwork変更 | DHCP縮小、gateway `.102`、ElastiFlow `.103`が完了（2026-09-12）。残りはApps VM |
 
-次にやること: 下の「残りの手順」の4（ElastiFlowを`.103`へ）から。段階3と同じ手順でよい。
+次にやること: 下の「残りの手順」の5（Apps VMの管理IPを`.10.101`へ）から。
 
 #### 残りの手順
 
@@ -450,9 +450,11 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
    gatewayでは所要数分でtailnetのnode IP（`100.90.37.109`）、AdvertiseRoutes、exit node、`ip_forward`が
    すべて維持された。**再起動でSSH host鍵が作り直される**ので`ssh-keygen -R <旧IP>`が要る。
    cloud-initのruncmdが再実行され`/etc/sysctl.conf`のip_forward行が重複するが無害である。
-4. **ElastiFlowを`.103`へ。** 段階3と同じTerraform手順（rootは`elastiflow`、変数は`ip_address`）。
-   applyでVMが再起動し`.103`になったら、IXの`sflow collector`を`.40`から`.103`へ変更して受信再開を
-   確認する。sFlowはUDPの片方向なので、collector変更までは受信が止まる。
+4. **ElastiFlowを`.103`へ。** 完了（2026-09-12）。段階3と同じ手順で、planは`0 added, 1 changed,
+   0 destroyed`だった（user-dataに差分が無くsnippetのreplaceも無し）。`/etc`に旧IPの直書きは無く、
+   Elasticsearchは`0.0.0.0`、Kibanaは`0.0.0.0`、flowcollは`*:6343`で待ち受けていたため、
+   IP変更でserviceは壊れなかった。IXの`sflow collector`を`.103`へ変更し、実際にsFlowv5の着信を確認済み。
+   Kibanaは`http://192.168.10.103:5601`になった。
 5. **Apps VMの管理IPを`.10.101`へ。** 同じTerraform手順（rootは`apps-vm`、変数は`management_ip`）。
    ただしApps VMだけは事前に2点を見ておく。**cloud-initが新instanceとして再実行されるので、
    apps-vmのuser-dataの中身を先に読む**こと（gatewayは再実行しても安全な内容だった）。それと
