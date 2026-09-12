@@ -432,8 +432,7 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
 | VLAN 11/63の撤去とuntaggedのGuest化 | 完了（2026-09-13）。`write memory`と再起動まで実施済み |
 | 残り | IX ACL再編（stateful化）、受入試験 |
 
-次にやること: 「残りの手順」の8（IX2215のstateful ACL再編）。Phase 4で唯一、事前にoffline手順書を
-作る段階である。書き換えるのは`server-out`と`main-out`の2本だけになった。
+次にやること: 「残りの手順」の8（IX2215のstateful ACL再編）。手順書は作成済みで、レビュー後に投入する。
 
 #### 残りの手順
 
@@ -485,10 +484,12 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
    `192.168.10.0/24`の広告は残す。Apps VMはtailnetノードではないため、宅外からのSMB/HTTPS/DNSと
    global nameserver `.10.101`への到達がこのrouteに依存している。hairpinはclient側の`accept-routes`で
    制御する（構造的な代替案は[#30](https://github.com/koji-genba/homelab/issues/30)）。
-8. **IX2215のstateful ACL再編。** Phase 4で唯一、事前にofflineの手順書（投入・確認・rollbackコマンドと
-   期待出力）を用意する段階である。現行ACLはTrusted→ServerとServer→Trustedをstatic permitしている
-   だけでstatefulではない。逆方向のpermitを単に消すと応答も落ちるので、動的フィルタを入れてから
-   逆方向の新規接続をdenyする。
+8. **IX2215のstateful ACL再編。** 手順・確認・rollbackは
+   [IX2215 ACL stateful化 実施手順書](../network/ix-acl-stateful-runbook.md)にある（2026-09-13作成、投入前）。
+   触るのは**BVI20の1枚だけ**である。stateful性が要るのは「Trustedゾーンへの戻りだけを通す」1点で、
+   Server/IoT/Guestへは誰も新規接続を張らないため、発信元側の既存staticで足りる。
+   動的フィルタのキャッシュはインタフェース単位でしか効かないので、遮断は宛先BVIの`out`に置く。
+   **`out`方向にフィルタを入れると暗黙denyが発生する**ため、末尾の`permit any any`を落とさない。
 9. **untaggedのGuest化とVLAN 63の撤去。** 完了（2026-09-13）。`GigaEthernet2.0`と`GigaEthernet2:6.0`を
    `bridge-group 40`へ移し、`BVI63`、`default-dhcp`、`default-out`を削除した。
 10. **VLAN 11の撤去。** 完了（2026-09-13）。14日保持期間の満了を待たず、ユーザー判断で前倒しした。
