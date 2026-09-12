@@ -21,6 +21,9 @@ Thumbs.db
 .agents/
 skills-lock.json
 
+# Local device captures and unredacted configuration backups
+/tmp/
+
 # ==========================================
 # エディタ・IDE
 # ==========================================
