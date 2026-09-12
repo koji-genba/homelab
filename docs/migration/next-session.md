@@ -5,17 +5,18 @@
 - 作業ブランチ: **`docs-phase4-prep`**（`origin/main`から分岐、PR未作成）。mainにはPR #23、#24、#25が
   merge済みである。**この文書にSHAを固定で書かない。** merge のたびに陳腐化して罠になるためである。
   現在地は`git log --oneline origin/main -1`と`git log --oneline origin/main..HEAD`で確認する。
-- **2026-09-12時点で、`docs-phase4-prep`にはpush済みのcommitが2件あり、さらに未commitの変更がある。**
-  未commitの内容は、Phase 4設計の詳細化（ADR-0003、目標ゾーン設計、移行手順、この文書）、
-  `.gitignore`へのrepo直下`/tmp/`の追加、tailscale-gateway rootの`ip_address`変数化である。commit、push、PRはユーザーの指示を受けてから行う。
+- **2026-09-12時点で、`docs-phase4-prep`は`origin`より7 commit進んでおり、未commitの変更は無い。**
+  内容はPhase 4の設計詳細化と文書整理、VM 3台のrenumber、Appsサービスの集約である。
+  pushとPRはユーザーの指示を受けてから行う。
 - 現在地: **Phase 3の再構築性試験を2026-09-06に実施した。** Apps VM（VMID 112）をTerraformで
   destroyし、Terraform・Ansible・Gitから再構築して復旧させた。**Apps VMが唯一のwriterで、
   7 Compose projectが稼働中。** IX2215の構成ドリフトは2026-09-05に解消済み。
   Kubernetes VM 3台は2026-09-05に停止済み（削除はしていない）。
 - **受入試験は12項目すべて合格した**（自動確認5項目と、2026-09-06にユーザーが確認した7項目）。
   **Kubernetes VM 14日保持期間は2026-09-06に開始し、2026-09-20に満了する。**
-- **Phase 4のネットワーク移行が進行中である。** 段階1（IX2215採取）が完了し、段階2（Tailscale import）は
-  ACL整形差分のapply待ちである。詳細は「Phase 4: ネットワーク移行」の「現在地」にある。
+- **Phase 4のネットワーク移行が進行中である。** IP関連は完了し（DHCP縮小、VM 3台のrenumber、
+  Appsサービスの`.10.101`集約、Tailscale nameserver切替と旧route撤去）、残るはIX2215のACL再編、
+  untaggedのGuest化、VLAN 11/63の撤去、受入試験である。詳細は「Phase 4: ネットワーク移行」の「現在地」にある。
   満了日までにrollbackが発生しなければ、その後にPhase 5の廃止へ進む。
 - **Phase 3は、Proxmoxのuser・role・API token・ACLがGitにもTerraformにも宣言されておらず、
   しかも`/vms/<vmid>`のACLはVMのdestroyで道連れに消えることを明らかにした。
@@ -72,19 +73,20 @@
   Phase 3は2026-09-06に合格したため、**2026-09-20の満了日まで**VM、disk、PVC、NFS data、
   ZFS snapshotのいずれも削除しない。**rollback以外の目的でVMを起動しない。**
   起動した場合も、Fluxをresumeせず、Deploymentをscale upせず、ServiceをLoadBalancerへ戻さない。
-- 次のAnsible flagは現在の値を維持する。`network_migration_complete`をtrueにしない。
-  - `legacy_service_addresses_enabled: true`
-  - `legacy_service_cutover_confirmed: true`
+- Ansible flagは2026-09-12のPhase 4集約で次の値になった。**これを逆戻ししない。**
+  - `network_migration_complete: true`
+  - `legacy_service_addresses_enabled: false`
+  - `legacy_service_cutover_confirmed: false`
   - `application_cutover_confirmed: true`
-  - `network_migration_complete: false`
-- Tailscaleはlive設定の完全なexport、review、importが終わるまで`manage_tailnet=false`を維持する。
-  global nameserverの実機値は`192.168.11.101`であり、Terraform変数`final_apps_ip`の
-  `192.168.10.101`はPhase 4の期待値である（`variables.tf`のvalidationでこの値に固定されている）。
-  **Apps VMが`192.168.10.101`で稼働を始める前に`enable_adguard_dns=true`でapplyすると、
-  tailnet全体のDNSが即座に解決不能になる。**
-- **`files/infrastructure/terraform/tailscale/`にはstateが存在しない。** このrootは一度も
-  applyもimportもされていない。他のroot（apps-vm、tailscale-gateway、elastiflow、
-  stashpad-dev、k8s-cluster）にはstateがある。**いきなりapplyせず、importから始める。**
+
+  `site.yml`のassertは、`network_migration_complete=true`のときlegacy 2 flagがどちらもfalseで
+  あることを要求する。VLAN 11のaddressを再付与する方向の変更は、rollback以外では行わない。
+- **Tailscale rootは2026-09-12にimport済みで、stateがある。** ACL、MagicDNS、global nameserverを
+  Terraformが所有する。global nameserverの実機値は`192.168.10.101`である。ACLを変えるときは
+  Admin Consoleを直接編集せず、`acl-policy.live.json`を編集してplan/applyする。
+  `manage_subnet_router`は引き続きfalseで、subnet routerのtagとroute承認はTerraform管理外である。
+  ノードが広告するrouteはguestの`tailscaled` prefsであり、どちらもTerraformでは変えられない
+  （[#29](https://github.com/koji-genba/homelab/issues/29)）。
 - Apps VMのcloud-init warning履歴を消す目的で`cloud-init clean`やreinitを行わない。
 - Terraform planにVMID 112のreplace、想定外resource、Apps VM以外の変更が出たらapplyしない。
 - secret、API token、age秘密鍵、復号済み設定、Terraform stateの実値を会話、ログ、Git、tfvarsへ出力しない。
@@ -111,8 +113,9 @@
   | sillytavern | `homelab-sillytavern-sillytavern-1` | 稼働 |
   | monitoring | `homelab-monitoring-gatus-1` | 稼働 |
 
-- `ens19`に`192.168.11.100/24`、`192.168.11.101/24`、`192.168.11.103/24`を保持。
-  `eth0`は管理用`192.168.10.101/24`（2026-09-12にPhase 4で`.42`から変更）。
+- `eth0`が`192.168.10.101/24`で、管理もserviceもこの1つに集約済み（2026-09-12のPhase 4）。
+  Caddy 80/443、AdGuard 53、Samba 445がこのaddressで待ち受ける。`ens19`（VLAN 11）は
+  IPv4 addressを持たない。VLAN 11 NIC自体の撤去は保持期間満了後に行う。
 - NFS 7 mountのうち`stashpad-media`だけが`ro`、他6つが`rw`。これが正しい状態である。
 - `/opt/homelab`は`origin/main`のcleanなcheckoutである。`homelab-app-reconcile.timer`は
   enabled/activeで、15分間隔でmainへfast-forwardする。**Compose定義に差分が無ければ
@@ -139,7 +142,7 @@
 - **Apps VM自身のhost resolverでは`*.kojigenba-srv.com`を解決できない。** `systemd-resolved`の
   `eth0` uplinkが`192.168.10.1`（53をrefuse）と`1.1.1.1`（内部record非保持）のためである。
   Kubernetes停止とは無関係の既存事象で、実害は現時点でない。host側でFQDNを扱う確認は
-  `192.168.11.101`を明示指定するか`curl --resolve`を使うこと。
+  `192.168.10.101`を明示指定するか`curl --resolve`を使うこと。
 
 ### Kubernetes（VM停止済み）
 
