@@ -17,6 +17,9 @@ Internet接続とAIセッションの双方を失う可能性を前提とし、c
 - 既存のACL（`server-out`、`main-out`、`iot-out`、`guest-out`）は**消さない**。新しいフィルタを
   より若いシーケンス番号で重ねるだけにする。これによりrollbackは「足したものを外す」だけで済む。
 - 投入は1段階ずつ。各段階の確認が終わるまで次へ進まない。
+- **ACLの行は登録順に評価され、シーケンス番号を指定しない追加は末尾に付く。** 既存ACLはすべて
+  末尾が`permit ip src any dest any`なので、**後から足した行はそこへ到達せず効かない**。
+  既存ACLへ行を「足す」変更はしない。削除だけにするか、別名の新ACLを作って参照を差し替える。
 
 ## 1. 設計の要点
 
@@ -53,6 +56,8 @@ Guest向けdenyとInternet向けpermitが従来どおり効く。
 ないこと**である（機能説明書 2-424: 最後のフィルタがダイナミックフィルタで全てにマッチしない場合は
 廃棄）。したがって**`ip filter main-out 10 in`は絶対に外さない**。外すとseq 5が最後になり、
 Trusted→Internetが全滅する。
+
+なお`option optimize`は評価結果を変えない。行順の問題を救済しない。
 
 ### 1.3 なぜBVI20だけなのか
 
@@ -94,6 +99,33 @@ Trusted端末からIXの`192.168.10.1`へSSHすると、応答の送信元は`19
 存在した場合、ダイナミックアクセスリストが評価されます。」既存static名で動的リストを作ると、
 インタフェース設定を触らずに挙動が黙って変わる。この手順では別名を使う。名前は15文字以内。
 
+### 1.8 動的キャッシュのタイムアウト
+
+既定値（コマンドリファレンス 24-7、IX2215は「IX3315以外」側）。
+
+| 項目 | 既定値 |
+| --- | --- |
+| `tcp-idle-time` | 300秒 |
+| `udp-idle-time` | 30秒 |
+| `icmp-timeout` | 30秒 |
+| `tcp-syn-timeout` | 30秒 |
+| `global-timeout` | 60秒 |
+| `cache` | 8192エントリ |
+
+BVI20の`ip ufs-cache timeout tcp 60`（転送キャッシュの寿命）とは**別物**である。
+
+**影響。** TCPセッションが300秒以上無通信になるとキャッシュが消える。その後に**Server側から先に
+パケットを送る**と、BVI20の`out`で新規接続扱いになりdenyされる。Trusted側から先に送れば
+キャッシュが作り直されて通る。
+
+該当しうるのは「長時間アイドルの後にサーバ側から通知を送る」種類の通信である。本環境の
+主要サービス（HTTPS、SMB、SSH、DNS）はいずれもclient起点なので、既定値のままで始める。
+受入試験の#22でアイドル後のserver-push挙動を実測し、実害があれば次で延ばす。
+
+```
+ip access-list dynamic timer tcp-idle-time 3600
+```
+
 ## 2. 変更内容
 
 | 変更 | 内容 | 段階 |
@@ -113,7 +145,10 @@ Trusted端末からIXの`192.168.10.1`へSSHすると、応答の送信元は`19
 ### 段階0: 事前取得（無停止）
 
 ```
+show version
 show running-config
+show startup-config
+check configuration status
 show ip filter
 show ip access-list
 show ip filter statistics
@@ -121,11 +156,36 @@ show ip filter statistics
 
 出力をローカルへ保存する。consoleでloginできることを確認しておく。
 
+**`check configuration status`で「already saved」（running-configとstartup-configが一致）である
+ことを必ず確認する。** 未保存の変更が残っていると、rollbackで`reload`したときにACL以外の変更まで
+失う。一致していなければ、先に`write memory`するか、その差分の素性を確認してから着手する。
+
+設定モードへは`enable-config`で入る（機種・版によっては`configure`）。プロンプトが
+`IX2215-HOME(config)#`になることを確認してから投入を始める。`configure terminal`はIXの構文ではない。
+
 ### 段階1: ACL定義の投入（インタフェース未適用なので無影響）
 
+まず、**行の途中へ挿入できるか**を未使用の捨てリストで確かめる。ここでの結果が段階4とrollbackの
+やり方を決める。
+
 ```
-configure terminal
-!
+ip access-list zz-probe permit ip src 192.168.20.0/24 dest any
+ip access-list zz-probe 5 deny ip src 192.168.20.1/32 dest any
+show ip access-list zz-probe
+```
+
+- `deny`が`permit`より**前**に表示された → シーケンス番号による挿入が使える（**挿入可**）
+- `deny`が後ろに付いた、または構文エラー → 挿入できない（**挿入不可**）
+
+どちらでも次へ進める。結果をこの文書の6章へ記録し、捨てリストを消す。
+
+```
+no ip access-list zz-probe
+```
+
+続いて本体を投入する。
+
+```
 ip access-list trusted-trig permit ip src 192.168.20.0/24 dest 192.168.10.0/24
 ip access-list trusted-trig permit ip src 192.168.20.0/24 dest 192.168.30.0/24
 !
@@ -145,10 +205,15 @@ ip access-list trusted-in permit ip src any dest any
 ```
 show ip access-list trusted-trig
 show ip access-list trusted-in
+show ip access-list dynamic trusted-dyn
+check configuration access-list
 ```
 
 期待: `trusted-trig`が**2エントリ**（`permit any any`が無いこと）、`trusted-in`が7エントリで、
-3つの`/32 permit`が`/24 deny`より**前**にあること。順序が違えば削除して入れ直す。
+3つの`/32 permit`が`/24 deny`より**前**にあること。`trusted-dyn`が`trusted-trig`を参照していること。
+
+新設の3本はどれも空の状態から順に投入するので、行順は入力順どおりになる。ずれていたら
+`no ip access-list <名前>`でリストごと消して入れ直す（**行単位の削除と再追加では前に戻せない**）。
 
 ### 段階2: BVI20の入力へ動的フィルタを追加
 
@@ -221,9 +286,11 @@ show ip filter statistics BVI20
 
 段階3を先に済ませてあるので、ここで開けても**新規のIoT→TrustedはBVI20の`out`で落ちる**。
 
+**denyを1行消すだけでよい。permitは足さない。** `iot-out`の末尾には既に`permit ip src any dest any`が
+あるので、denyが無くなれば30→20はそこで通る。permitを足しても末尾の後ろに付いて無意味である。
+
 ```
 no ip access-list iot-out deny ip src 192.168.30.0/24 dest 192.168.20.0/24
-ip access-list iot-out permit ip src 192.168.30.0/24 dest 192.168.20.0/24
 ```
 
 確認:
@@ -232,9 +299,10 @@ ip access-list iot-out permit ip src 192.168.30.0/24 dest 192.168.20.0/24
 show ip access-list iot-out
 ```
 
-期待: 追加した`permit 30→20`が末尾の`permit any any`より**前**にあること。
+期待: `iot-out`が4エントリ（`deny 30→10`、`deny 30→40`、`permit any any`、および`option optimize`）で、
+`deny 30→20`が消えていること。
 Trusted端末からIoT機器への接続が**双方向で成立**すること。
-IoT機器からTrusted端末への新規接続が**失敗**すること。
+IoT機器からTrusted端末への新規接続が**失敗**すること（BVI20の`out`で落ちる）。
 
 ### 段階5: IX自身の管理plane制限
 
@@ -257,12 +325,14 @@ destも見る可能性があるため`dest any`にして両方の解釈で安全
 
 ### 段階6: 受入試験と保存
 
-4章の行列をすべて実施し、合格を確認してから:
+4章の行列をすべて実施し、合格を確認してから、**設定モードのまま**保存する。
 
 ```
-exit
 write memory
+exit
 ```
+
+保存後に`check configuration status`で「already saved」を確認する。
 
 ## 4. 受入試験の行列
 
@@ -289,6 +359,9 @@ write memory
 | 19 | tailnet | VLAN 20/30/40のアドレス | **到達しない**（routeを広告していない） |
 | 20 | tailnet | exit node経由のInternet | 成功 |
 | 21 | — | sFlowが`.10.103`へ届き続けている | 成功 |
+| 22 | Server | Trustedへ、300秒以上アイドルにした既存セッションで応答 | 落ちる可能性あり（1.8） |
+| 23 | Server / Trusted | IXのHTTP管理画面 | 成功 |
+| 24 | — | `show ip access-list dynamic trusted-dyn`が定義を表示 | 成功 |
 
 denyが効いていることは、カウンタでも確認する。
 
@@ -318,7 +391,7 @@ show logging
 暗黙denyを起こしているのはBVI20の`out`だけなので、まずこれを外す。
 
 ```
-configure terminal
+enable-config
 interface BVI20
   no ip filter trusted-in 5 out
   exit
@@ -329,7 +402,7 @@ interface BVI20
 **必ず上から順に実行する。フィルタのdetachを、ACL定義の削除より先に行うこと。**
 
 ```
-configure terminal
+enable-config
 !
 ! (1) まずBVI20から両方のフィルタを外す
 interface BVI20
@@ -337,9 +410,7 @@ interface BVI20
   no ip filter trusted-dyn 5 in
   exit
 !
-! (2) iot-outを元に戻す（段階4を実施済みの場合のみ）
-no ip access-list iot-out permit ip src 192.168.30.0/24 dest 192.168.20.0/24
-ip access-list iot-out deny ip src 192.168.30.0/24 dest 192.168.20.0/24
+! (2) iot-outを元に戻す（段階4を実施済みの場合のみ。方法は5.4を見ること）
 !
 ! (3) 管理planeを戻す
 no ssh-server ip access-list
@@ -356,10 +427,41 @@ clear ip filter dynamic
 clear ip ufs-cache
 ```
 
-(2)の後で`show ip access-list iot-out`を確認し、**戻した`deny 30→20`が末尾の`permit any any`より
-前にあること**を必ず見る。後ろに入ると効かない。
-
 `main-out`・`server-out`・`guest-out`は最初から触っていないので復旧不要である。
+
+### 5.4 `iot-out`のdenyを復元する（行順に注意）
+
+**`ip access-list iot-out deny ...`と打つだけでは戻らない。** 末尾の`permit any any`の後ろに付き、
+評価されないからである。段階1の予備検証の結果に応じて方法を選ぶ。
+
+**挿入可だった場合**（シーケンス番号が効く）:
+
+```
+ip access-list iot-out 15 deny ip src 192.168.30.0/24 dest 192.168.20.0/24
+show ip access-list iot-out
+```
+
+番号は`deny 30→10`と`deny 30→40`の間に入る値を`show`で確かめてから決める。
+
+**挿入不可だった場合**（リストを作り直す）:
+
+```
+no ip access-list iot-out
+ip access-list iot-out option optimize
+ip access-list iot-out deny ip src 192.168.30.0/24 dest 192.168.10.0/24
+ip access-list iot-out deny ip src 192.168.30.0/24 dest 192.168.20.0/24
+ip access-list iot-out deny ip src 192.168.30.0/24 dest 192.168.40.0/24
+ip access-list iot-out permit ip src any dest any
+show ip access-list iot-out
+```
+
+**この方法は、`ip filter iot-out 10 in`がBVI30に付いたままACL定義が一瞬消える。** その間の
+IoTゾーンの扱い（全通過か全廃棄か）は未確認である。IoTは低トラフィックなので許容するが、
+不安なら先に`interface BVI30`で`no ip filter iot-out 10 in`してから作り直し、最後に付け直す
+（その間IoTは無フィルタになる）。
+
+どちらの方法でも、最後に`show ip access-list iot-out`で**`deny 30→20`が`permit any any`より前に
+あること**を必ず目視する。
 
 ### 5.3 最終手段
 
@@ -377,13 +479,24 @@ VLAN撤去まで反映済みなので、reloadしてもVLAN 11/63は戻らない
    この挙動に依存している。** 段階3の直後、Trusted→Serverの既存セッションが生き残るかが最初の関門。
 3. **自装置宛パケットが動的キャッシュを生成するか。** 自装置「発」（DDNS更新）は公式事例で確認できたが、
    自装置「宛」は記載が無い。だから1.6の救済permitと運用ルールを併記している。
-4. **`option optimize`がACL行の評価順に影響するか。** 既存4本のACLには付いているが、新設の3本には
-   付けていない。行の評価が上から順（first-match）であることは既存ACLの構成と矛盾しないが、
-   マニュアルで明示を確認できていない。**段階1と段階4の`show ip access-list`で行順を目視すること。**
+4. **シーケンス番号によるACL行の挿入が使えるか。** 段階1の予備検証（`zz-probe`）で判定する。
+   結果をここに記録する。rollbackで`iot-out`のdenyを戻す方法（5.4）がこれで変わる。
+
+   - 判定日: ____  結果: 挿入可 / 挿入不可
+
+5. **`option optimize`がACL行の評価順に影響するか。** 既存4本には付いているが新設3本には付けない。
+   評価が上から順（first-match）であることは既存ACLの構成と矛盾しないが、マニュアルでの明示を
+   確認できていない。**各段階の`show ip access-list`で行順を目視すること。**
 
 第三者の技術ブログに「NEC IXのDynamic ACLは意図せぬ通信まで許可する挙動だった」という報告がある
 （検証バージョンの記載なし、公式に該当する制限事項の記述は無い）。**だからこそ4章の#4と#6で
 denyのヒットカウント増加まで確認する。**
+
+### 6.1 ファームウェア
+
+実機は`10.11.6`だが、2026-09-13時点のIX2215向け10.11系の最新は`10.11.18`である。今回のACL構成を
+直接否定するTrafficFilterの修正は10.11系のリリース一覧では確認できなかった。更新の要否は
+この作業とは分けて判断する。
 
 ## 7. 対象外
 
@@ -404,6 +517,17 @@ denyのヒットカウント増加まで確認する。**
   - 完全rollbackで、ACL定義の削除より前にフィルタをdetachするよう順序を明示
   - 受入試験にTrusted→Guest、Server→IoT/Guest、IoT→Guest、tailnetの否定試験、exit nodeを追加
   - 段階5の確認をServerとTrustedの両方からに変更
+- 2026-09-13 ユーザーが別途実行したCodexレビューを反映。修正点:
+  - **ACLの行は登録順評価で、追加は末尾に付く**という前提を明記。既存ACLへ行を足す変更をやめた
+  - 段階4を「`deny 30→20`を削除するだけ」に変更（permitを足しても末尾の`permit any any`の後ろで無意味）
+  - **rollbackで`iot-out`のdenyが復元できない問題**に対処（5.4を新設。シーケンス挿入かリスト再作成）
+  - 段階1に、シーケンス番号での挿入可否を確かめる予備検証（`zz-probe`）を追加
+  - 設定モードの入り方を`enable-config`に訂正（`configure terminal`はIXの構文ではない）
+  - `write memory`を設定モードのまま実行する順序へ訂正
+  - 段階0に`show startup-config`と`check configuration status`を追加。**reloadが安全な前提
+    （running-configとstartup-configの一致）を着手前に確認する**
+  - 動的キャッシュのタイムアウト（1.8）を新設。アイドル後のserver-push試験を受入試験へ追加
+  - 受入試験にHTTP管理と`trusted-dyn`定義の確認を追加
 
 ## 9. 出典
 
