@@ -4,7 +4,11 @@ TerraformでProxmox VE上にTailscale VPN Gateway用のVMを構築します。
 
 ## 構築されるVM
 
-- **tailscale-gateway**: 192.168.10.30 (サブネットルーター)
+- **tailscale-gateway**: 192.168.10.102（サブネットルーター）
+
+IPは`ip_address`変数で管理する。2026-09-12に`.30`から`.102`へ変更した。PVEのcloud-init設定を変えると
+instance-idが変わるため、`reboot_after_update = true`による再起動後にcloud-initがnetplanを描き直し、
+guestの実IPが切り替わる。再起動でSSH host鍵が作り直される点に注意する。
 
 ## 前提条件
 
@@ -57,7 +61,7 @@ VMが起動したら、Tailscale Admin Consoleでサブネットルーターを�
 
 ```bash
 # VM起動確認
-ssh ubuntu@192.168.10.30
+ssh ubuntu@192.168.10.102
 
 # Tailscale状態確認
 tailscale status

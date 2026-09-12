@@ -476,7 +476,7 @@ Terraform 完了後に各 VM への疎通を確認する。
 ping -c 3 192.168.10.21  # k8s-master01
 ping -c 3 192.168.10.22  # k8s-worker01
 ping -c 3 192.168.10.23  # k8s-worker02
-ping -c 3 192.168.10.30  # tailscale-gateway
+ping -c 3 192.168.10.102  # tailscale-gateway
 
 # SSH 接続 (cloud-init で配布された鍵で接続)
 ssh -i ~/.ssh/k8s_ed25519 ubuntu@192.168.10.21
@@ -615,6 +615,6 @@ mokutil --list-enrolled | grep -A5 "Proxmox"
 | k8s-master01    | 192.168.10.21  | 192.168.11.21  |
 | k8s-worker01    | 192.168.10.22  | 192.168.11.22  |
 | k8s-worker02    | 192.168.10.23  | 192.168.11.23  |
-| tailscale-gw    | 192.168.10.30  | —              |
+| tailscale-gw    | 192.168.10.102 | —              |
 | stashPadDev     | 192.168.10.41  | —              |
 | Gateway/Router  | 192.168.10.1   | —              |

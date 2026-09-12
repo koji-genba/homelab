@@ -120,7 +120,7 @@ resource "proxmox_virtual_environment_vm" "tailscale_gateway" {
 
     ip_config {
       ipv4 {
-        address = "192.168.10.30/24"
+        address = var.ip_address
         gateway = var.gateway
       }
     }
@@ -152,6 +152,10 @@ resource "proxmox_virtual_environment_vm" "tailscale_gateway" {
 
   # シリアルデバイス（k8s実績）
   serial_device {}
+
+  # cloud-init設定を変えたときはPVE側で再起動させ、guestに反映させる。
+  # ipconfigの変更はinstance-idを変えるため、再起動後にcloud-initがnetplanを描き直す。
+  reboot_after_update = true
 
   # ライフサイクル（k8s実績ベース）
   lifecycle {
