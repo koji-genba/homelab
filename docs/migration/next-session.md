@@ -1,22 +1,23 @@
 # 次セッションへの作業指示
 
-- 更新日: 2026-09-12
+- 更新日: 2026-09-13
 - 対象リポジトリ: `/home/s-sato/homelab`
 - 作業ブランチ: **`docs-phase4-prep`**（`origin/main`から分岐、PR未作成）。mainにはPR #23、#24、#25が
   merge済みである。**この文書にSHAを固定で書かない。** merge のたびに陳腐化して罠になるためである。
   現在地は`git log --oneline origin/main -1`と`git log --oneline origin/main..HEAD`で確認する。
-- **2026-09-12時点で、`docs-phase4-prep`は`origin`より7 commit進んでおり、未commitの変更は無い。**
-  内容はPhase 4の設計詳細化と文書整理、VM 3台のrenumber、Appsサービスの集約である。
-  pushとPRはユーザーの指示を受けてから行う。
+- **2026-09-13時点で、`docs-phase4-prep`は`origin`と同期済み（未commit・未pushなし）、`main`より
+  12 commit進んでいる。** 内容はPhase 4の設計詳細化と文書整理、VM 3台のrenumber、Appsサービスの集約、
+  VLAN 11/63の撤去である。PRの作成はユーザーの指示を受けてから行う。
 - 現在地: **Phase 3の再構築性試験を2026-09-06に実施した。** Apps VM（VMID 112）をTerraformで
   destroyし、Terraform・Ansible・Gitから再構築して復旧させた。**Apps VMが唯一のwriterで、
   7 Compose projectが稼働中。** IX2215の構成ドリフトは2026-09-05に解消済み。
   Kubernetes VM 3台は2026-09-05に停止済み（削除はしていない）。
 - **受入試験は12項目すべて合格した**（自動確認5項目と、2026-09-06にユーザーが確認した7項目）。
   **Kubernetes VM 14日保持期間は2026-09-06に開始し、2026-09-20に満了する。**
-- **Phase 4のネットワーク移行が進行中である。** IP関連は完了し（DHCP縮小、VM 3台のrenumber、
-  Appsサービスの`.10.101`集約、Tailscale nameserver切替と旧route撤去）、残るはIX2215のACL再編、
-  untaggedのGuest化、VLAN 11/63の撤去、受入試験である。詳細は「Phase 4: ネットワーク移行」の「現在地」にある。
+- **Phase 4のネットワーク移行が進行中である。** IP関連とVLAN整理は完了し（DHCP縮小、VM 3台のrenumber、
+  Appsサービスの`.10.101`集約、Tailscale nameserver切替と旧route撤去、VLAN 11/63の撤去と
+  untaggedのGuest化）、**残るはIX2215のACL再編（stateful化）と受入試験だけである。**
+  詳細は「Phase 4: ネットワーク移行」の「現在地」にある。
   満了日までにrollbackが発生しなければ、その後にPhase 5の廃止へ進む。
 - **Phase 3は、Proxmoxのuser・role・API token・ACLがGitにもTerraformにも宣言されておらず、
   しかも`/vms/<vmid>`のACLはVMのdestroyで道連れに消えることを明らかにした。
@@ -114,8 +115,8 @@
   | monitoring | `homelab-monitoring-gatus-1` | 稼働 |
 
 - `eth0`が`192.168.10.101/24`で、管理もserviceもこの1つに集約済み（2026-09-12のPhase 4）。
-  Caddy 80/443、AdGuard 53、Samba 445がこのaddressで待ち受ける。`ens19`（VLAN 11）は
-  IPv4 addressを持たない。VLAN 11 NIC自体の撤去は保持期間満了後に行う。
+  Caddy 80/443、AdGuard 53、Samba 445がこのaddressで待ち受ける。**VLAN 11 NIC（`ens19`）は
+  2026-09-13に`legacy_service_nic=false`で撤去済み**で、NICは`eth0`の1枚だけである。
 - NFS 7 mountのうち`stashpad-media`だけが`ro`、他6つが`rw`。これが正しい状態である。
 - `/opt/homelab`は`origin/main`のcleanなcheckoutである。`homelab-app-reconcile.timer`は
   enabled/activeで、15分間隔でmainへfast-forwardする。**Compose定義に差分が無ければ
@@ -419,7 +420,7 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
 影響を受けるのは宅内のユーザー1人だけである。短時間の停止は許容し、各段階の後に実際の疎通で
 確かめて進める。全段階を1つの窓でやろうとしない。
 
-#### 現在地（2026-09-12）
+#### 現在地（2026-09-13）
 
 | 対象 | 状態 |
 | --- | --- |
