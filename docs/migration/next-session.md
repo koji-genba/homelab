@@ -423,9 +423,10 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
 | IX2215の採取 | 完了（2026-09-06）。console loginも確認済み |
 | ECW5211 | 完了。management VLAN tagged 10、SSID→VLAN 20/30/40、station isolation、config backup |
 | Tailscale import | 完了（2026-09-12）。ACLとMagicDNSをimportし、整形差分をapply済み。state-backup取得済み |
-| 実機のnetwork変更 | DHCP縮小、gateway `.102`、ElastiFlow `.103`、Apps VM管理IP `.101`が完了（2026-09-12） |
+| 実機のnetwork変更 | DHCP縮小、VM 3台のrenumber、Apps serviceの`.10.101`集約、Tailscale nameserver切替が完了（2026-09-12） |
+| 残り | `.11.0/24`広告の撤去、IX ACL再編、untaggedのGuest化、VLAN 11撤去、受入試験 |
 
-次にやること: 下の「残りの手順」の6（Apps serviceを`.10.101`へ集約）から。
+次にやること: 下の「残りの手順」の8（`192.168.11.0/24`の広告撤去）から。
 
 #### 残りの手順
 
@@ -460,12 +461,16 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
    unitが付け直し、NFS 7本と全7コンテナが自動復帰した。NFS exportは`192.168.10.0/24`単位なので
    export側の変更は不要だった。Ansibleの`ansible_host`と`apps_management_ip`、運用文書の参照も`.101`へ
    更新済み。なおこのVMはICMPを塞いでいるのでpingでの死活確認はできない（SSHで確認する）。
-6. **Apps serviceを`.10.101`へ集約。** Ansibleのflag 3つを1commitで変更し、`make ansible-check`→
-   `make ansible-apply`。`.11.100`/`.11.101`/`.11.103`が消える。集約後にTerraformで
-   `legacy_service_nic=false`としてVLAN 11 NICを外す。
-7. **Tailscale nameserverの切り替え。** Apps VMが`.10.101`で動いていることを確認してから
-   `enable_adguard_dns=true`で`tailscale-import-dns`→plan→apply。**逆順にするとtailnetのDNSが落ちる。**
-   tailnet越しに`.10.101`のSMB/HTTPS/DNSを実測してから、`192.168.11.0/24`をAdvertiseRoutesから外す。
+6. **Apps serviceを`.10.101`へ集約。** 完了（2026-09-12）。group_varsの3フラグを同時に反転した
+   （`network_migration_complete=true`、`legacy_service_addresses_enabled=false`、
+   `legacy_service_cutover_confirmed=false`）。`make ansible-apply`は`failed=0`で、`ens19`から
+   `.11.x`が外れ、Caddy・AdGuard・Sambaが`.10.101`の443/53/445へ移った。AdGuardのrewriteも
+   `.10.101`を返す。`prod.kojigenba-srv.com`はHTTP 200。
+   **`make ansible-apply`には`AGE_IDENTITY_FILE`が要る**（SOPSの復号がcontroller側で走るため）。
+   最初これを忘れてfirewallだけ適用された中途半端な状態で止まった。
+7. **Tailscale nameserverの切り替え。** 完了（2026-09-12）。`tailscale-import-dns`でimportし、
+   planは`nameservers`が`192.168.11.101 -> 192.168.10.101`の1件だけだった。apply後、tailnet経由の
+   名前解決をユーザーが確認済み。
 8. **IX2215のstateful ACL再編。** Phase 4で唯一、事前にofflineの手順書（投入・確認・rollbackコマンドと
    期待出力）を用意する段階である。現行ACLはTrusted→ServerとServer→Trustedをstatic permitしている
    だけでstatefulではない。逆方向のpermitを単に消すと応答も落ちるので、動的フィルタを入れてから

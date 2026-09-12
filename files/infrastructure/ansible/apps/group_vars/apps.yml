@@ -5,12 +5,12 @@
 apps_management_ip: 192.168.10.101
 apps_final_management_ip: 192.168.10.101
 apps_hostname: apps
-network_migration_complete: false
+network_migration_complete: true
 
 # Both flags remain false until the old Kubernetes/MetalLB/DHCP writers are
 # fenced and ARP ownership has been checked by an operator.
-legacy_service_addresses_enabled: true
-legacy_service_cutover_confirmed: true
+legacy_service_addresses_enabled: false
+legacy_service_cutover_confirmed: false
 legacy_service_interface_name: ens19
 legacy_service_addresses:
   - 192.168.11.100/24  # Caddy/HTTP (cutover only)
