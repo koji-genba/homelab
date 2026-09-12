@@ -30,8 +30,8 @@ output "vm_info" {
 output "next_steps" {
   description = "Next configuration steps"
   value = [
-    "1. SSH to VM: ssh -i ~/.ssh/k8s_ed25519 ubuntu@${split("/", var.ip_address)[0]}",
-    "2. Authenticate Tailscale: sudo tailscale up --advertise-exit-node --advertise-routes=192.168.10.0/24,192.168.11.0/24 --accept-dns=false --hostname=home-gateway",
+    "1. SSH to VM: ssh ubuntu@${split("/", var.ip_address)[0]}",
+    "2. Authenticate Tailscale: sudo tailscale up --advertise-exit-node --advertise-routes=192.168.10.0/24 --accept-dns=false --hostname=home-gateway",
     "3. Approve routes in Tailscale admin console",
     "4. Test connection from mobile device"
   ]
