@@ -428,9 +428,12 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
 | Tailscale import | 完了（2026-09-12）。ACLとMagicDNSをimportし、整形差分をapply済み。state-backup取得済み |
 | 実機のnetwork変更 | DHCP縮小、VM 3台のrenumber、Apps serviceの`.10.101`集約、Tailscale nameserver切替が完了（2026-09-12） |
 | `.11.0/24`広告の撤去 | 完了（2026-09-12） |
-| 残り | IX ACL再編、untaggedのGuest化、VLAN 11撤去、受入試験 |
+| VLAN 11/63の撤去とuntaggedのGuest化 | 完了（2026-09-13）。**IXは`write memory`未実施** |
+| 残り | IX ACL再編（stateful化）、受入試験 |
 
-次にやること: 下の「残りの手順」の8（IX2215のstateful ACL再編）から。Phase 4で唯一、事前にoffline手順書を作る段階である。
+次にやること: **まずIXで`write memory`を実行する**（未保存のまま再起動すると、DHCP poolが`.100-.200`へ
+戻って`.101-.103`と衝突する）。そのうえで「残りの手順」の8（IX2215のstateful ACL再編）へ進む。
+Phase 4で唯一、事前にoffline手順書を作る段階である。
 
 #### 残りの手順
 
@@ -486,11 +489,15 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
    期待出力）を用意する段階である。現行ACLはTrusted→ServerとServer→Trustedをstatic permitしている
    だけでstatefulではない。逆方向のpermitを単に消すと応答も落ちるので、動的フィルタを入れてから
    逆方向の新規接続をdenyする。
-9. **untaggedのGuest化とVLAN 63の撤去。** port 2/3以外のuntagged（`GigaEthernet2.0`と
-   `GigaEthernet2:6.0`）をbridge-group 63から40へ移し、BVI63、`default-dhcp`、`default-out`を削除する。
-   VLAN 63はKubernetesのrollback経路ではないので保持期間を待たない。変更後にGuest SSIDの疎通と、
-   Guest clientのMACがflapしないことを見る。
-10. **VLAN 11の撤去。** 2026-09-20の保持期間満了後、rollbackが無ければ撤去する。
+9. **untaggedのGuest化とVLAN 63の撤去。** 完了（2026-09-13）。`GigaEthernet2.0`と`GigaEthernet2:6.0`を
+   `bridge-group 40`へ移し、`BVI63`、`default-dhcp`、`default-out`を削除した。
+10. **VLAN 11の撤去。** 完了（2026-09-13）。14日保持期間の満了を待たず、ユーザー判断で前倒しした。
+   Apps VMのVLAN 11 NICをTerraformで外し（`legacy_service_nic=false`）、IXから`BVI11`、
+   `GigaEthernet2.2`、`GigaEthernet2:6.2`、`server_app-dhcp`、`server_app-out`、各ACLの`.11`/`.63`行を
+   削除した。**interfaceの削除はIXの再起動まで内部状態に残るが、running-configからは消えている。**
+   k8s VM・PVC・NFS data・ZFS snapshotは削除していない。**Kubernetesへrollbackする場合は、
+   VLAN 11（`BVI11`、tagged subif、`server_app-dhcp`、ACL）の再投入が先に必要になる。**
+   投入内容はGitの`config.txt`履歴から復元できる。
 11. **受入試験。** 各zoneのallow/deny、LAN/tailnetからのservice、Guest isolation。結果を
     [目標ゾーン設計](../network/target-zones.md)の「手動変更記録」へ記入する。
 

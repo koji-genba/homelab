@@ -55,7 +55,8 @@ variable "service_vlan_id" {
 variable "legacy_service_nic" {
   description = "Create the second VLAN 11 NIC without assigning an IP"
   type        = bool
-  default     = true
+  # Phase 4でserviceを192.168.10.101へ集約したため、VLAN 11のNICは不要になった。
+  default     = false
 }
 
 variable "management_ip" {
