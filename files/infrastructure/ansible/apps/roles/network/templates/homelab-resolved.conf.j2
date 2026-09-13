@@ -1,0 +1,8 @@
+# Managed by Ansible (network role). Do not edit on the host.
+#
+# Global DNS is the default route for every name that no link claims. The
+# internal zone is routed to the local AdGuard Home by the management link
+# drop-in, so the host keeps resolving public names even when the AdGuard
+# container is stopped.
+[Resolve]
+DNS={{ apps_upstream_dns_servers | join(' ') }}

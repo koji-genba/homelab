@@ -22,7 +22,7 @@ replicas=0、MetalLB speakerの停止、3 ServiceのClusterIP化でwriterから�
 Phase 4ではTailscale import、Apps/Tailscale gateway/ElastiFlowのServer VLAN 10への集約、VLAN 11/63の
 撤去、ECW5211、IX2215のstateful ACL・port再編・管理plane制限まで完了した。2026-09-13にzone間通信、
 DHCP、Internet、tailnet/exit node、Guest isolationを確認して`write memory`し、startup-configとの一致と
-再起動不要を確認した。Apps VM自身のhost resolver修正は未完了である。sFlowはcollectorへの着信まで確認済みで、ElastiFlowの
+再起動不要を確認した。Apps VM自身のhost resolver修正も2026-09-13に完了した。sFlowはcollectorへの着信まで確認済みで、ElastiFlowの
 Elasticsearch取り込み障害（2026-07-07から、[#34](https://github.com/koji-genba/homelab/issues/34)）は別件である。NFS serverのexport設定と
 既存dataはmount guard用marker追加以外変更していない。
 ProxmoxのTerraform認証、SOPS/age、Discord webhook、Healthchecks.io checkは準備済みで、2026-09-05に
@@ -350,8 +350,7 @@ Apps VMのhost側resolverは`systemd-resolved`で、`eth0`のuplink DNSが`192.1
 これはKubernetes VMの停止によるものではない。いずれのuplinkもKubernetesに依存していないためである。
 実害も現時点ではない。Gatusはcontainer名（`http://caddy:80`等）で監視し、Docker内のcontainerは
 public名の解決だけをhost resolverに依存するためである。**ただしhost側でFQDNを解決する運用スクリプトを
-追加する場合はこの前提が崩れる。** Phase 4でApps VMを`192.168.10.101`へ集約し
-global nameserverを移す際に解消される見込みである。
+追加する場合はこの前提が崩れる。** 2026-09-13にAnsibleの`network` roleで、内部ゾーンだけ自分のAdGuardへ送るsplit DNSとして解消した。
 
 ## Phase 3: 再構築性の証明（2026-09-06、全項目合格）
 
@@ -567,7 +566,7 @@ Apps VM/PVEのLAN IP直指定で実施した。
 - port 1/8はタグ専用trunk、port 2/3はそれぞれVLAN 20/10 access、空きport 4～7はVLAN 40 accessとした。
 - sFlowはcollector（`.10.103:6343`）への着信をtcpdumpで確認。ElastiFlowのElasticsearch取り込みは2026-07-07から
   index/alias名の衝突で失敗し続けている既存障害（[#34](https://github.com/koji-genba/homelab/issues/34)）。
-- Apps VM自身のhost resolverをAnsibleで明示管理する作業は未完了。
+- Apps VM自身のhost resolverをAnsibleで明示管理した（内部ゾーンだけAdGuard、それ以外は`1.1.1.1`/`8.8.8.8`）。
 
 ### Phase 5: 廃止
 
@@ -584,6 +583,6 @@ Phase 3の再構築性試験（Apps VMをTerraform/Ansible/Gitから実際に削
 Unboundの復旧を、新旧を同時にwriterにしないことを最優先して行う。手順の詳細は
 [next-session.mdのrollback手順](next-session.md)を参照。
 
-VLAN 10/20/30/40の配線・ACL再編は2026-09-13に完了した。Apps VMのhost resolverとsFlow受信確認を終え、
+VLAN 10/20/30/40の配線・ACL再編とApps VMのhost resolver修正は2026-09-13に完了した。
 保持期間が満了した後にPhase 5の廃止判断へ進む。それまでは旧Kubernetes VM、
 disk、PVC、NFS data、ZFS snapshotを削除しない。

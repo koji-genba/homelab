@@ -15,8 +15,8 @@
 - **受入試験は12項目すべて合格した**（自動確認5項目と、2026-09-06にユーザーが確認した7項目）。
   **Kubernetes VM 14日保持期間は2026-09-06に開始し、2026-09-20に満了する。**
 - **Phase 4のIX/VLAN/ECW移行は2026-09-13に実機反映・受入・startup-config保存まで完了した。**
-  ACL stateful化、port再編、管理plane制限、tailnet/exit nodeを含む受入に合格している。残るのは
-  Apps VM自身のhost resolver修正だけである。ElastiFlowのElasticsearch取り込みが2026-07-07から
+  ACL stateful化、port再編、管理plane制限、tailnet/exit nodeを含む受入に合格している。Apps VM自身の
+  host resolver修正も2026-09-13に完了し、**Phase 4は完了した。** ElastiFlowのElasticsearch取り込みが2026-07-07から
   壊れている件は、Phase 4とは無関係の既存障害として[#34](https://github.com/koji-genba/homelab/issues/34)で追跡する。
   詳細は「Phase 4: ネットワーク移行」の「現在地」にある。
   満了日までにrollbackが発生しなければ、その後にPhase 5の廃止へ進む。
@@ -141,10 +141,9 @@
   想定外のwriterは観測されていない。VM停止後もworker 2台のentryは`states`に残るが、
   `info`の`status`が`courtesy`へ遷移しており、これはLinux nfsdのcourteous serverによる
   最大24時間の保持である。詳細は後述の「Kubernetes VM停止後のNFS open state」を参照。
-- **Apps VM自身のhost resolverでは`*.kojigenba-srv.com`を解決できない。** `systemd-resolved`の
-  `eth0` uplinkが`192.168.10.1`（53をrefuse）と`1.1.1.1`（内部record非保持）のためである。
-  Kubernetes停止とは無関係の既存事象で、実害は現時点でない。host側でFQDNを扱う確認は
-  `192.168.10.101`を明示指定するか`curl --resolve`を使うこと。
+- **Apps VM自身のhost resolverは2026-09-13にAnsibleの`network` roleで解消した。** `kojigenba-srv.com`だけを自分のAdGuard（`192.168.10.101`）へ、それ以外を`1.1.1.1`/`8.8.8.8`へ送るsplit DNSで、AdGuardのコンテナが止まってもhostの外部名前解決は影響を受けない。
+  以前は`eth0`のDNSが`192.168.10.1`（DNSを提供しておらず毎回約4秒タイムアウト）と`1.1.1.1`
+  （内部record非保持）で、内部FQDNが引けなかった。
 
 ### Kubernetes（VM停止済み）
 
@@ -400,10 +399,9 @@ Phase 3は合格見込みだが、将来同じ操作を行う場合は次を必�
 
 #### 再構築しても変わらないもの
 
-Apps VMのhost resolverが`*.kojigenba-srv.com`を解決できない件は、Terraformの
-`dns_servers`既定値が`["192.168.10.1", "1.1.1.1"]`であることに由来する宣言どおりの結果であり、
-ドリフトではない。**直そうとしないこと。** 解消はPhase 4の
-`192.168.10.101`集約とglobal nameserver変更で行う。
+Terraformの`dns_servers`既定値`["192.168.10.1", "1.1.1.1"]`はcloud-initの初回起動用であり、
+再構築直後のApps VMはこの値で起動する。実運用のhost resolverはAnsibleの`network` roleが上書きする。
+**再構築後は`make ansible-apply`まで流さないと内部FQDNが引けない**のが正しい状態であり、ドリフトではない。
 
 #### 失敗したとき
 
@@ -433,11 +431,11 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
 | VLAN 11/63の撤去 | 完了（2026-09-13）。`write memory`と再起動まで実施済み。untaggedの扱いは下のport再編で確定 |
 | IX2215のACL・port再編 | 完了（2026-09-13）。stateful ACL、管理plane制限、PVE/APのタグ専用trunk、access port分離を反映して`write memory`済み |
 | 受入試験 | 完了。zone間allow/deny、DHCP、Internet、管理plane、tailnet/exit node、Guest isolationに合格 |
-| Apps VM host resolver | 未完了。下記「Phase 4で直すもの」の`systemd-resolved`管理を実装・反映する |
+| Apps VM host resolver | 完了（2026-09-13）。内部ゾーンだけAdGuard、それ以外は公開DNSへ送るsplit DNS |
 | sFlow受信 | collector（`.10.103:6343`）への着信を確認済み。**ElastiFlowのElasticsearch取り込みは2026-07-07から壊れている**既存障害（[#34](https://github.com/koji-genba/homelab/issues/34)、Phase 4とは無関係） |
 
-次にやること: Apps VMのhost resolverをAnsibleで管理して反映する。IX2215のrunning/startup configは
-一致しているので再投入しない。Phase 5はこれと2026-09-20の保持期間満了を確認してから廃止判断へ進む。
+次にやること: Phase 4は完了した。2026-09-20の保持期間満了を待ち、Phase 5（Kubernetes廃止）の判断へ進む。
+IX2215のrunning/startup configは一致しているので再投入しない。
 
 #### 残りの手順
 
@@ -603,12 +601,24 @@ Git管理外のローカルfile（機微情報を含むものはmode `0600`）:
    guestを手で触る必要はない。代わりに**SSH host鍵が作り直され、user-dataのruncmdも再実行される**ので、
    rootごとにuser-dataの再実行が安全かを確認してから行う。
 
-#### Phase 4で直すもの
+#### Phase 4で直すもの（完了）
 
-Apps VMのhost resolverが`*.kojigenba-srv.com`を解決できない件は、Terraformの`dns_servers`既定値が
-`["192.168.10.1", "1.1.1.1"]`であることに由来する。Phase 3では宣言どおりの結果として直さなかった。
-Tailscale global nameserverの変更はApps VM自身には作用せず、TerraformのDNS値もcloud-init/bootstrap専用である。
-**`.10.101`集約に合わせてAnsibleで`systemd-resolved`を明示管理する実装を追加して解消する。**
+Apps VMのhost resolverが`*.kojigenba-srv.com`を解決できなかった件は、2026-09-13に解消した。
+
+- 原因: Terraformの`dns_servers`既定値`["192.168.10.1", "1.1.1.1"]`がcloud-initでnetplanへ入っていた。
+  `192.168.10.1`（IX）はDNSを提供しておらず、毎回約4秒タイムアウトしていた。
+- 対処: Ansibleの`network` roleで、networkdのdrop-in（`10-netplan-eth0.network.d/50-homelab-dns.conf`）と
+  resolvedのdrop-in（`resolved.conf.d/50-homelab.conf`）を配置した。eth0は`192.168.10.101`を
+  `~kojigenba-srv.com`専用（`DNSDefaultRoute=no`）とし、それ以外はGlobalの`1.1.1.1 8.8.8.8`へ送る。
+- **全部をAdGuardへ向けなかった理由:** AdGuardのコンテナが止まるとaptやイメージ取得まで失敗し、
+  コンテナを起動しないと何もできないhostになるため。
+- 検証: 適用後にAnsible自身が`dnsTestRecord.kojigenba-srv.com`（AdGuardだけが持つrecord）と
+  `deb.debian.org`の解決を確認する。実測で内部名2〜3ms、外部名2〜7ms。
+- Terraformの`dns_servers`は初回起動用として残した。変えるとVMの再起動とSSH host鍵の再生成が起きるため。
+
+この適用で、`make ansible-apply`のたびに全Compose projectが再作成される既存の不具合に気づいた
+（AdGuardが起動直後に設定ファイルを書き戻し、テンプレートと常に食い違う）。
+[#35](https://github.com/koji-genba/homelab/issues/35)で追跡する。
 
 
 ### 6. Phase 5: 廃止

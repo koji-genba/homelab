@@ -125,7 +125,7 @@ access portに対応するtagged subinterfaceは作らず、tagged frameを別zo
 どのzoneにも収容しない。同一物理port上で同じzoneをtagged/untaggedの両方へ収容しない。
 
 ゲート: 各zoneのallow/deny test、LAN/Tailscaleのservice test、Guest isolationが合格すること。
-IX/VLAN/ECW部分は2026-09-13に合格済み。Apps VM host resolverは残作業とする。ElastiFlowの取り込み障害
+IX/VLAN/ECW部分とApps VM host resolverは2026-09-13に完了した。ElastiFlowの取り込み障害
 （[#34](https://github.com/koji-genba/homelab/issues/34)）は2026-07-07からの既存障害で、このゲートの対象外である。
 
 ## フェーズ 5: 廃止
