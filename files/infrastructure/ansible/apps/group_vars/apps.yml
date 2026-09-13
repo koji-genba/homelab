@@ -53,6 +53,9 @@ acme_email: admin@kojigenba-srv.com
 # configuration. Every configured marker must already exist remotely. The
 # mergerfs and direct-HDD mounts use different marker names because both expose
 # the same tank-gen2/data/shared root.
+# nconnect is shared per NFS client (server+proto+version), not per mount: the
+# first mount to a server fixes the transport count, so every mount to the same
+# server must carry the same value.
 nfs_mounts:
   - name: shared
     local_path: /srv/homelab/nfs/shared
@@ -81,28 +84,28 @@ nfs_mounts:
     export: /mnt/shared/koji-genba/stashPadLib
     marker: .homelab-export
     marker_value: stashpad-media
-    options: hard,_netdev,nfsvers=4.1,noatime,ro
+    options: hard,_netdev,nfsvers=4.1,noatime,nconnect=8,ro
   - name: sillytavern-data
     local_path: /srv/homelab/nfs/sillytavern
     server: 192.168.10.11
     export: /mnt/tank-gen2/data/k8s-volumes/sillytavern-sillytavern-data-pvc-85f01a24-9480-4341-a6ad-f44b17cbecaa
     marker: .homelab-export
     marker_value: sillytavern-data
-    options: hard,_netdev,nfsvers=4.1,noatime
+    options: hard,_netdev,nfsvers=4.1,noatime,nconnect=8
   - name: stashpad-prod-data
     local_path: /srv/homelab/nfs/stashpad-prod
     server: 192.168.10.11
     export: /mnt/tank-gen2/data/k8s-volumes/stashpad-prod-stashpad-data-pvc-c96b1813-be70-49ca-865f-989e77359a6b
     marker: .homelab-export
     marker_value: stashpad-prod-data
-    options: hard,_netdev,nfsvers=4.1,noatime
+    options: hard,_netdev,nfsvers=4.1,noatime,nconnect=8
   - name: stashpad-staging-data
     local_path: /srv/homelab/nfs/stashpad-staging
     server: 192.168.10.11
     export: /mnt/tank-gen2/data/k8s-volumes/stashpad-staging-stashpad-data-pvc-ecc8b17c-bd0a-47db-b169-248d5d98995b
     marker: .homelab-export
     marker_value: stashpad-staging-data
-    options: hard,_netdev,nfsvers=4.1,noatime
+    options: hard,_netdev,nfsvers=4.1,noatime,nconnect=8
 
 shared_mount_path: /srv/homelab/nfs/shared
 shared_hdd_mount_path: /srv/homelab/nfs/shared-hdd

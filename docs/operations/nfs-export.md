@@ -56,6 +56,20 @@ read-only bind mountで行う。
 フェーズ1ではexportが`rw`でもApps VM側を`ro`でmountし、旧Kubernetesを唯一のwriterにする。
 cutover確認後だけApps VM側mountを`rw`へ変更する。
 
+## Apps VMの`nconnect`
+
+`nconnect`はmountごとではなく、server address、protocol、NFS versionが同じNFS client単位で共有される。
+このため、`192.168.10.11`への7つのmountは全て`nconnect=8`を指定する。
+
+既存mountへのremountでは接続数を変更できない。設定反映には`192.168.10.11`へのmountを全てunmount
+してからmountし直す必要があり、Apps VMではrebootで実施する。reboot後は次のcommandで確認する。
+
+```sh
+awk '/^device 192.168.10.11/{d=$2} /xprt:/{c[d]++} END{for(k in c) print c[k], k}' /proc/self/mountstats
+```
+
+各mountについて`8 <device>`が出力されることを期待する。
+
 ## マーカー契約
 
 誤ったexportや未mountの空directoryへcontainerが書き込むことを防ぐため、各利用pathには
