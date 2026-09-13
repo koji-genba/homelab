@@ -1,6 +1,6 @@
 # IX2215 ACL stateful化 実施手順書
 
-- 状態: 投入前レビュー待ち（2026-09-13にCodexレビューを反映して改訂）
+- 状態: 実機投入・受入・startup-config保存済み（2026-09-13）
 - 日付: 2026-09-13
 - 対象: IX2215-HOME（IX Series IX2215 magellan-sec, Version 10.11.6）
 - 目標ポリシー: [目標ネットワークゾーン](target-zones.md)
@@ -327,7 +327,8 @@ destも見る可能性があるため`dest any`にして両方の解釈で安全
 
 ### 段階6: 受入試験と保存
 
-4章の行列をすべて実施し、合格を確認してから、**設定モードのまま**保存する。
+4章のうち今回のIX/VLAN/ECW変更に関する受入項目を実施し、合格を確認してから、**設定モードのまま**保存する。
+sFlowは2026-09-13にcollector側の着信までtcpdumpで確認した。ElastiFlowのElasticsearch取り込み障害（[#34](https://github.com/koji-genba/homelab/issues/34)）は本作業と無関係の既存障害として切り離した。
 
 ```
 write memory
@@ -360,10 +361,23 @@ exit
 | 18 | tailnet（宅外） | `.10.101`のDNS/HTTPS/SMB | 成功 |
 | 19 | tailnet | VLAN 20/30/40のアドレス | **到達しない**（routeを広告していない） |
 | 20 | tailnet | exit node経由のInternet | 成功 |
-| 21 | — | sFlowが`.10.103`へ届き続けている | 成功 |
+| 21 | — | IXのsFlow送信counterが増える。collector側の受信は別件 | IX側成功 / collector側保留 |
 | 22 | Server | Trustedへ、300秒以上アイドルにした既存セッションで応答 | 落ちる可能性あり（1.8） |
 | 23 | Server / Trusted | IXのHTTP管理画面 | 成功 |
 | 24 | — | `show ip access-list dynamic trusted-dyn`が定義を表示 | 成功 |
+
+### 実施結果（2026-09-13）
+
+- 段階1～5を投入し、`trusted-dyn`、`trusted-in`、既存static ACLの各deny/permit counterで期待経路を確認した。
+- TrustedからApps VMのHTTPS/SMB、PVE、IoT、Internetが成功し、Trusted→Guestは拒否された。
+- Server、IoT、Guestからの新規zone間接続は設計どおり拒否され、Trusted起点セッションの応答は成功した。
+- Server/TrustedからIXのSSH/HTTP管理が成功し、IoT/Guestからは拒否された。
+- VLAN 20/30/40のDHCP、全zoneのInternet、tailnetからServer、既存exit nodeを確認した。
+- sFlowはACL投入後もcollector（`.10.103:6343`）へ着信している（tcpdumpで確認）。ElastiFlowは停止しておらず、
+  2026-07-07からElasticsearchへの取り込みがindex/alias名の衝突で失敗し続けている既存障害である（[#34](https://github.com/koji-genba/homelab/issues/34)）。
+- ポート設計の実機試験で判明したECW uplinkのtagged/untagged VLAN 40重複を解消し、GuestのARP、
+  Internet、zone隔離を再確認した。確定したport対応は[目標ネットワークゾーン](target-zones.md)に記録した。
+- 最後に`write memory`を実行し、`configuration status is already saved`および再起動不要を確認した。
 
 denyが効いていることは、カウンタでも確認する。
 
@@ -456,14 +470,15 @@ IoTゾーンの扱い（全通過か全廃棄か）は未確認である。IoT�
 
 最後に`show ip access-list iot-out`で**`deny 30→20`が`permit any any`より前にあること**を必ず目視する。
 
-### 5.3 最終手段
+### 5.3 `reload`による復旧の適用条件
 
-`write memory`していなければ`reload`でstartup-configへ戻る。現在のstartup-configはPhase 4の
-VLAN撤去まで反映済みなので、reloadしてもVLAN 11/63は戻らない。
+投入中かつ`write memory`前なら`reload`でstartup-configへ戻せる。2026-09-13の受入後にACLとport変更を
+`write memory`したため、**現在は`reload`だけでは本作業をrollbackできない。** 戻す場合は5.1または5.2を
+実行して疎通を確認し、戻した状態を保存する。いずれの場合もVLAN 11/63は復元されない。
 
-## 6. 投入前に実機で埋める空欄
+## 6. 実機で確定した項目
 
-公式マニュアルに記載が無く、**投入時に実測して確定する項目**。推測で埋めない。
+公式マニュアルだけでは確定できず、投入時に実測した項目を記録する。
 
 1. **`show ip filter dynamic BVI20`の出力形式 → 2026-09-13に実測。**
 

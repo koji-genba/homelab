@@ -6,8 +6,9 @@
   **Apps VMが唯一のwriterであり、7 Compose projectが稼働中**。
   **旧Kubernetes VM 101/102/103は2026-09-05に停止した（削除はしていない）。**
   **受入試験は12項目すべて合格した**（自動確認5項目に加え、2026-09-06にユーザーが残り7項目を確認）。
-  **Kubernetes VM 14日保持期間は2026-09-06に開始し、2026-09-20に満了する**
-- 更新日: 2026-09-06
+  **Kubernetes VM 14日保持期間は2026-09-06に開始し、2026-09-20に満了する。**
+  **Phase 4のIX/VLAN/ECW移行は2026-09-13に実機反映・受入・保存まで完了した。**
+- 更新日: 2026-09-13
 - 手順書: [KubernetesからComposeへの移行](k8s-to-compose.md)
 - 関連文書: [Phase 2A事前調査結果](phase2a-inventory.md)（実測値、cutover/rollback手順）、
   [次セッションへの作業指示](next-session.md)（最新の実機状態と残作業の一次情報）
@@ -18,11 +19,12 @@ Apps VMが唯一のwriterとなり、Caddy/AdGuard Home/Samba/stashPad prod・st
 replicas=0、MetalLB speakerの停止、3 ServiceのClusterIP化でwriterから降ろしたうえで、
 2026-09-05にVM 101/102/103を`qm shutdown`で停止した。VM、disk、PVC、NFS data、ZFS snapshotは
 いずれも削除しておらず、rollback時は起動して復旧できる。
-IX2215はVLAN 11のDHCP bindingを解除して`write memory`で保存済み、さらに2026-09-05にBVI11を
-`192.168.11.1/25`から`/24`へ修正し、ACL 3本（`server_app-out`、`default-out`、`guest-out`）の
-`/25`表記を`/24`へ更新して`write memory`で保存済みである。Tailscaleはlive ACLのexport・reviewは
-済んだがTerraformへのimportは済んでおらず`manage_tailnet=false`を維持、ECW5211とVLAN 10/20/30/40への
-再編（Phase 4）は未着手である。NFS serverのexport設定と既存dataはmount guard用marker追加以外変更していない。
+Phase 4ではTailscale import、Apps/Tailscale gateway/ElastiFlowのServer VLAN 10への集約、VLAN 11/63の
+撤去、ECW5211、IX2215のstateful ACL・port再編・管理plane制限まで完了した。2026-09-13にzone間通信、
+DHCP、Internet、tailnet/exit node、Guest isolationを確認して`write memory`し、startup-configとの一致と
+再起動不要を確認した。Apps VM自身のhost resolver修正は未完了である。sFlowはcollectorへの着信まで確認済みで、ElastiFlowの
+Elasticsearch取り込み障害（2026-07-07から、[#34](https://github.com/koji-genba/homelab/issues/34)）は別件である。NFS serverのexport設定と
+既存dataはmount guard用marker追加以外変更していない。
 ProxmoxのTerraform認証、SOPS/age、Discord webhook、Healthchecks.io checkは準備済みで、2026-09-05に
 実serviceのread/write、FQDN、隔離、再起動、fail-closed、Gatus/Healthchecks.ioのDiscord通知を含む
 application cutoverの受入試験を完了した（詳細は「今後の残作業」）。
@@ -557,13 +559,15 @@ Apps VM/PVEのLAN IP直指定で実施した。
 
 ### Phase 4: ネットワーク移行
 
-別のmaintenance windowで実施し、application cutoverへ混ぜない。含まれるのは次である。
+2026-09-12～13のmaintenance windowでIX/VLAN/ECWの実機反映・受入・保存まで完了した。
 
-- `files/infrastructure/network/README.md`と`config.txt`の反映（ユーザー管理）。BVI11の`/24`化と
-  実機バージョン整合は2026-09-05に反映済みのため、Phase 4で残るのはVLAN 10/20/30/40再編に伴う
-  変更に限る
-- Tailscale live ACLのTerraform import、global nameserverの`192.168.10.101`への変更
-- VLAN 10/20/30/40への再編、ECW5211の設定、Apps VMの`192.168.10.101`への集約
+- Tailscale live ACLをTerraformへimportし、global nameserverを`192.168.10.101`へ変更した。
+- Apps VMを`.10.101`、Tailscale gatewayを`.102`、ElastiFlowを`.103`へ集約した。
+- VLAN 11/63を撤去し、VLAN 10/20/30/40、ECW5211、IX2215のACLとportを最終設計へ移行した。
+- port 1/8はタグ専用trunk、port 2/3はそれぞれVLAN 20/10 access、空きport 4～7はVLAN 40 accessとした。
+- sFlowはcollector（`.10.103:6343`）への着信をtcpdumpで確認。ElastiFlowのElasticsearch取り込みは2026-07-07から
+  index/alias名の衝突で失敗し続けている既存障害（[#34](https://github.com/koji-genba/homelab/issues/34)）。
+- Apps VM自身のhost resolverをAnsibleで明示管理する作業は未完了。
 
 ### Phase 5: 廃止
 
@@ -580,6 +584,6 @@ Phase 3の再構築性試験（Apps VMをTerraform/Ansible/Gitから実際に削
 Unboundの復旧を、新旧を同時にwriterにしないことを最優先して行う。手順の詳細は
 [next-session.mdのrollback手順](next-session.md)を参照。
 
-VLAN 10/20/30/40への再編（Phase 4）は別maintenance windowで実施する。
-Tailscale live ACLのimport、Apps VMの最終`.10.101`への統合、ECW5211の設定はいずれも未着手であり、
-現時点では期待状態と手順のみがGit管理されている。
+VLAN 10/20/30/40の配線・ACL再編は2026-09-13に完了した。Apps VMのhost resolverとsFlow受信確認を終え、
+保持期間が満了した後にPhase 5の廃止判断へ進む。それまでは旧Kubernetes VM、
+disk、PVC、NFS data、ZFS snapshotを削除しない。

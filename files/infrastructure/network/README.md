@@ -1,187 +1,107 @@
 # IX2215 Router Configuration
 
-## 機器情報
+## 現在の基準
 
-- **機種**: NEC IX2215
-- **ホスト名**: IX2215-HOME
-- **バージョン**: 10.11.6
+- 機種: NEC IX2215
+- ホスト名: `IX2215-HOME`
+- ソフトウェア: 10.11.6
+- 実機保存確認: 2026-09-13 15:57 JST
+- 構成ファイル: [config.txt](config.txt)
 
-## ネットワーク構成
+`config.txt`は、実機の保存済み`startup-config`を基準にコメントを加えた管理用コピーである。
+認証情報の行は既存値を保持しているため、公開場所へ転載しないこと。
 
-### WAN接続
+## WAN
 
-- **インターフェース**: GigaEthernet0.0
-- **接続方式**: DHCP
-- **NAPT**: 有効 (Hairpinning対応)
-  - **最大エントリ数**: 16,384
-- **タイムアウト設定**:
-  - TCP: 3600秒
-  - UDP: 1800秒
-  - DNS: 30秒
+`GigaEthernet0.0`がDHCPで上流へ接続し、default routeを受信する。NAPTとhairpinningを有効化し、
+NAPT tableは最大16,384 entries、timeoutはTCP 3600秒、UDP 1800秒、DNS 30秒としている。
 
-### LAN側VLAN構成
+## VLANとDHCP
 
-| VLAN ID | ネットワーク | 用途 | Untaggedポート | DHCPプール | リース時間 |
-|---------|-------------|------|---------------|-----------|----------|
-| 10 | 192.168.10.0/24 | Server (Management) | - | .100-.200 | 24時間 |
-| 11 | 192.168.11.0/24 | Server Application | - | 未割当（binding解除済み） | - |
-| 20 | 192.168.20.0/24 | Main (Client) | Port 2 | .100-.200 | 24時間 |
-| 30 | 192.168.30.0/24 | IoT | Port 3 | .100-.200 | 12時間 |
-| 40 | 192.168.40.0/24 | Guest | Port 4 | .100-.200 | 1時間 |
-| 63 | 192.168.63.0/24 | Default | Port 1, 5-8 | .100-.200 | 30分 |
+| VLAN | Zone | Subnet / gateway | DHCP pool | Lease |
+|---:|---|---|---|---:|
+| 10 | Server / Management | `192.168.10.0/24`, `.1` | `.250-.254` | 1時間 |
+| 20 | Trusted | `192.168.20.0/24`, `.1` | `.100-.200` | 24時間 |
+| 30 | IoT | `192.168.30.0/24`, `.1` | `.100-.200` | 12時間 |
+| 40 | Guest | `192.168.40.0/24`, `.1` | `.100-.200` | 1時間 |
 
-**注**: 全ポート（Port 1-8）がすべてのタグVLAN（10, 11, 20, 30, 40）に対応しています。
+VLAN 11とVLAN 63は撤去済みである。VLAN 20/30/40の`.201-.254`は現在未割当。
+DNSは全profileで`1.1.1.1`と`8.8.8.8`を配布する。
 
-### ポート割り当て (GigaEthernet2)
+## 物理ポート
 
-#### タグVLAN対応 (全ポート共通)
+| Port | 接続先 / 用途 | Untagged | Tagged |
+|---:|---|---|---|
+| 1 | PVE1 | 収容しない | VLAN 10 |
+| 2 | Windows desktop | VLAN 20 | 収容しない |
+| 3 | edgeXpert | VLAN 10 | 収容しない |
+| 4-7 | 空き / default Guest access | VLAN 40 | 収容しない |
+| 8 | ECW5211 AP trunk | 収容しない | VLAN 10, 20, 30, 40 |
 
-GigaEthernet2.1-2.5のサブインターフェース設定により、**全ポート（Port 1-8）**で以下のタグVLANが利用可能:
+実装上、Port 2/3/4-7はそれぞれ`vlan-group 2/1/4`のbase interfaceをBVIへbridgeするaccess
+portである。Port 1は`vlan-group 6`のtagged VLAN 10だけを`GigaEthernet2:6.1`へ収容する。
+Port 8はbase側`GigaEthernet2.0`をどのbridgeにも入れず、`GigaEthernet2.1/.3/.4/.5`で4 VLANを
+収容する。
 
-- VLAN 10 (Tagged) - GigaEthernet2.1 → bridge-group 10 → BVI10
-- VLAN 11 (Tagged) - GigaEthernet2.2 → bridge-group 11 → BVI11
-- VLAN 20 (Tagged) - GigaEthernet2.3 → bridge-group 20 → BVI20
-- VLAN 30 (Tagged) - GigaEthernet2.4 → bridge-group 30 → BVI30
-- VLAN 40 (Tagged) - GigaEthernet2.5 → bridge-group 40 → BVI40
+`GigaEthernet2:3.0`は保存構成に残るが、`vlan-group 3`へ割り当てた物理portがないため転送には使われない。
 
-#### Untaggedトラフィック処理 (vlan-groupによる制御)
+### AP trunkの注意点
 
-| ポート | vlan-group | Untagged VLAN | 処理フロー |
-|--------|-----------|---------------|----------|
-| Port 1 | 6 | 63 (Default) | GigaEthernet2:6.0 → bridge-group 63 → BVI63 |
-| Port 2 | 2 | 20 (Main) | GigaEthernet2:2.0 → bridge-group 20 → BVI20 |
-| Port 3 | 3 | 30 (IoT) | GigaEthernet2:3.0 → bridge-group 30 → BVI30 |
-| Port 4 | 4 | 40 (Guest) | GigaEthernet2:4.0 → bridge-group 40 → BVI40 |
-| Port 5-7 | 6 | 63 (Default) | GigaEthernet2:6.0 → bridge-group 63 → BVI63 |
-| Port 8 | (未割当) | 63 (Default) | GigaEthernet2.0 → bridge-group 63 → BVI63 |
+Port 8でtagged VLAN 40とuntagged側を同じ`bridge-group 40`へ入れると、APから届いたARP requestが
+untagged側へ反射し、無線clientがgateway `192.168.40.1`をARP解決できなくなる現象を確認した。
+このため、AP trunkのuntagged側`GigaEthernet2.0`にはbridge-groupを設定しない。
 
-## セキュリティポリシー
+## VLAN間ポリシー
 
-### VLAN間アクセス制御
+すべてのzoneからInternetへの通信を許可し、zone間は次の方針にする。
 
-各VLANからのアウトバウンドトラフィックに対してアクセスリストを適用:
+| 発信元 | Server 10 | Trusted 20 | IoT 30 | Guest 40 |
+|---|---|---|---|---|
+| Server 10 | — | 新規開始を拒否 | 拒否 | 拒否 |
+| Trusted 20 | 許可 | — | 許可 | 拒否 |
+| IoT 30 | 拒否 | 新規開始を拒否 | — | 拒否 |
+| Guest 40 | 拒否 | 拒否 | 拒否 | — |
 
-#### Server VLAN (10) → 他VLAN
-- **許可**: VLAN 11, VLAN 20, インターネット
-- **拒否**: VLAN 30 (IoT), VLAN 40 (Guest), VLAN 63 (Default)
+TrustedからServer/IoTへの通信は`trusted-trig`と`trusted-dyn`で動的に追跡し、応答方向だけを許可する。
+Server/IoTからTrustedへの未要求通信は、BVI20のoutput filter `trusted-in`で拒否する。Guestは
+`guest-out`で他の3 subnetを明示的に拒否する。
 
-#### Server Application VLAN (11) → 他VLAN
-- **許可**: VLAN 10, VLAN 20, インターネット
-- **拒否**: VLAN 30 (IoT), VLAN 40 (Guest), VLAN 63 (Default)
-
-#### Main VLAN (20) → 他VLAN
-- **許可**: VLAN 10, VLAN 11, インターネット
-- **拒否**: VLAN 30 (IoT), VLAN 40 (Guest), VLAN 63 (Default)
-
-#### IoT VLAN (30) → 他VLAN
-- **許可**: インターネットのみ
-- **拒否**: すべての他VLAN (10, 11, 20, 40, 63)
-
-#### Guest VLAN (40) → 他VLAN
-- **許可**: インターネットのみ
-- **拒否**: すべての他VLAN (10, 11, 20, 30, 63)
-
-#### Default VLAN (63) → 他VLAN
-- **許可**: インターネットのみ
-- **拒否**: すべての他VLAN (10, 11, 20, 30, 40)
-
-### セキュリティ機能
-
-- **SSH**: 有効
-- **HTTP管理**: 有効 (Digest認証)
-- **UFSキャッシュ**: 有効 (最大20,000エントリ)
-- **QoS**: VoIPトラフィック優先 (DSCP 48設定)
-
-## DHCP設定
-
-VLAN 11を除くすべてのVLANでDHCPサーバーが有効:
-
-VLAN 11は2026-09-05のCompose移行に伴い`interface BVI11`の`ip dhcp binding server_app-dhcp`を
-解除したため、DHCPを配布しない。`ip dhcp profile server_app-dhcp`の定義自体は残してある。
-
-- **DNSサーバー**: 1.1.1.1, 8.8.8.8
-- **ドメイン名**:
-  - VLAN 10, 11: `kojigenba-srv.com`
-  - VLAN 20: `client.kojigenba-srv.com`
-  - VLAN 30: `iot.kojigenba-srv.com`
-  - VLAN 40: `guest.kojigenba-srv.com`
-  - VLAN 63: `default.kojigenba-srv.com`
-
-## NTP設定
-
-- **NTPサーバー**:
-  - 210.173.160.27 (Priority 30)
-  - 210.173.160.57 (Priority 20)
-  - 210.173.160.87 (Priority 10)
-- **送信元インターフェース**: GigaEthernet0.0
-- **同期間隔**: 3600秒
-
-## タイムゾーン
-
-- **設定**: +09:00 (JST)
-
-## フローエクスポート（sFlow）設定案 - ElastiFlow連携
-
-ネットワークトラフィック可視化のため、[ElastiFlow](../terraform/elastiflow/README.md)（VLAN10上のLXCコンテナ、192.168.10.40）にsFlowをエクスポートする案。
-
-**反映状況**: `config.txt`（実機のrunning-config控え）へ、LAN側 `GigaEthernet2` のsFlow送信設定を反映済み。NEC UNIVERGE IX2000/IX3000シリーズのコマンドリファレンスでは、agent/collectorはグローバルコンフィグモード、sampling-rate/polling-intervalはデバイスコンフィグモードのコマンドとして定義されているため、IXの構文に合わせて物理デバイス `GigaEthernet2` に設定している。IX2215はNetFlow/IPFIXの設定例が確認できなかったため、sFlow前提とする。
-
-WAN側 `GigaEthernet0` でサンプリングすると、インターネット向け通信はNAPT後のGE0アドレス（例: 172.16.0.26）が送信元として見えやすい。宅内クライアント/サーバ単位で「どこへ通信しているか」を見る目的では、NAPT前のLAN側である `GigaEthernet2` をサンプリング対象にする。
-
-```text
-! グローバル設定
-sflow agent ip 192.168.10.1        ! BVI10（管理VLANの自IP）をagentアドレスに
-sflow collector ip 192.168.10.40   ! ElastiFlowコンテナ（デフォルトUDP 6343）
-
-! デバイス単位でサンプリングを有効化（LAN側）
-device GigaEthernet2
-  sflow sampling-rate 512 in
-  sflow sampling-rate 512 out
-  sflow polling-interval 30
-```
-
-すでに `GigaEthernet0` 側のsFlow設定を実機へ反映済みの場合は、GE0側を無効化してからGE2側を有効化する。
-
-```text
-device GigaEthernet0
-  no sflow sampling-rate 512 in
-  no sflow sampling-rate 512 out
-  no sflow polling-interval
-
-device GigaEthernet2
-  sflow sampling-rate 512 in
-  sflow sampling-rate 512 out
-  sflow polling-interval 30
-```
-
-- LAN側（デバイス: `GigaEthernet2`、配下にVLAN 10/11/20/30/40/63）をサンプリング対象にする。これにより、GE2配下の各クライアント/サーバから、GE2配下の別VLANまたはGE0先の外部宛てへの通信をNAPT前のアドレスで見やすくする。
-- `GigaEthernet0` 側にもsFlowを残すと、同じインターネット向け通信がNAPT後のWANアドレスでも観測され、ElastiFlow上で送信元がGE0アドレスに見えるデータが混ざる。そのため、クライアント単位の可視化を優先する場合はGE0側のsFlow sampling設定は外す。
-- sFlowはUDPの片方向送信（ルーター→コレクタ）のみで、既存の通信に影響しない設定変更。
-- コレクタは管理VLAN10上の `192.168.10.40` で、agentアドレスにしているBVI10 (`192.168.10.1`) と同一セグメントのため、VLAN間ACLの追加は不要想定。
-- 実機反映後は `show sflow information` でagent/collectorと対象デバイスを確認し、必要に応じて `clear sflow statistics` 後にElastiFlow側の受信状況を見る。
-
-## UFSキャッシュタイムアウト
-
-| VLAN | TCP | UDP |
-|------|-----|-----|
-| 10 (Server) | 300秒 | 1800秒 |
-| 11 (Server App) | 300秒 | 1800秒 |
-| 20 (Main) | 60秒 | 300秒 |
-| 30 (IoT) | 300秒 | 300秒 |
-| 40 (Guest) | 60秒 | 180秒 |
-| 63 (Default) | 60秒 | 300秒 |
+実機でInternet、Trusted→Server/IoT、各deny方向、SMB/HTTPS、tailnet route/exit nodeを確認済み。
 
 ## 管理アクセス
 
-- **管理者ユーザー**: `admin`
-- **SSH**: 有効 (すべてのVLANからアクセス可能)
-- **HTTP/HTTPS**: 有効 (Digest認証)
+IX2215のSSHとHTTP管理は`mgmt-src`を適用し、VLAN 10とVLAN 20からだけ許可する。
+HTTPはDigest認証を使用する。
 
-## ファイル
+## sFlow
 
-- [config.txt](config.txt) - IX2215のrunning-config (完全版)
+- Agent: `192.168.10.1`
+- Collector: `192.168.10.103:6343`
+- Data source: `GigaEthernet2`
+- Sampling: in/outとも1/512、counter interval 30秒
 
-## 関連ドキュメント
+IX側ではsample出力を確認済み。現在はElastiFlowが停止している可能性があるため、collector側の受信確認は
+別件として保留し、このネットワーク変更では触らない。
 
-- [Homelab Project Overview](../../../README.md)
-- [Terraform k8s-cluster](../terraform/k8s-cluster/README.md) - VLAN 10/11を使用するProxmox VM構成
+## UFS cache timeout
+
+| VLAN | TCP | UDP |
+|---:|---:|---:|
+| 10 | 300秒 | 1800秒 |
+| 20 | 60秒 | 300秒 |
+| 30 | 300秒 | 300秒 |
+| 40 | 60秒 | 180秒 |
+
+global UFS cacheは最大20,000 entriesで有効化している。
+
+## NTPとQoS
+
+NTPは`210.173.160.27/.57/.87`を使い、sourceは`GigaEthernet0.0`、intervalは3600秒。
+QoSでは対象UDP trafficをDSCP 48へ設定する`output-policy`をBVI10/20/40へinput/outputとも適用している。
+
+## 関連文書
+
+- [最終ゾーン設計](../../../docs/network/target-zones.md)
+- [IX ACL stateful化runbook](../../../docs/network/ix-acl-stateful-runbook.md)
+- [4ゾーン化ADR](../../../docs/adr/0003-four-network-zones.md)
+- [移行状況](../../../docs/migration/implementation-status.md)

@@ -5,18 +5,19 @@
 - 作業ブランチ: **`docs-phase4-prep`**（`origin/main`から分岐、PR未作成）。mainにはPR #23、#24、#25が
   merge済みである。**この文書にSHAを固定で書かない。** merge のたびに陳腐化して罠になるためである。
   現在地は`git log --oneline origin/main -1`と`git log --oneline origin/main..HEAD`で確認する。
-- **2026-09-13時点で、`docs-phase4-prep`は`origin`と同期済み（未commit・未pushなし）、`main`より
-  12 commit進んでいる。** 内容はPhase 4の設計詳細化と文書整理、VM 3台のrenumber、Appsサービスの集約、
-  VLAN 11/63の撤去である。PRの作成はユーザーの指示を受けてから行う。
+- **2026-09-13時点で、`docs-phase4-prep`はIX2215のACL・port再編の結果までcommit・push済みである。**
+  未commit/unpushed差分は`git status`と`git log --oneline origin/docs-phase4-prep..HEAD`で確認する。
+  PRの作成はユーザーの指示を受けてから行う。
 - 現在地: **Phase 3の再構築性試験を2026-09-06に実施した。** Apps VM（VMID 112）をTerraformで
   destroyし、Terraform・Ansible・Gitから再構築して復旧させた。**Apps VMが唯一のwriterで、
   7 Compose projectが稼働中。** IX2215の構成ドリフトは2026-09-05に解消済み。
   Kubernetes VM 3台は2026-09-05に停止済み（削除はしていない）。
 - **受入試験は12項目すべて合格した**（自動確認5項目と、2026-09-06にユーザーが確認した7項目）。
   **Kubernetes VM 14日保持期間は2026-09-06に開始し、2026-09-20に満了する。**
-- **Phase 4のネットワーク移行が進行中である。** IP関連とVLAN整理は完了し（DHCP縮小、VM 3台のrenumber、
-  Appsサービスの`.10.101`集約、Tailscale nameserver切替と旧route撤去、VLAN 11/63の撤去と
-  untaggedのGuest化）、**残るはIX2215のACL再編（stateful化）と受入試験だけである。**
+- **Phase 4のIX/VLAN/ECW移行は2026-09-13に実機反映・受入・startup-config保存まで完了した。**
+  ACL stateful化、port再編、管理plane制限、tailnet/exit nodeを含む受入に合格している。残るのは
+  Apps VM自身のhost resolver修正だけである。ElastiFlowのElasticsearch取り込みが2026-07-07から
+  壊れている件は、Phase 4とは無関係の既存障害として[#34](https://github.com/koji-genba/homelab/issues/34)で追跡する。
   詳細は「Phase 4: ネットワーク移行」の「現在地」にある。
   満了日までにrollbackが発生しなければ、その後にPhase 5の廃止へ進む。
 - **Phase 3は、Proxmoxのuser・role・API token・ACLがGitにもTerraformにも宣言されておらず、
@@ -410,7 +411,7 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
 後述のrollback手順を実行する。VMもdiskもPVCもNFS dataも残っている。
 
 
-### 5. Phase 4: ネットワーク移行（作業中）
+### 5. Phase 4: ネットワーク移行（IX/VLAN/ECWは2026-09-13完了）
 
 **この節がPhase 4の進捗と手順の唯一の情報源である。** 他の文書へ進捗を書かない。設計の根拠は
 [ADR-0003](../adr/0003-four-network-zones.md)、目標状態は[目標ゾーン設計](../network/target-zones.md)、
@@ -429,10 +430,14 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
 | Tailscale import | 完了（2026-09-12）。ACLとMagicDNSをimportし、整形差分をapply済み。state-backup取得済み |
 | 実機のnetwork変更 | DHCP縮小、VM 3台のrenumber、Apps serviceの`.10.101`集約、Tailscale nameserver切替が完了（2026-09-12） |
 | `.11.0/24`広告の撤去 | 完了（2026-09-12） |
-| VLAN 11/63の撤去とuntaggedのGuest化 | 完了（2026-09-13）。`write memory`と再起動まで実施済み |
-| 残り | IX ACL再編（stateful化）、受入試験 |
+| VLAN 11/63の撤去 | 完了（2026-09-13）。`write memory`と再起動まで実施済み。untaggedの扱いは下のport再編で確定 |
+| IX2215のACL・port再編 | 完了（2026-09-13）。stateful ACL、管理plane制限、PVE/APのタグ専用trunk、access port分離を反映して`write memory`済み |
+| 受入試験 | 完了。zone間allow/deny、DHCP、Internet、管理plane、tailnet/exit node、Guest isolationに合格 |
+| Apps VM host resolver | 未完了。下記「Phase 4で直すもの」の`systemd-resolved`管理を実装・反映する |
+| sFlow受信 | collector（`.10.103:6343`）への着信を確認済み。**ElastiFlowのElasticsearch取り込みは2026-07-07から壊れている**既存障害（[#34](https://github.com/koji-genba/homelab/issues/34)、Phase 4とは無関係） |
 
-次にやること: 「残りの手順」の8（IX2215のstateful ACL再編）。手順書は作成済みで、レビュー後に投入する。
+次にやること: Apps VMのhost resolverをAnsibleで管理して反映する。IX2215のrunning/startup configは
+一致しているので再投入しない。Phase 5はこれと2026-09-20の保持期間満了を確認してから廃止判断へ進む。
 
 #### 残りの手順
 
@@ -484,14 +489,16 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
    `192.168.10.0/24`の広告は残す。Apps VMはtailnetノードではないため、宅外からのSMB/HTTPS/DNSと
    global nameserver `.10.101`への到達がこのrouteに依存している。hairpinはclient側の`accept-routes`で
    制御する（構造的な代替案は[#30](https://github.com/koji-genba/homelab/issues/30)）。
-8. **IX2215のstateful ACL再編。** 手順・確認・rollbackは
-   [IX2215 ACL stateful化 実施手順書](../network/ix-acl-stateful-runbook.md)にある（2026-09-13作成、投入前）。
+8. **IX2215のstateful ACL再編。** 完了（2026-09-13）。手順・確認・rollbackは
+   [IX2215 ACL stateful化 実施手順書](../network/ix-acl-stateful-runbook.md)にある。
    触るのは**BVI20の1枚だけ**である。stateful性が要るのは「Trustedゾーンへの戻りだけを通す」1点で、
    Server/IoT/Guestへは誰も新規接続を張らないため、発信元側の既存staticで足りる。
    動的フィルタのキャッシュはインタフェース単位でしか効かないので、遮断は宛先BVIの`out`に置く。
-   **`out`方向にフィルタを入れると暗黙denyが発生する**ため、末尾の`permit any any`を落とさない。
-9. **untaggedのGuest化とVLAN 63の撤去。** 完了（2026-09-13）。`GigaEthernet2.0`と`GigaEthernet2:6.0`を
-   `bridge-group 40`へ移し、`BVI63`、`default-dhcp`、`default-out`を削除した。
+   **`out`方向にフィルタを入れると暗黙denyが発生する**ため、末尾の`permit any any`を維持した。
+9. **untaggedのGuest化とVLAN 63の撤去。** 完了（2026-09-13）。`BVI63`、`default-dhcp`、`default-out`を
+   削除した。最終port設計ではport 4～7の`GigaEthernet2:4.0`だけをuntagged Guestとする。
+   PVE用port 1の`GigaEthernet2:6.0`とECW用port 8の`GigaEthernet2.0`はbridge-groupへ入れず、
+   タグ専用trunkとした。
 10. **VLAN 11の撤去。** 完了（2026-09-13）。14日保持期間の満了を待たず、ユーザー判断で前倒しした。
    Apps VMのVLAN 11 NICをTerraformで外し（`legacy_service_nic=false`）、IXから`BVI11`、
    `GigaEthernet2.2`、`GigaEthernet2:6.2`、`server_app-dhcp`、`server_app-out`、各ACLの`.11`/`.63`行を
@@ -501,8 +508,9 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
    投入内容はGitの`config.txt`履歴から復元できる。
    2026-09-13に`write memory`と再起動を実施し、再起動後にIX/PVE/ECW/Apps/gateway/ElastiFlowへの
    到達、HTTPS 200、インターネット、tailnetのexit node、sFlow受信、NFS 7本と7コンテナを確認した。
-11. **受入試験。** 各zoneのallow/deny、LAN/tailnetからのservice、Guest isolation。結果を
-    [目標ゾーン設計](../network/target-zones.md)の「手動変更記録」へ記入する。
+11. **受入試験。** 完了（2026-09-13）。各zoneのallow/deny、LAN/tailnetからのservice、Guest isolation、
+    DHCP、Internet、管理plane、exit nodeに合格した。sFlowはcollectorへの着信まで確認した。
+    結果は[目標ゾーン設計](../network/target-zones.md)の「手動変更記録」に記録した。
 
 #### 変更直前に見るものだけ
 
@@ -522,12 +530,14 @@ AppsならSSH/DNS/HTTPS/SMBである。予防的な全service inventoryは作ら
 
 #### 採取済みの事実（再採取しない）
 
-IX2215（2026-09-06、`tmp/ix/`）:
+IX2215（採取物は2026-09-06の`tmp/ix/`、実機状態は2026-09-13更新）:
 
-- software `10.11.6`。running-configはstartup-configと一致し保存済み。
-- Server DHCP poolは`.100-.200`でlease 0件。`.10.101-.103`はARPにもDHCPにも無い。
+- software `10.11.6`。2026-09-13のACL/port変更後、running-configを`write memory`し、
+  `configuration status is already saved`と再起動不要を確認した。
+- Server DHCP poolは`.250-.254`、lease 3600秒。Server機器はstaticで、受入時のVLAN 10 DHCP leaseは0件。
 - IPv6 routeもneighborも0件で、BVI/WANにIPv6 addressは無い。
-- sFlowは`.10.40:6343`へ送信中、drop/errorは0。
+- sFlowは`.10.103:6343`へ送信中。受入時に19426 datagram、flow sample 65776件、counter sample 1875件、
+  sample drop 0件、累積output error 2件を表示した。collector側でも着信をtcpdumpで確認した。
 - `tmp/ix/startup-config.txt`は認証hashを含むsession logで、復元元として使えるがそのままupload
   できるfileではない。Gitへは追加しない。
 
@@ -535,14 +545,16 @@ GE2の物理port:
 
 | port | 接続先 | untagged | tagged |
 | ---: | --- | --- | --- |
-| 1 | pve1 | VLAN 63 | 10/11（group 6） |
-| 2 | 管理端末 | VLAN 20 | なし |
-| 3 | DGX Spark `.10.51` | VLAN 10 | なし |
-| 4-7 | 未使用 | VLAN 63 | 10/11（group 6） |
-| 8 | ECW5211-L `.10.2` | VLAN 63 | 10/11/20/30/40 |
+| 1 | pve1 | 破棄 | VLAN 10（group 6） |
+| 2 | 管理端末 | VLAN 20（access） | 破棄 |
+| 3 | edgeXpert `.10.51` | VLAN 10（access） | 破棄 |
+| 4-7 | 未使用 | VLAN 40（access、group 4） | 破棄 |
+| 8 | ECW5211-L `.10.2` | 破棄 | VLAN 10/20/30/40 |
 
-port 8はvlan-group外なのでdefaultのサブIFに属し、ECWに必要なtaggedはすでに届いている。全VMのNICと
-PVE host（`vmbr0.10`）はtaggedなので、untaggedのGuest化の影響を受けない。
+port 1と8はタグ専用trunk、port 2～7は1 VLANだけのaccess portである。PVE host（`vmbr0.10`）と
+Terraform管理VMの現用NICはtagged VLAN 10なので、port 1でuntaggedを破棄しても影響しない。
+ECW uplinkではtagged/untagged VLAN 40を同じbridge-groupへ入れたときにARP反射が発生したため、
+untaggedを`GigaEthernet2.0`へ収容しない。
 
 Tailscale（2026-09-12）:
 
@@ -550,14 +562,14 @@ Tailscale（2026-09-12）:
   `tmp/tailscale/acl_json`にある。top-levelは`groups`/`acls`/`ssh`だけで、`autoApprovers`も
   `tagOwners`も無い。`acls`の先頭が`*`→`*:*`の全許可で、残り2件はそれに包含される。policyの
   見直しはPhase 4に含めない。
-- MagicDNS有効、global nameserverは`.11.101`、Override DNS servers有効、Split DNSとsearch domainなし。
-- **Override DNSが有効なので、tailnetに接続中の全clientは`.11.101`をDNSに使う。** `.11.101`を止める
-  前にnameserverを`.10.101`へ変える順序を崩さない。
+- MagicDNS有効、global nameserverは`.10.101`、Override DNS servers有効、Split DNSとsearch domainなし。
+- 広告・承認中のLAN routeは`192.168.10.0/24`だけで、VLAN 20/30/40は広告しない。宅外tailnetから
+  Apps VMのserviceと既存exit nodeが使え、VLAN 20/30/40へ到達しないことを2026-09-13に確認した。
 - ACLはimport後Terraformの管理下にある。Admin Consoleで直接編集せず、`acl-policy.live.json`を
   編集してplan/applyする。
 
-3 VM（2026-09-06）: Apps 112 `.10.42`、Tailscale 105 `.10.30`、ElastiFlow 110 `.10.40`。いずれも
-systemd-networkd + Netplan、NoCloud seedである。
+3 VM（2026-09-13）: Apps 112 `.10.101`、Tailscale 105 `.10.102`、ElastiFlow 110 `.10.103`。いずれも
+systemd-networkd + Netplan、NoCloud seedである。ElastiFlow serviceは現在要調査。
 
 Git管理外のローカルfile（機微情報を含むものはmode `0600`）:
 
@@ -570,18 +582,16 @@ Git管理外のローカルfile（機微情報を含むものはmode `0600`）:
 | `files/infrastructure/terraform/tailscale/terraform.tfvars` | tailnet ID |
 | `files/infrastructure/terraform/tailscale/terraform.tfstate` | import済みstate。失っても再importできる |
 
-#### コード側の実態（2026-09-06、静的調査）
+#### コード側の実態（2026-09-13）
 
-- **Ansibleは実装済みで、追加のコード変更は要らない。** `network_migration_complete`を`true`にすると
-  `compose.env.j2`、`AdGuardHome.yaml.j2`、`healthchecks-ping.sh.j2`、`homelab.nft.j2`が`.10.101`へ揃う。
-  `site.yml`のassertがflagの単独変更を拒むので、`legacy_service_addresses_enabled=false`と
-  `legacy_service_cutover_confirmed=false`を同じcommitで変える。
-- **Terraform apps-vm rootで変えるのは2つだけである。** `management_ip`を`192.168.10.101/24`へ、集約後に
-  `legacy_service_nic`を`false`へ。`management_vlan_id`は`10`のまま変えない。`outputs.tf`の
-  `planned_final_management_address`はどこからも参照されていない記録用の出力である。
-- **IX2215のVLAN 10/20/30/40はすでに稼働している。** Phase 4の実体は新規VLAN作成ではなく、ACLの
-  stateful化とVLAN 11/63の撤去である。目標との差分は`server-out`/`server_app-out`のTrusted向け無条件
-  permitと、`main-out`のIoT denyの2点で、`iot-out`の全denyと`guest-out`は目標どおりである。
+- **Ansibleのservice集約は反映済み。** `network_migration_complete=true`、
+  `legacy_service_addresses_enabled=false`、`legacy_service_cutover_confirmed=false`で、
+  `compose.env.j2`、`AdGuardHome.yaml.j2`、`healthchecks-ping.sh.j2`、`homelab.nft.j2`は`.10.101`へ揃っている。
+- **Terraform apps-vm rootは最終状態。** `management_ip`は`192.168.10.101/24`、
+  `legacy_service_nic=false`、`management_vlan_id=10`で、state上の現用NICも`vmbr0`のVLAN 10だけである。
+- **IX2215のVLAN 10/20/30/40、stateful ACL、管理plane制限、port分離は2026-09-13に反映・保存済み。**
+  `trusted-dyn`でTrusted起点のServer/IoTセッションを追跡し、逆方向の新規接続は`trusted-in`で拒否する。
+  `server-out`、`iot-out`、`guest-out`のdenyと各zoneのInternet permitも実機counterと疎通で確認した。
 
 #### 特に気をつける3点
 

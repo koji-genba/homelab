@@ -115,13 +115,18 @@ application cutoverの安定後、別のメンテナンス時間帯に実施す�
 8. ACLをServer/Trusted/IoT/Guestのstateful policyへ変更する。
 9. SSIDをVLAN 20/30/40へ割り当て、AP管理をVLAN 10へ移し、Guest SSIDのclient isolationを有効にする。
 10. IPv6 forwarding、RA、DHCPv6が稼働していないことを確認する。
-11. port 2/3以外のuntaggedをVLAN 63からGuest VLAN 40へ移し、VLAN 63と`default-dhcp`を削除する。
-    VLAN 63はKubernetesのrollback経路ではないため、14日保持期間を待たない。
-12. 14日保持期間の満了後にVLAN 11、旧DHCP、旧ACLを削除する。
+11. access portを1つのuntagged VLAN、PVE/APのtrunkを必要なtagged VLANだけに分け、VLAN 63と
+    `default-dhcp`を削除する。空きport 4～7はGuest VLAN 40のaccess portとする。
+12. VLAN 11、旧DHCP、旧ACLを削除する。実施時はユーザー判断により14日保持期間の満了を待たず、
+    Kubernetes rollbackにはVLAN 11の先行復元が必要になることを記録したうえで2026-09-13に完了した。
+13. Apps VM自身のhost resolverをAnsibleで明示管理し、内部FQDNの解決を確認する。
 
-access portでのtagged VLAN制限はPhase 4に含めず、必要なら独立したhardeningとして行う。
+access portに対応するtagged subinterfaceは作らず、tagged frameを別zoneへ転送しない。trunkのuntaggedも
+どのzoneにも収容しない。同一物理port上で同じzoneをtagged/untaggedの両方へ収容しない。
 
 ゲート: 各zoneのallow/deny test、LAN/Tailscaleのservice test、Guest isolationが合格すること。
+IX/VLAN/ECW部分は2026-09-13に合格済み。Apps VM host resolverは残作業とする。ElastiFlowの取り込み障害
+（[#34](https://github.com/koji-genba/homelab/issues/34)）は2026-07-07からの既存障害で、このゲートの対象外である。
 
 ## フェーズ 5: 廃止
 

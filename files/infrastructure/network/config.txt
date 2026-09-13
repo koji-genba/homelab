@@ -3,7 +3,7 @@
 ! NEC Portable Internetwork Core Operating System Software
 ! IX Series IX2215 (magellan-sec) Software, Version 10.11.6, RELEASE SOFTWARE
 ! Compiled May 22-Thu-2025 14:55:23 JST #2
-! Current time Sep 05-Sat-2026 22:29:31 JST
+! Last updated Sep 13-Sun-2026 15:57:22 JST
 !
 system interfaces bvi 64
 !
@@ -36,7 +36,6 @@ ip access-list guest-out deny ip src 192.168.40.0/24 dest 192.168.30.0/24
 ip access-list guest-out permit ip src any dest any
 ip access-list iot-out option optimize
 ip access-list iot-out deny ip src 192.168.30.0/24 dest 192.168.10.0/24
-ip access-list iot-out deny ip src 192.168.30.0/24 dest 192.168.20.0/24
 ip access-list iot-out deny ip src 192.168.30.0/24 dest 192.168.40.0/24
 ip access-list iot-out permit ip src any dest any
 ip access-list ipv4_udp_range permit udp src any sport range 1024 65535 dest any dport range 1024 65535
@@ -45,11 +44,23 @@ ip access-list main-out permit ip src 192.168.20.0/24 dest 192.168.10.0/24
 ip access-list main-out deny ip src 192.168.20.0/24 dest 192.168.30.0/24
 ip access-list main-out deny ip src 192.168.20.0/24 dest 192.168.40.0/24
 ip access-list main-out permit ip src any dest any
+ip access-list mgmt-src permit ip src 192.168.10.0/24 dest any
+ip access-list mgmt-src permit ip src 192.168.20.0/24 dest any
 ip access-list server-out option optimize
 ip access-list server-out permit ip src 192.168.10.0/24 dest 192.168.20.0/24
 ip access-list server-out deny ip src 192.168.10.0/24 dest 192.168.30.0/24
 ip access-list server-out deny ip src 192.168.10.0/24 dest 192.168.40.0/24
 ip access-list server-out permit ip src any dest any
+ip access-list trusted-in permit ip src 192.168.10.1/32 dest 192.168.20.0/24
+ip access-list trusted-in permit ip src 192.168.30.1/32 dest 192.168.20.0/24
+ip access-list trusted-in permit ip src 192.168.40.1/32 dest 192.168.20.0/24
+ip access-list trusted-in deny ip src 192.168.10.0/24 dest 192.168.20.0/24
+ip access-list trusted-in deny ip src 192.168.30.0/24 dest 192.168.20.0/24
+ip access-list trusted-in deny ip src 192.168.40.0/24 dest 192.168.20.0/24
+ip access-list trusted-in permit ip src any dest any
+ip access-list trusted-trig permit ip src 192.168.20.0/24 dest 192.168.10.0/24
+ip access-list trusted-trig permit ip src 192.168.20.0/24 dest 192.168.30.0/24
+ip access-list dynamic trusted-dyn access trusted-trig
 !
 !
 ipv6 access-list ipv6_udp_range permit udp src any sport range 1024 65535 dest any dport range 1024 65535
@@ -64,10 +75,12 @@ bridge irb enable
 !
 !
 !
+ssh-server ip access-list mgmt-src
 ssh-server ip enable
 !
 http-server authentication-method digest
 http-server username admin secret-password (HASH)
+http-server ip access-list mgmt-src
 http-server ip enable
 !
 !
@@ -131,7 +144,8 @@ device GigaEthernet2
   sflow polling-interval 30
   vlan-group 1 port 3
   vlan-group 2 port 2
-  vlan-group 6 port 1 4 5 6 7
+  vlan-group 4 port 4 5 6 7
+  vlan-group 6 port 1
 !
 device BRI0
   isdn switch-type hsd128k
@@ -167,10 +181,9 @@ interface USB-Serial0.0
   no ip address
   shutdown
 !
-! タグなし(default) と bridge-group40 (=BVI40) の関連付け
+! Port 8/AP trunkのタグなしフレームはL3へ収容しない
 interface GigaEthernet2.0
   no ip address
-  bridge-group 40
   no shutdown
 !
 ! タグvlan_vlan10(server)のサブIF
@@ -230,7 +243,7 @@ interface GigaEthernet2:2.0
   bridge-group 20
   no shutdown
 !
-! vlan-group3 と bridge-group30 (=BVI30) の関連付け
+! 物理port未割当のvlan-group3用定義（現状は転送に使われない）
 interface GigaEthernet2:3.0
   no ip address
   bridge-group 30
@@ -242,10 +255,9 @@ interface GigaEthernet2:4.0
   bridge-group 40
   no shutdown
 !
-! vlan-group6 と bridge-group40 (=BVI40) の関連付け
+! vlan-group6（Port 1/PVE1）のタグなしフレームはL3へ収容しない
 interface GigaEthernet2:6.0
   no ip address
-  bridge-group 40
   no shutdown
 !
 ! vlan10の仮想インターフェース設定
@@ -264,7 +276,9 @@ interface BVI10
 interface BVI20
   ip address 192.168.20.1/24
   ip dhcp binding main-dhcp
+  ip filter trusted-dyn 5 in
   ip filter main-out 10 in
+  ip filter trusted-in 5 out
   ip ufs-cache timeout tcp 60
   ip ufs-cache timeout udp 300
   bridge-group 20
