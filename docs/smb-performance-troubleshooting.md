@@ -32,6 +32,14 @@ tailscale set --accept-routes=false
 
 デスクトップ(常時宅内)なら実質ノーデメリット。
 
+## NFSクライアントのclose時writeback対策 (2026-09-13)
+
+Apps VMの既定値`vm.dirty_background_ratio=10`（約1.2GB）では、数十〜数百MBのファイルは転送中にbackground writebackが始まらない。Sambaがファイルをcloseすると、Apps VMのpage cacheに溜まった全データをNFSクライアントがflushして同期COMMITするため、closeが待たされていた。
+
+Apps VMに`vm.dirty_background_bytes=67108864`（64MiB）を設定し、転送中からwritebackを開始するようにした。これによりclose時は末尾だけをflushし、5秒以上前に書かれたデータはZFS txgへ反映済みになる。hard limitはkernel既定値のままとし、データ安全性のsemanticsは変更しない。
+
+設定値は`cat /proc/sys/vm/dirty_background_bytes`で確認する。コピー中に`grep -E '^(Dirty|Writeback):' /proc/meminfo`を観察し、`Dirty`が数百MBまで増えてから一括で`Writeback`へ移るのではなく、両方が小さい値を保つことを確認する。
+
 ## 切り分けの記録
 
 1. **読み込みも50MB/sで頭打ち** → ストレージ書き込みパス(NFS syncマウント等)ではなく経路の対称的ボトルネックと判断。
