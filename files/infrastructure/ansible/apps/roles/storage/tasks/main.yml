@@ -1,4 +1,45 @@
 ---
+- name: Configure early background writeback for NFS workloads
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/90-homelab-nfs-writeback.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      vm.dirty_background_bytes = {{ apps_vm_dirty_background_bytes }}
+  register: storage_nfs_writeback_sysctl
+
+# Apply in place instead of flushing handlers: a flush here would also run
+# handlers queued by earlier roles (e.g. Docker/application restarts) before
+# the NFS mounts below are validated.
+- name: Apply the NFS writeback sysctl when it changed  # noqa: no-handler
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/sysctl
+      - -p
+      - /etc/sysctl.d/90-homelab-nfs-writeback.conf
+  when: storage_nfs_writeback_sysctl is changed
+  changed_when: true
+
+- name: Read the active NFS writeback threshold
+  ansible.builtin.command:
+    argv:
+      - cat
+      - /proc/sys/vm/dirty_background_bytes
+  register: storage_dirty_background_bytes
+  changed_when: false
+
+- name: Refuse an unexpected NFS writeback threshold
+  ansible.builtin.assert:
+    that:
+      - >-
+        (storage_dirty_background_bytes.stdout | trim | int)
+        == (apps_vm_dirty_background_bytes | int)
+    fail_msg: >-
+      NFS writeback validation failed. Expected vm.dirty_background_bytes={{
+      apps_vm_dirty_background_bytes }}, but the active value was {{
+      storage_dirty_background_bytes.stdout | trim | default('(none)') }}.
+
 - name: Probe whether each NFS mount root is already mounted
   ansible.builtin.command:
     argv:

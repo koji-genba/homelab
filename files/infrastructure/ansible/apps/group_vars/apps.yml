@@ -104,6 +104,12 @@ nfs_mounts:
     marker_value: stashpad-staging-data
     options: hard,_netdev,nfsvers=4.1,noatime
 
+# NFS client writeback. With the default dirty_background_ratio (~1.2GB on
+# this VM) writeback of typical SMB uploads starts only at close, which then
+# blocks on a whole-file flush plus COMMIT. Start background writeback early
+# so close only flushes a small tail.
+apps_vm_dirty_background_bytes: 67108864
+
 shared_mount_path: /srv/homelab/nfs/shared
 shared_hdd_mount_path: /srv/homelab/nfs/shared-hdd
 archive_mount_path: /srv/homelab/nfs/archive
