@@ -2,12 +2,15 @@
 
 - 更新日: 2026-09-13
 - 対象リポジトリ: `/home/s-sato/homelab`
-- 作業ブランチ: **`docs-phase4-prep`**（`origin/main`から分岐、PR未作成）。mainにはPR #23、#24、#25が
-  merge済みである。**この文書にSHAを固定で書かない。** merge のたびに陳腐化して罠になるためである。
-  現在地は`git log --oneline origin/main -1`と`git log --oneline origin/main..HEAD`で確認する。
-- **2026-09-13時点で、`docs-phase4-prep`はIX2215のACL・port再編の結果までcommit・push済みである。**
-  未commit/unpushed差分は`git status`と`git log --oneline origin/docs-phase4-prep..HEAD`で確認する。
-  PRの作成はユーザーの指示を受けてから行う。
+- 作業ブランチ: **`main`**。Phase 4の作業ブランチ`docs-phase4-prep`はPR #26として2026-09-13にmergeし、
+  削除済みである。新しい作業は`origin/main`からbranchを切って行う。
+  **この文書にSHAを固定で書かない。** merge のたびに陳腐化して罠になるためである。
+  現在地は`git log --oneline origin/main -1`で確認する。
+- 2026-09-13時点のブランチは`main`と`state-backup`（暗号化したTerraform stateの保管用。削除しない）だけである。
+  mainには同日、Phase 4（PR #26）と、dependabotによる`bpg/proxmox` 0.111.1→0.112.0の更新（PR #27、
+  apps-vm root）をmerge済みである。PR #27の後、apps-vmで`make terraform-plan`が`No changes.`になることを
+  2026-09-13に確認した（providerの更新による既存VMへの差分は無い）。
+  pushとPRはユーザーの指示を受けてから行う。
 - 現在地: **Phase 3の再構築性試験を2026-09-06に実施した。** Apps VM（VMID 112）をTerraformで
   destroyし、Terraform・Ansible・Gitから再構築して復旧させた。**Apps VMが唯一のwriterで、
   7 Compose projectが稼働中。** IX2215の構成ドリフトは2026-09-05に解消済み。
