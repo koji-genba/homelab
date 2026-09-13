@@ -103,7 +103,7 @@ IPv4と同等のゾーンポリシーを設計した新しいADRを先に作成�
 | 項目 | 値 |
 | --- | --- |
 | メンテナンス日/操作者 | 2026-09-13 / ユーザー |
-| IX2215バックアップ場所/hash | 変更前の採取物はrepo直下`tmp/ix/`（Git管理外）。2026-09-13の最終configは`write memory`済みだが、変更後backup/hashは未記録 |
+| IX2215バックアップ場所/hash | 変更前の採取物はrepo直下`tmp/ix/`（Git管理外）。変更後は`files/infrastructure/network/config.txt`（Git管理）を記録とし、別途のbackupファイルとhashは持たない。2026-09-13 18:33の`show running-config`と照合し、並び順を除いてトップレベル93行すべてが一致した。認証情報は`config.txt`では伏せ、KeePassXCで管理する |
 | ECW5211バックアップ場所/hash | 2026-09-12、management VLANをtagged 10へ変更した後に取得。repo直下`tmp/ecw/config-backup.conf`（Git管理外、mode `0600`）、SHA-256 `a0253614dc7075e79675760af62add0643adb09167466ede3c11bd7624e13eb0`。management VLAN、SSID→VLAN、Wireless Station Isolationの変更をすべて反映した状態 |
 | コンソール/OOB試験 | 2026-09-12、IX2215のconsole loginを確認 |
 | ポート/VLANインベントリのcommit | 2026-09-13、`docs-phase4-prep`へcommit・push済み |
