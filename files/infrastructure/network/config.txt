@@ -3,7 +3,7 @@
 ! NEC Portable Internetwork Core Operating System Software
 ! IX Series IX2215 (magellan-sec) Software, Version 10.11.6, RELEASE SOFTWARE
 ! Compiled May 22-Thu-2025 14:55:23 JST #2
-! Current time Sep 05-Sat-2026 22:29:31 JST
+! Last updated Sep 13-Sun-2026 15:57:22 JST
 !
 system interfaces bvi 64
 !
@@ -29,49 +29,38 @@ ip ufs-cache max-entries 20000
 ip ufs-cache enable
 ip route default GigaEthernet0.0
 ip dhcp enable
-ip access-list default-out option optimize
-ip access-list default-out deny ip src 192.168.63.0/24 dest 192.168.10.0/24
-ip access-list default-out deny ip src 192.168.63.0/24 dest 192.168.11.0/24
-ip access-list default-out deny ip src 192.168.63.0/24 dest 192.168.20.0/24
-ip access-list default-out deny ip src 192.168.63.0/24 dest 192.168.30.0/24
-ip access-list default-out deny ip src 192.168.63.0/24 dest 192.168.40.0/24
-ip access-list default-out permit ip src any dest any
 ip access-list guest-out option optimize
 ip access-list guest-out deny ip src 192.168.40.0/24 dest 192.168.10.0/24
-ip access-list guest-out deny ip src 192.168.40.0/24 dest 192.168.11.0/24
 ip access-list guest-out deny ip src 192.168.40.0/24 dest 192.168.20.0/24
 ip access-list guest-out deny ip src 192.168.40.0/24 dest 192.168.30.0/24
-ip access-list guest-out deny ip src 192.168.40.0/24 dest 192.168.63.0/24
 ip access-list guest-out permit ip src any dest any
 ip access-list iot-out option optimize
 ip access-list iot-out deny ip src 192.168.30.0/24 dest 192.168.10.0/24
-ip access-list iot-out deny ip src 192.168.30.0/24 dest 192.168.11.0/24
-ip access-list iot-out deny ip src 192.168.30.0/24 dest 192.168.20.0/24
 ip access-list iot-out deny ip src 192.168.30.0/24 dest 192.168.40.0/24
-ip access-list iot-out deny ip src 192.168.30.0/24 dest 192.168.63.0/24
 ip access-list iot-out permit ip src any dest any
 ip access-list ipv4_udp_range permit udp src any sport range 1024 65535 dest any dport range 1024 65535
 ip access-list main-out option optimize
 ip access-list main-out permit ip src 192.168.20.0/24 dest 192.168.10.0/24
-ip access-list main-out permit ip src 192.168.20.0/24 dest 192.168.11.0/24
 ip access-list main-out deny ip src 192.168.20.0/24 dest 192.168.30.0/24
 ip access-list main-out deny ip src 192.168.20.0/24 dest 192.168.40.0/24
-ip access-list main-out deny ip src 192.168.20.0/24 dest 192.168.63.0/24
 ip access-list main-out permit ip src any dest any
+ip access-list mgmt-src permit ip src 192.168.10.0/24 dest any
+ip access-list mgmt-src permit ip src 192.168.20.0/24 dest any
 ip access-list server-out option optimize
-ip access-list server-out permit ip src 192.168.10.0/24 dest 192.168.11.0/24
 ip access-list server-out permit ip src 192.168.10.0/24 dest 192.168.20.0/24
 ip access-list server-out deny ip src 192.168.10.0/24 dest 192.168.30.0/24
 ip access-list server-out deny ip src 192.168.10.0/24 dest 192.168.40.0/24
-ip access-list server-out deny ip src 192.168.10.0/24 dest 192.168.63.0/24
 ip access-list server-out permit ip src any dest any
-ip access-list server_app-out option optimize
-ip access-list server_app-out permit ip src 192.168.11.0/24 dest 192.168.10.0/24
-ip access-list server_app-out permit ip src 192.168.11.0/24 dest 192.168.20.0/24
-ip access-list server_app-out deny ip src 192.168.11.0/24 dest 192.168.30.0/24
-ip access-list server_app-out deny ip src 192.168.11.0/24 dest 192.168.40.0/24
-ip access-list server_app-out deny ip src 192.168.11.0/24 dest 192.168.63.0/24
-ip access-list server_app-out permit ip src any dest any
+ip access-list trusted-in permit ip src 192.168.10.1/32 dest 192.168.20.0/24
+ip access-list trusted-in permit ip src 192.168.30.1/32 dest 192.168.20.0/24
+ip access-list trusted-in permit ip src 192.168.40.1/32 dest 192.168.20.0/24
+ip access-list trusted-in deny ip src 192.168.10.0/24 dest 192.168.20.0/24
+ip access-list trusted-in deny ip src 192.168.30.0/24 dest 192.168.20.0/24
+ip access-list trusted-in deny ip src 192.168.40.0/24 dest 192.168.20.0/24
+ip access-list trusted-in permit ip src any dest any
+ip access-list trusted-trig permit ip src 192.168.20.0/24 dest 192.168.10.0/24
+ip access-list trusted-trig permit ip src 192.168.20.0/24 dest 192.168.30.0/24
+ip access-list dynamic trusted-dyn access trusted-trig
 !
 !
 ipv6 access-list ipv6_udp_range permit udp src any sport range 1024 65535 dest any dport range 1024 65535
@@ -86,26 +75,28 @@ bridge irb enable
 !
 !
 !
+ssh-server ip access-list mgmt-src
 ssh-server ip enable
 !
 http-server authentication-method digest
 http-server username admin secret-password (HASH)
+http-server ip access-list mgmt-src
 http-server ip enable
 !
 !
 sflow agent ip 192.168.10.1
-sflow collector ip 192.168.10.40
+sflow collector ip 192.168.10.103
 !
 !
 !
 !
 ip dhcp profile server-dhcp
-  assignable-range 192.168.10.100 192.168.10.200
+  assignable-range 192.168.10.250 192.168.10.254
   subnet-mask 255.255.255.0
   default-gateway 192.168.10.1
   dns-server 1.1.1.1 8.8.8.8
   domain-name kojigenba-srv.com
-  lease-time 86400
+  lease-time 3600
 !
 ip dhcp profile main-dhcp
   assignable-range 192.168.20.100 192.168.20.200
@@ -131,22 +122,6 @@ ip dhcp profile guest-dhcp
   domain-name guest.kojigenba-srv.com
   lease-time 3600
 !
-ip dhcp profile default-dhcp
-  assignable-range 192.168.63.100 192.168.63.200
-  subnet-mask 255.255.255.0
-  default-gateway 192.168.63.1
-  dns-server 1.1.1.1 8.8.8.8
-  domain-name default.kojigenba-srv.com
-  lease-time 1800
-!
-ip dhcp profile server_app-dhcp
-  assignable-range 192.168.11.100 192.168.11.200
-  subnet-mask 255.255.255.0
-  default-gateway 192.168.11.1
-  dns-server 1.1.1.1 8.8.8.8
-  domain-name kojigenba-srv.com
-  lease-time 86400
-!
 class-map match-any voice
   match ip access-list ipv4_udp_range normal
   match ipv6 access-list ipv6_udp_range normal
@@ -169,7 +144,8 @@ device GigaEthernet2
   sflow polling-interval 30
   vlan-group 1 port 3
   vlan-group 2 port 2
-  vlan-group 6 port 1 4 5 6 7
+  vlan-group 4 port 4 5 6 7
+  vlan-group 6 port 1
 !
 device BRI0
   isdn switch-type hsd128k
@@ -205,10 +181,9 @@ interface USB-Serial0.0
   no ip address
   shutdown
 !
-! タグなし(default) と bridge-group63 (=BVI63) の関連付け
+! Port 8/AP trunkのタグなしフレームはL3へ収容しない
 interface GigaEthernet2.0
   no ip address
-  bridge-group 63
   no shutdown
 !
 ! タグvlan_vlan10(server)のサブIF
@@ -218,15 +193,6 @@ interface GigaEthernet2.1
   auto-connect
   no ip address
   bridge-group 10
-  no shutdown
-!
-! タグvlan_vlan11(server_app)のサブIF
-interface GigaEthernet2.2
-  description vlan11
-  encapsulation dot1q 11 tpid 8100
-  auto-connect
-  no ip address
-  bridge-group 11
   no shutdown
 !
 ! タグvlan_vlan20(main)のサブIF
@@ -265,15 +231,6 @@ interface GigaEthernet2:6.1
   bridge-group 10
   no shutdown
 !
-! vlan-group6 の ポート番号1 と bridge-group11 (=BVI11) の関連付け
-interface GigaEthernet2:6.2
-  description vlan11
-  encapsulation dot1q 11 tpid 8100
-  auto-connect
-  no ip address
-  bridge-group 11
-  no shutdown
-!
 ! vlan-group1 と bridge-group10 (=BVI10) の関連付け
 interface GigaEthernet2:1.0
   no ip address
@@ -286,7 +243,7 @@ interface GigaEthernet2:2.0
   bridge-group 20
   no shutdown
 !
-! vlan-group3 と bridge-group30 (=BVI30) の関連付け
+! 物理port未割当のvlan-group3用定義（現状は転送に使われない）
 interface GigaEthernet2:3.0
   no ip address
   bridge-group 30
@@ -298,10 +255,9 @@ interface GigaEthernet2:4.0
   bridge-group 40
   no shutdown
 !
-! vlan-group6 と bridge-group63 (=BVI63) の関連付け
+! vlan-group6（Port 1/PVE1）のタグなしフレームはL3へ収容しない
 interface GigaEthernet2:6.0
   no ip address
-  bridge-group 63
   no shutdown
 !
 ! vlan10の仮想インターフェース設定
@@ -316,22 +272,13 @@ interface BVI10
   service-policy output output-policy
   no shutdown
 !
-! vlan11の仮想インターフェース設定
-interface BVI11
-  ip address 192.168.11.1/24
-  ip filter server_app-out 10 in
-  ip ufs-cache timeout tcp 300
-  ip ufs-cache timeout udp 1800
-  bridge-group 11
-  service-policy input output-policy
-  service-policy output output-policy
-  no shutdown
-!
 ! vlan20の仮想インターフェース設定
 interface BVI20
   ip address 192.168.20.1/24
   ip dhcp binding main-dhcp
+  ip filter trusted-dyn 5 in
   ip filter main-out 10 in
+  ip filter trusted-in 5 out
   ip ufs-cache timeout tcp 60
   ip ufs-cache timeout udp 300
   bridge-group 20
@@ -357,18 +304,6 @@ interface BVI40
   ip ufs-cache timeout tcp 60
   ip ufs-cache timeout udp 180
   bridge-group 40
-  service-policy input output-policy
-  service-policy output output-policy
-  no shutdown
-!
-! タグなし(default)の仮想インターフェース設定
-interface BVI63
-  ip address 192.168.63.1/24
-  ip dhcp binding default-dhcp
-  ip filter default-out 10 in
-  ip ufs-cache timeout tcp 60
-  ip ufs-cache timeout udp 300
-  bridge-group 63
   service-policy input output-policy
   service-policy output output-policy
   no shutdown

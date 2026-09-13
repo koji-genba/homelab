@@ -55,13 +55,14 @@ variable "service_vlan_id" {
 variable "legacy_service_nic" {
   description = "Create the second VLAN 11 NIC without assigning an IP"
   type        = bool
-  default     = true
+  # Phase 4でserviceを192.168.10.101へ集約したため、VLAN 11のNICは不要になった。
+  default = false
 }
 
 variable "management_ip" {
   description = "Phase 1 management address; .42 avoids the current .100-.200 DHCP pool"
   type        = string
-  default     = "192.168.10.42/24"
+  default     = "192.168.10.101/24"
 }
 
 variable "management_gateway" {

@@ -55,3 +55,79 @@
     daemon_reload: true
     enabled: "{{ legacy_service_addresses_enabled | bool }}"
     state: "{{ 'started' if legacy_service_addresses_enabled | bool else 'stopped' }}"
+
+# Host resolver. Only meaningful after the final network migration, because
+# AdGuard Home listens on the management address only from then on.
+- name: Check that the netplan-generated management unit exists
+  ansible.builtin.stat:
+    path: "/run/systemd/network/10-netplan-{{ apps_management_interface }}.network"
+  register: network_management_unit
+  when: network_migration_complete | bool
+
+- name: Refuse to guess the management link unit name
+  ansible.builtin.assert:
+    that: network_management_unit.stat.exists
+    fail_msg: >-
+      /run/systemd/network/10-netplan-{{ apps_management_interface }}.network
+      was not found. Check the netplan interface id and set
+      apps_management_interface accordingly.
+  when: network_migration_complete | bool
+
+- name: Create the management link drop-in directory
+  ansible.builtin.file:
+    path: "/etc/systemd/network/10-netplan-{{ apps_management_interface }}.network.d"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: network_migration_complete | bool
+
+- name: Route only the internal zone to the local AdGuard Home
+  ansible.builtin.template:
+    src: homelab-management-dns.conf.j2
+    dest: "/etc/systemd/network/10-netplan-{{ apps_management_interface }}.network.d/50-homelab-dns.conf"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Apply host resolver
+  when: network_migration_complete | bool
+
+- name: Create the systemd-resolved drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/resolved.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: network_migration_complete | bool
+
+- name: Use public upstreams as the default DNS route
+  ansible.builtin.template:
+    src: homelab-resolved.conf.j2
+    dest: /etc/systemd/resolved.conf.d/50-homelab.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Apply host resolver
+  when: network_migration_complete | bool
+
+- name: Apply resolver changes before verifying them
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify that the internal zone resolves through AdGuard Home
+  ansible.builtin.command: "getent ahostsv4 {{ apps_dns_probe_name }}"
+  register: network_dns_internal_probe
+  changed_when: false
+  retries: 5
+  delay: 3
+  until: apps_dns_probe_address in network_dns_internal_probe.stdout
+  when: network_migration_complete | bool
+
+- name: Verify that public names still resolve through the upstreams
+  ansible.builtin.command: getent ahostsv4 deb.debian.org
+  register: network_dns_public_probe
+  changed_when: false
+  retries: 5
+  delay: 3
+  until: network_dns_public_probe.rc == 0
+  when: network_migration_complete | bool

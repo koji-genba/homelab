@@ -48,6 +48,17 @@ variable "gateway" {
   default     = "192.168.10.1"
 }
 
+variable "ip_address" {
+  description = "Static IPv4 address (CIDR) for the existing gateway VM"
+  type        = string
+  default     = "192.168.10.102/24"
+
+  validation {
+    condition     = can(cidrnetmask(var.ip_address))
+    error_message = "ip_address must be a valid IPv4 CIDR address."
+  }
+}
+
 variable "dns_servers" {
   description = "DNS servers"
   type        = list(string)

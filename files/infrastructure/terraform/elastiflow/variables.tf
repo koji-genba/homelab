@@ -67,7 +67,7 @@ variable "vm_id" {
 variable "ip_address" {
   description = "Static IPv4 address (CIDR) for the VM, on the management VLAN"
   type        = string
-  default     = "192.168.10.40/24"
+  default     = "192.168.10.103/24"
 }
 
 variable "template_vm_id" {

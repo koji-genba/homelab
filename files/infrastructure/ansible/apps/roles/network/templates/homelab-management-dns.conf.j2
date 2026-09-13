@@ -1,0 +1,12 @@
+# Managed by Ansible (network role). Do not edit on the host.
+#
+# cloud-init renders the Terraform bootstrap resolvers into the netplan unit.
+# Those values are only for first boot: 192.168.10.1 does not answer DNS and
+# 1.1.1.1 does not know internal records. Empty assignments reset the lists
+# inherited from the netplan-generated unit.
+[Network]
+DNS=
+DNS={{ apps_management_ip }}
+Domains=
+Domains=~{{ apps_internal_dns_domain }}
+DNSDefaultRoute=no

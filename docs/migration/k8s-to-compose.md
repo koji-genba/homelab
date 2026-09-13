@@ -99,20 +99,34 @@ snapshot restoreで代替してはならない。この試験はGitとIaCから�
 ## フェーズ 4: ネットワーク移行
 
 application cutoverの安定後、別のメンテナンス時間帯に実施する。
+一括の事前確認は作らず、各対象を変更する直前に必要な値だけを確認する。進捗と実施手順の詳細は
+[次セッションへの作業指示のPhase 4](next-session.md)にある。
 
-1. IX2215 complete config backup、console、rollback configを用意する。
-2. ECW5211の設定backupと手動変更手順を用意する。
-3. Server VLAN 10 DHCPを廃止し、IPAMのstatic assignmentを確認する。
-4. Apps `.101`、Tailscale `.102`、ElastiFlow `.103`への移動順序を決める。
-5. ACLをServer/Trusted/IoT/Guest policyへ変更する。
-6. SSIDをVLAN 20/30/40へ割り当て、AP管理をVLAN 10へ移す。
-7. 未指定untagged portをGuest VLAN 40へ移す。
-8. Tailscaleの既存exit node機能とAdvertiseRoutesをTerraformで保持し、global DNSを`.10.101`へ変更する。
-9. Apps VM serviceを単一`.10.101`へ集約し、DNS recordを更新する。
-10. VLAN 11と63、旧DHCP、旧ACLを削除する。
-11. IPv6 forwarding、RA、DHCPv6を無効化したことを確認する。
+1. IX2215のstartup/running config、DHCP/ARP、IPv6、port inventoryを確認する。
+2. ECW5211のbackupはECW変更直前、Tailscale live exportはTerraform import直前に取得する。
+3. Tailscaleの既存ACLとMagicDNSをTerraformへimportし、no-op planを確認する。
+4. Server VLAN 10 DHCPを現行`.100-.200`から初期設定用`.250-.254`へ縮小し、
+   IPAMのstatic assignmentとlease 0件を確認する。
+5. Tailscale gatewayを`.30`から`.102`、ElastiFlowを`.40`から`.103`へ個別に移動する。
+   ElastiFlowではsFlow collectorも同じ作業単位で切り替える。
+6. Appsの管理IPを`.42`から`.101`へ移動し、その後にserviceを単一`.101`へ集約する。
+7. `.101`のDNS/SMB/HTTPSをLANとtailnetから確認してから、Tailscale global DNSを`.101`へ変更し、
+   `192.168.11.0/24`の広告を外す。既存exit nodeは維持する。
+8. ACLをServer/Trusted/IoT/Guestのstateful policyへ変更する。
+9. SSIDをVLAN 20/30/40へ割り当て、AP管理をVLAN 10へ移し、Guest SSIDのclient isolationを有効にする。
+10. IPv6 forwarding、RA、DHCPv6が稼働していないことを確認する。
+11. access portを1つのuntagged VLAN、PVE/APのtrunkを必要なtagged VLANだけに分け、VLAN 63と
+    `default-dhcp`を削除する。空きport 4～7はGuest VLAN 40のaccess portとする。
+12. VLAN 11、旧DHCP、旧ACLを削除する。実施時はユーザー判断により14日保持期間の満了を待たず、
+    Kubernetes rollbackにはVLAN 11の先行復元が必要になることを記録したうえで2026-09-13に完了した。
+13. Apps VM自身のhost resolverをAnsibleで明示管理し、内部FQDNの解決を確認する。
+
+access portに対応するtagged subinterfaceは作らず、tagged frameを別zoneへ転送しない。trunkのuntaggedも
+どのzoneにも収容しない。同一物理port上で同じzoneをtagged/untaggedの両方へ収容しない。
 
 ゲート: 各zoneのallow/deny test、LAN/Tailscaleのservice test、Guest isolationが合格すること。
+IX/VLAN/ECW部分とApps VM host resolverは2026-09-13に完了した。ElastiFlowの取り込み障害
+（[#34](https://github.com/koji-genba/homelab/issues/34)）は2026-07-07からの既存障害で、このゲートの対象外である。
 
 ## フェーズ 5: 廃止
 

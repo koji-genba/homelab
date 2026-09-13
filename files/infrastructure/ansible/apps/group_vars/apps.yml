@@ -2,15 +2,26 @@
 # Non-secret desired state for the Debian 13 Apps VM. Runtime credentials are
 # intentionally absent from Git and are loaded from runtime.sops.yaml only
 # after the cutover gate is enabled.
-apps_management_ip: 192.168.10.42
+apps_management_ip: 192.168.10.101
 apps_final_management_ip: 192.168.10.101
 apps_hostname: apps
-network_migration_complete: false
+
+# Host resolver. The internal zone is routed to the local AdGuard Home only;
+# every other name uses the public upstreams so the host does not depend on
+# the AdGuard container being up.
+apps_management_interface: eth0
+apps_internal_dns_domain: kojigenba-srv.com
+apps_upstream_dns_servers:
+  - 1.1.1.1
+  - 8.8.8.8
+apps_dns_probe_name: dnsTestRecord.kojigenba-srv.com
+apps_dns_probe_address: 192.168.63.254
+network_migration_complete: true
 
 # Both flags remain false until the old Kubernetes/MetalLB/DHCP writers are
 # fenced and ARP ownership has been checked by an operator.
-legacy_service_addresses_enabled: true
-legacy_service_cutover_confirmed: true
+legacy_service_addresses_enabled: false
+legacy_service_cutover_confirmed: false
 legacy_service_interface_name: ens19
 legacy_service_addresses:
   - 192.168.11.100/24  # Caddy/HTTP (cutover only)

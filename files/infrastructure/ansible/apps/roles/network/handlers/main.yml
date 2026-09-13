@@ -6,3 +6,21 @@
 - name: Apply sysctl
   ansible.builtin.command: sysctl --system
   changed_when: true
+
+# The order matters: networkd must reload the drop-in before the link is
+# reconfigured, and resolved restarts last to pick up the global drop-in.
+- name: Reload systemd-networkd configuration
+  ansible.builtin.command: networkctl reload
+  changed_when: true
+  listen: Apply host resolver
+
+- name: Reconfigure the management link
+  ansible.builtin.command: "networkctl reconfigure {{ apps_management_interface }}"
+  changed_when: true
+  listen: Apply host resolver
+
+- name: Restart systemd-resolved
+  ansible.builtin.systemd:
+    name: systemd-resolved
+    state: restarted
+  listen: Apply host resolver

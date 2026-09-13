@@ -129,6 +129,9 @@ resource "proxmox_virtual_environment_vm" "elastiflow" {
 
   serial_device {}
 
+  # cloud-init設定の変更をguestへ反映させるため、更新後にPVE側で再起動する。
+  reboot_after_update = true
+
   lifecycle {
     ignore_changes = [
       initialization[0].user_data_file_id,
