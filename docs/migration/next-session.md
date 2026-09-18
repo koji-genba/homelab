@@ -24,7 +24,7 @@
   詳細は「Phase 4: ネットワーク移行」の「現在地」にある。
   満了日までにrollbackが発生しなければ、その後にPhase 5の廃止へ進む。
 - **2026-09-18にPort 4をPort 3と同じVLAN 10 accessへ移す管理構成を追加し、2026-09-19に
-  ユーザーが実機反映済みと確認した。** `write memory`と疎通確認は未記録である。
+  実機反映・疎通確認・`write memory`まで完了した。** Port 4変更に残作業はない。
 - **Phase 3は、Proxmoxのuser・role・API token・ACLがGitにもTerraformにも宣言されておらず、
   しかも`/vms/<vmid>`のACLはVMのdestroyで道連れに消えることを明らかにした。
   「GitとIaCだけから復旧できる」という前提は現状では成立していない。** 詳細は
@@ -435,14 +435,13 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
 | `.11.0/24`広告の撤去 | 完了（2026-09-12） |
 | VLAN 11/63の撤去 | 完了（2026-09-13）。`write memory`と再起動まで実施済み。untaggedの扱いは下のport再編で確定 |
 | IX2215のACL・port再編 | 完了（2026-09-13）。stateful ACL、管理plane制限、PVE/APのタグ専用trunk、access port分離を反映して`write memory`済み |
-| Port 4のVLAN 10 access化 | `config.txt`と関連文書を更新済み（2026-09-18）。2026-09-19に実機反映済みと確認。`write memory`と疎通確認は未記録 |
+| Port 4のVLAN 10 access化 | 完了。`config.txt`と関連文書を更新し、2026-09-19に実機反映・疎通確認・`write memory`まで実施済み |
 | 受入試験 | 完了。zone間allow/deny、DHCP、Internet、管理plane、tailnet/exit node、Guest isolationに合格 |
 | Apps VM host resolver | 完了（2026-09-13）。内部ゾーンだけAdGuard、それ以外は公開DNSへ送るsplit DNS |
 | sFlow受信 | collector（`.10.103:6343`）への着信を確認済み。**ElastiFlowのElasticsearch取り込みは2026-07-07から壊れている**既存障害（[#34](https://github.com/koji-genba/homelab/issues/34)、Phase 4とは無関係） |
 
-次にやること: Port 4でVLAN 10のDHCP取得とgateway/Internet疎通を確認し、未保存なら`write memory`する。
-既存のACLや他portは再投入しない。その後、2026-09-20の保持期間満了を待ち、Phase 5（Kubernetes廃止）の
-判断へ進む。
+次にやること: Phase 4とPort 4変更に残作業はない。2026-09-20の保持期間満了を待ち、
+Phase 5（Kubernetes廃止）の判断へ進む。
 
 #### 残りの手順
 
