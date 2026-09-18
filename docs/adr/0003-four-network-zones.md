@@ -1,6 +1,6 @@
 # ADR-0003: ネットワークを4ゾーンへ整理する
 
-- 状態: 実装済み（2026-09-13）
+- 状態: 実装済み（2026-09-13）。Port 4変更は決定済み・適用確認待ち（2026-09-18）
 - 日付: 2026-08-29
 
 ## 背景
@@ -90,3 +90,10 @@ trunk portは必要なtagged VLANだけを収容し、trunkのuntagged traffic�
   したがって同一物理port上で同じzoneをtagged/untaggedの両方へ収容しない。
 - PVE hostの`vmbr0.10`とTerraform管理VMの現用NICはいずれも物理uplink上でtagged VLAN 10を使用するため、
   port 1のuntagged廃止による影響はない。旧Kubernetes VMに残るVLAN 11 NICは廃止済みnetworkの履歴である。
+
+## 2026-09-18の有線Server port追加
+
+- GE2 port 4をGuest用VLAN groupからServer用VLAN groupへ移し、port 3と同じServer VLAN 10のaccess
+  portとする。これにより、Server accessはport 3/4、空きGuest accessはport 5～7となる。
+- access portでtagged frameを転送しない方針と、port 1/8をタグ専用trunkとする方針は変更しない。
+- Git管理構成への反映後、実機でPort 4のVLAN 10 DHCP/疎通を確認してから`write memory`する。

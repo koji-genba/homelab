@@ -116,7 +116,7 @@ application cutoverの安定後、別のメンテナンス時間帯に実施す�
 9. SSIDをVLAN 20/30/40へ割り当て、AP管理をVLAN 10へ移し、Guest SSIDのclient isolationを有効にする。
 10. IPv6 forwarding、RA、DHCPv6が稼働していないことを確認する。
 11. access portを1つのuntagged VLAN、PVE/APのtrunkを必要なtagged VLANだけに分け、VLAN 63と
-    `default-dhcp`を削除する。空きport 4～7はGuest VLAN 40のaccess portとする。
+    `default-dhcp`を削除する。port 3/4はServer VLAN 10、空きport 5～7はGuest VLAN 40のaccess portとする。
 12. VLAN 11、旧DHCP、旧ACLを削除する。実施時はユーザー判断により14日保持期間の満了を待たず、
     Kubernetes rollbackにはVLAN 11の先行復元が必要になることを記録したうえで2026-09-13に完了した。
 13. Apps VM自身のhost resolverをAnsibleで明示管理し、内部FQDNの解決を確認する。

@@ -6,9 +6,11 @@
 - ホスト名: `IX2215-HOME`
 - ソフトウェア: 10.11.6
 - 実機保存確認: 2026-09-13 15:57 JST
+- 管理構成更新: 2026-09-18（Port 4をVLAN 10 accessへ変更）
 - 構成ファイル: [config.txt](config.txt)
 
 `config.txt`は、実機の保存済み`startup-config`を基準にコメントを加えた管理用コピーである。
+2026-09-18のPort 4変更は期待状態として反映しており、実機への適用・保存確認は別途記録する。
 認証情報の行は既存値を保持しているため、公開場所へ転載しないこと。
 
 ## WAN
@@ -35,10 +37,11 @@ DNSは全profileで`1.1.1.1`と`8.8.8.8`を配布する。
 | 1 | PVE1 | 収容しない | VLAN 10 |
 | 2 | Windows desktop | VLAN 20 | 収容しない |
 | 3 | edgeXpert | VLAN 10 | 収容しない |
-| 4-7 | 空き / default Guest access | VLAN 40 | 収容しない |
+| 4 | Server access | VLAN 10 | 収容しない |
+| 5-7 | 空き / default Guest access | VLAN 40 | 収容しない |
 | 8 | ECW5211 AP trunk | 収容しない | VLAN 10, 20, 30, 40 |
 
-実装上、Port 2/3/4-7はそれぞれ`vlan-group 2/1/4`のbase interfaceをBVIへbridgeするaccess
+実装上、Port 2/3-4/5-7はそれぞれ`vlan-group 2/1/4`のbase interfaceをBVIへbridgeするaccess
 portである。Port 1は`vlan-group 6`のtagged VLAN 10だけを`GigaEthernet2:6.1`へ収容する。
 Port 8はbase側`GigaEthernet2.0`をどのbridgeにも入れず、`GigaEthernet2.1/.3/.4/.5`で4 VLANを
 収容する。
