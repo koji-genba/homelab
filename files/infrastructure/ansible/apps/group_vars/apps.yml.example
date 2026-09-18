@@ -67,6 +67,13 @@ nfs_mounts:
     marker: .homelab-export
     marker_value: archive
     options: hard,_netdev,nfsvers=4.1,noatime,rsize=1048576,wsize=1048576,timeo=600,retrans=2,nconnect=8
+  - name: ai
+    local_path: /srv/homelab/nfs/ai
+    server: 192.168.10.11
+    export: /mnt/tank-gen2/data/ai
+    marker: .homelab-export
+    marker_value: ai
+    options: hard,_netdev,nfsvers=4.1,noatime,rsize=1048576,wsize=1048576,timeo=600,retrans=2,nconnect=8
   - name: stashpad-media
     local_path: /srv/homelab/nfs/stashpad-media
     server: 192.168.10.11
@@ -105,6 +112,7 @@ apps_vm_dirty_background_bytes: 67108864
 shared_mount_path: /srv/homelab/nfs/shared
 shared_hdd_mount_path: /srv/homelab/nfs/shared-hdd
 archive_mount_path: /srv/homelab/nfs/archive
+ai_mount_path: /srv/homelab/nfs/ai
 stashpad_media_mount_path: /srv/homelab/nfs/stashpad-media
 
 # Existing PVC directory names are intentionally required inputs. Do not

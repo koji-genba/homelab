@@ -24,6 +24,7 @@ SMB_BIND_IP=0.0.0.0
 SHARED_MOUNT_PATH=$tmp_dir/data
 SHARED_HDD_MOUNT_PATH=$tmp_dir/data
 ARCHIVE_MOUNT_PATH=$tmp_dir/data
+AI_MOUNT_PATH=$tmp_dir/data
 STASHPAD_MEDIA_MOUNT_PATH=$tmp_dir/data
 STASHPAD_DATA_PATH=$tmp_dir/data
 STASHPAD_STAGING_DATA_PATH=$tmp_dir/data

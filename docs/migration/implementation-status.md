@@ -577,6 +577,29 @@ Phase 3合格から14日経過し、rollbackが発生していないことを条
 orphan directory 7件（openldap 3世代、旧blocklist 2世代、旧stashpad prod/staging各1世代）の
 削除判断もここで行う。
 
+## DGX Spark用ストレージ（ADR-0006、2026-09-19）
+
+DGX Spark 2台（4TB機`192.168.10.51`、1TB機`192.168.10.52`、GE2 port 3/4）が使うモデルと
+学習データの置き場を、`tank-gen2/data/ai`の**単一NFS export**として設計した。read-only exportも
+clientごとの分割も行わず、Apps VMとDGX 2台が同条件でmountする。
+
+**Gitに実装済み・実機未反映である。** この移行フェーズとは独立した追加であり、Phase 5の
+ゲートには影響しない。
+
+| 変更 | 内容 |
+| --- | --- |
+| [ADR-0006](../adr/0006-ai-dataset-single-export.md) | 単一export、`/mnt/shared`配下に置かない判断とその理由 |
+| [DGX Sparkストレージ運用](../operations/dgx-storage.md) | pve1 / Apps VM / DGX 2台の手順と検証、切り戻し |
+| [NFS export契約](../operations/nfs-export.md) | `ai` exportの契約、8つ目のmarker、client範囲の例外 |
+| `group_vars/apps.yml` | `nfs_mounts`に`ai`（`/srv/homelab/nfs/ai`、marker内容`ai`） |
+| `compose.env.j2` / `.env.example` / `compose-config.sh` | `AI_MOUNT_PATH` |
+| Samba `compose.yaml` / `smb.conf` | `[ai]` share（この1つだけ`0666/0777`） |
+| IX2215 | **変更なし。** port 3/4はすでにVLAN 10 accessで、`config.txt`は触っていない |
+
+実機反映は3段階である。**pve1（`zfs create`・marker作成・`/etc/exports`追記）は2026-09-19に
+完了し、export稼働・dataset property・markerを確認した。** Apps VMへの`make ansible-apply`と
+DGX 2台の`/etc/fstab`追記は未実施である。
+
 ## 後続のゲート
 
 Phase 3の再構築性試験（Apps VMをTerraform/Ansible/Gitから実際に削除・再構築する試験）に
