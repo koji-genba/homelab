@@ -1,24 +1,40 @@
 # KubernetesからComposeへの移行手順書
 
-- 状態: 実装用ドラフト手順書
+- 状態: **フェーズ0〜4は完了。残るのはフェーズ5（廃止）だけである。**
+- 更新日: 2026-09-19
 - 目標設計: [目標アーキテクチャ](../architecture/target-state.md)
+- 実施記録: [archive/実装状況](archive/implementation-status.md)
+- 現在の作業指示: [次セッションへの作業指示](next-session.md)
 
 この手順書は停止時間を許容する。一度にapplication runtimeとVLAN設計を変更せず、rollbackの
 境界を単純にする。各check欄には実施日時、操作者、結果、関連commitを記録する。
 
+| フェーズ | 状態 |
+| --- | --- |
+| 0 インベントリと安全確認 | 完了（2026-09-05） |
+| 1 サービス所有権を持たないApps VMの構築 | 完了（2026-09-05） |
+| 2 現在のVLANでのアプリケーション切替 | 完了（2026-09-05） |
+| 3 再構築性の証明 | 完了（2026-09-06、合格） |
+| 4 ネットワーク移行 | 完了（2026-09-13。Port 4のVLAN 10 access化は2026-09-19） |
+| **5 廃止** | **未着手。ゲートは2026-09-20の保持期間満了** |
+
 ## フェーズ 0: インベントリと安全確認
 
-- [ ] Proxmox VM/LXC、IP、MAC、bridge、VLAN tagを実機から取得し、Git inventoryと照合する。
-- [ ] IX2215のrunning/startup configとDHCP leaseを取得する。
-- [ ] `.10.42`、`.11.100`、`.11.101`、`.11.103`についてARP/ping/DHCP/Proxmoxの重複を確認する。
-- [ ] ECW5211のSSID/VLAN/management IPと接続portを記録する。
-- [ ] 現在のcontainer image digest、UID/GID、data容量、file count、ACL/xattrを記録する。
-- [ ] 現行FQDN、certificate、Tailscale DNS/route/grantをexportする。
-- [ ] 現行secretとcredentialのinventoryを作り、移行後にrotateする対象を記録する。
-- [ ] NFS/ZFSが別手順で復旧可能であることを確認する。本runbookではその復旧を実施しない。
-- [ ] PVE local consoleまたは確実なout-of-band accessを確保する。
+- [x] Proxmox VM/LXC、IP、MAC、bridge、VLAN tagを実機から取得し、Git inventoryと照合する。
+- [x] IX2215のrunning/startup configとDHCP leaseを取得する。
+- [x] `.10.42`、`.11.100`、`.11.101`、`.11.103`についてARP/ping/DHCP/Proxmoxの重複を確認する。
+- [x] ECW5211のSSID/VLAN/management IPと接続portを記録する。
+- [x] 現在のcontainer image digest、UID/GID、data容量、file count、ACL/xattrを記録する。
+- [x] 現行FQDN、certificate、Tailscale DNS/route/grantをexportする。
+- [x] 現行secretとcredentialのinventoryを作り、移行後にrotateする対象を記録する。
+- [x] NFS/ZFSが別手順で復旧可能であることを確認する。本runbookではその復旧を実施しない。
+- [x] PVE local consoleまたは確実なout-of-band accessを確保する。
 
 ゲート: inventoryに不明なwriter、IP競合、未記録の必須機能がある場合はフェーズ1へ進まない。
+
+**完了（2026-09-05）。** 調査結果は[archive/Phase 2A事前調査結果](archive/phase2a-inventory.md)にある。
+移行文書が管理する7 pathの外に、NFS上へPVデータを持つ未記録のworkloadが2系統
+（`openldap`、`external-dns-blocklist`）あることがここで判明した。
 
 ## フェーズ 1: サービス所有権を持たないApps VMの構築
 
@@ -37,14 +53,16 @@
 ゲート: VM reboot後もmount guardが機能し、全設定のoffline検証が通ること。stateful serviceの
 実probeはwriter fencing後のフェーズ2で行う。
 
+**完了（2026-09-05）。**
+
 ## フェーズ 2: 現在のVLANでのアプリケーション切替
 
 ### 準備
 
-- [ ] Git mainのcutover commitと全image digestを記録する。
-- [ ] 対象datasetのZFS snapshotを取得する。
-- [ ] IX2215のVLAN 11 DHCPを停止するか、`.100/.101/.103`を確実に除外する。
-- [ ] Flux reconciliationをsuspendする。
+- [x] Git mainのcutover commitと全image digestを記録する。
+- [x] 対象datasetのZFS snapshotを取得する。
+- [x] IX2215のVLAN 11 DHCPを停止するか、`.100/.101/.103`を確実に除外する。
+- [x] Flux reconciliationをsuspendする。
 
 ### writerの隔離
 
@@ -79,6 +97,13 @@
 
 ゲート: 全受入項目合格後もKubernetes VMは14日間保持する。
 
+**完了（2026-09-05）。** Apps VMが唯一のwriterとなり、7 Compose projectが稼働を開始した。
+同日Kubernetes VM 101/102/103を`qm shutdown`で停止した（削除はしていない）。
+実機適用で初めて顕在化した実装バグ4件（AdGuardHome.yaml.j2のYAML生成不正、systemd unit templateの
+改行消失、Samba HEALTHCHECKの誤検知、Gatus Caddy probeのredirect誤検知）と、bind-mounted fileだけの
+変更をcontainerへ反映できないreconcileの不具合はPR #19〜#21で修正済みである。
+詳細は[archive/実装状況](archive/implementation-status.md)にある。
+
 ## フェーズ 3: 再構築性の証明
 
 Kubernetes VMの14日保持期間を開始する前に、Apps VMの再構築試験を行う。
@@ -94,13 +119,21 @@ snapshot restoreで代替してはならない。この試験はGitとIaCから�
 
 ゲート: 合格日をKubernetes VM 14日保持期間の開始日とする。
 
+**完了（2026-09-06、受入試験12項目すべて合格）。保持期間は2026-09-20に満了する。**
+この試験は、Proxmoxのuser・role・API token・ACLがGitにもTerraformにも宣言されていない
+手動作成の資産であり、しかも`/vms/<vmid>`のACLがVMのdestroyで道連れに消えることを明らかにした。
+**「GitとIaCだけから復旧できる」という前提は現状では成立していない。**
+前提条件と403の診断手順は[Apps VM復旧手順](../operations/apps-vm-recovery.md)にある。
+恒久対策は未実施で、残作業として[次セッションへの作業指示](next-session.md)が追跡する。
+
 <a id="phase-4-network-migration"></a>
 
 ## フェーズ 4: ネットワーク移行
 
 application cutoverの安定後、別のメンテナンス時間帯に実施する。
-一括の事前確認は作らず、各対象を変更する直前に必要な値だけを確認する。進捗と実施手順の詳細は
-[次セッションへの作業指示のPhase 4](next-session.md)にある。
+一括の事前確認は作らず、各対象を変更する直前に必要な値だけを確認する。実施手順と実測値は
+[archive/実装状況](archive/implementation-status.md)、ACLの設計と投入手順は
+[IX2215 ACL stateful化 実施手順書](../network/ix-acl-stateful-runbook.md)にある。
 
 1. IX2215のstartup/running config、DHCP/ARP、IPv6、port inventoryを確認する。
 2. ECW5211のbackupはECW変更直前、Tailscale live exportはTerraform import直前に取得する。
@@ -130,7 +163,10 @@ IX/VLAN/ECW部分とApps VM host resolverは2026-09-13に完了した。ElastiFl
 
 ## フェーズ 5: 廃止
 
+**未着手。これが残っている唯一のフェーズである。**
 再構築試験から14日経過し、rollbackが発生していないことを条件とする。
+合格日は2026-09-06、**保持期間の満了は2026-09-20**である。それ以前に着手しない。
+判断が要る点は[次セッションへの作業指示](next-session.md)にまとめてある。
 
 - [ ] Kubernetes VMを削除する。
 - [ ] k8s Terraform、Kubespray、Flux、manifestをactive treeから削除する。
@@ -145,15 +181,18 @@ IX/VLAN/ECW部分とApps VM host resolverは2026-09-13に完了した。ElastiFl
 
 ## 受入試験
 
-- [ ] stashPad prod/stagingで閲覧、更新、upload、共有mediaを確認する。
-- [ ] stashPad prod/stagingのmetadataが分離されている。
-- [ ] SillyTavernでlogin、会話、設定保存を確認する。
-- [ ] Samba 3 shareを既存userでread/writeできる。
-- [ ] Trusted LANとTailscaleから既存FQDN/TLSへ接続できる。
-- [ ] 通常DNS、内部record、block、allowlistが期待どおり応答する。
-- [ ] IoT/Guest/Internetから管理UI、SSH、SMBへ到達できない。
-- [ ] Apps VM reboot後にmountと全serviceが自動復旧する。
-- [ ] NFS未mountまたはmarker不一致ならapplicationが起動しない。
-- [ ] Gatusが障害と復旧をDiscordへ通知する。
-- [ ] Healthchecks.ioがdead-man停止を通知する。
-- [ ] running commit/image digestがGit宣言と一致する。
+**Phase 2B（2026-09-05）とPhase 3（2026-09-06）で、12項目すべて合格した。**
+Phase 5の完了確認でも同じ行列を使う。
+
+- [x] stashPad prod/stagingで閲覧、更新、upload、共有mediaを確認する。
+- [x] stashPad prod/stagingのmetadataが分離されている。
+- [x] SillyTavernでlogin、会話、設定保存を確認する。
+- [x] Samba 3 shareを既存userでread/writeできる。
+- [x] Trusted LANとTailscaleから既存FQDN/TLSへ接続できる。
+- [x] 通常DNS、内部record、block、allowlistが期待どおり応答する。
+- [x] IoT/Guest/Internetから管理UI、SSH、SMBへ到達できない。
+- [x] Apps VM reboot後にmountと全serviceが自動復旧する。
+- [x] NFS未mountまたはmarker不一致ならapplicationが起動しない。
+- [x] Gatusが障害と復旧をDiscordへ通知する。
+- [x] Healthchecks.ioがdead-man停止を通知する。
+- [x] running commit/image digestがGit宣言と一致する。

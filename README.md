@@ -35,8 +35,8 @@ Proxmox VE 192.168.10.11
 - [設計判断（ADR）](docs/adr/README.md)
 - [ネットワークゾーン仕様](docs/network/target-zones.md)
 - [KubernetesからComposeへの移行手順](docs/migration/k8s-to-compose.md)
-- [実装・適用状況](docs/migration/implementation-status.md)
 - [次セッションへの作業指示](docs/migration/next-session.md)
+- [移行記録アーカイブ（Phase 0〜4の完了記録）](docs/migration/archive/README.md)
 - [Apps VM復旧手順](docs/operations/apps-vm-recovery.md)
 - [アプリ更新・promotion・rollback](docs/operations/application-lifecycle.md)
 - [NFS export契約と手動反映メモ](docs/operations/nfs-export.md)
@@ -50,7 +50,7 @@ Proxmox VE 192.168.10.11
 docs/
 ├── adr/                         # 採用理由とトレードオフ
 ├── architecture/                # 現状監査と目標構成
-├── migration/                   # 段階移行、切戻し、廃止条件
+├── migration/                   # 段階移行、切戻し、廃止条件（archive/は完了記録）
 ├── network/                     # VLANゾーンと手動反映の期待状態
 └── operations/                  # 復旧手順
 files/

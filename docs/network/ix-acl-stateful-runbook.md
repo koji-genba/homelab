@@ -4,7 +4,7 @@
 - 日付: 2026-09-13
 - 対象: IX2215-HOME（IX Series IX2215 magellan-sec, Version 10.11.6）
 - 目標ポリシー: [目標ネットワークゾーン](target-zones.md)
-- 進捗: [次セッションへの作業指示のPhase 4](../migration/next-session.md)
+- 実施記録: [archive/実装状況](../migration/archive/implementation-status.md)
 
 **この文書はInternetが切れても参照できるようローカルで完結させる。** IX2215の変更中は管理端末の
 Internet接続とAIセッションの双方を失う可能性を前提とし、console接続した操作者がこの文書だけで
@@ -98,6 +98,37 @@ Trusted端末からIXの`192.168.10.1`へSSHすると、応答の送信元は`19
 コマンドリファレンス 13-3のノート: 「同一名称のアクセスリストとダイナミックアクセスリストが
 存在した場合、ダイナミックアクセスリストが評価されます。」既存static名で動的リストを作ると、
 インタフェース設定を触らずに挙動が黙って変わる。この手順では別名を使う。名前は15文字以内。
+
+### 1.7.1 既存ACLエントリを書き換える手順（この手順書以外でも必ず守る）
+
+IX2215のACLは**投入順に末尾追加され、エントリ単位のシーケンス番号も途中挿入の構文もない。**
+そのため個別エントリを`no`で消して再投入すると、末尾の`permit ip src any dest any`の**後ろ**へ
+回り、永久に評価されなくなる。
+
+2026-09-05のドリフト解消作業で実際にこれが起き、`default-out`と`guest-out`で
+VLAN 63 → VLAN 11とGuest VLAN 40 → VLAN 11のdenyが一時的に無効化された。変更前は`permit any`より
+前にdenyがあって有効だったため、**一時的に変更前より弱い状態を作ってしまった。**
+ACLエントリを書き換えるときは必ず次の順序で行う。
+
+1. 対象インターフェースから`ip filter`のバインドを外す。
+2. `no ip access-list <名前>`でリストごと削除する。
+3. `option optimize`を先頭に、正しい順序で全エントリを再投入する。
+4. `ip filter`を再バインドする。
+
+フィルタを先に外すのは、空または未定義のACLを`ip filter`が参照した場合の挙動をNEC公式資料で
+確認できなかったためである。無フィルタ＝素通りという既知の状態に倒して通信断を避ける意図であり、
+遮断側へ倒す判断ではない。
+
+### 1.7.2 `config.txt`を実機と照合するときの注意
+
+`files/infrastructure/network/config.txt`は日本語の注釈が付いた記録であり、
+`show running-config`の逐語dumpではない。内容は実機と一致するが、blockの並び順が3箇所で異なる
+（`device GigaEthernet2`内のsflowとvlan-groupの順、`interface GigaEthernet2.0`の位置、
+`interface GigaEthernet2:1.0`から`2:6.0`までの位置）。
+
+**行の並びではなく行の集合として比較すること。** 並び順の差分を「ドリフト」と誤認して
+`config.txt`を書き換えない。逆に、実機を変えたら必ず`write memory`まで済ませてから
+`config.txt`と同ディレクトリの`README.md`へ反映する。実機を変えずに記録だけ書き換えない。
 
 ### 1.8 動的キャッシュのタイムアウト
 
@@ -529,7 +560,7 @@ denyのヒットカウント増加まで確認する。**
 ## 7. 対象外
 
 - **IPv6。** 2026-09-06の採取でIPv6 routeもneighborも0件、BVI/WANにIPv6アドレス無しを確認済み
-  （[Phase 4の現在地](../migration/next-session.md)）。したがってIPv4 ACLを迂回する経路は現時点で無い。
+  （[archive/実装状況](../migration/archive/implementation-status.md)）。したがってIPv4 ACLを迂回する経路は現時点で無い。
   ただし[目標ゾーン設計](target-zones.md)が求めるRA・DHCPv6・forwardingの**明示的な無効化は未実施**で
   あり、この手順書の範囲外とする。別issueで追跡する。
 - **`ip dynamic-filter group`によるキャッシュ共有。** NECが「主にSIPダイナミックフィルタを使用する
