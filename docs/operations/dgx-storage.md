@@ -1,6 +1,6 @@
 # DGX Sparkストレージ運用
 
-- 状態: 手順A（pve1）は2026-09-19に反映・確認済み。手順B（Apps VM）と手順C（DGX 2台）は未実施
+- 状態: 手順A（pve1）と手順B（Apps VM）は2026-09-19に反映・確認済み。手順C（DGX 2台）は未実施
 - 設計判断: [ADR-0006](../adr/0006-ai-dataset-single-export.md)
 - export契約: [NFS export契約](nfs-export.md#ai-dataset-exportadr-0006)
 - 対象: DGX Spark 2台（4TB機 `192.168.10.51`、GE2 port 3 / 1TB機 `192.168.10.52`、GE2 port 4）
@@ -156,11 +156,12 @@ dd if=/mnt/ai/models/<任意のファイル> of=/dev/null bs=1M status=progress 
 | dataset property | `recordsize=1M` / `atime=off` / `compression=lz4` を確認 |
 | owner / mode / marker | `root:root`、`0777`、`models`と`datasets`を作成。marker内容`ai`を確認 |
 | Apps VM mount / marker確認 | 2026-09-19に`/srv/homelab/nfs/ai`が`nfs4,rw,nconnect=8`でmountされ、marker内容`ai`、`homelab-mount-guard.service`が`active`であることを確認 |
-| Apps VM Compose反映 | 未実施。`secrets`ロールが`AGE_IDENTITY_FILE`未設定で失敗し、後続の`compose`ロールが走っていない。Sambaは旧設定のまま稼働中で`[ai]` shareは未提供 |
-| DGX 4TB機 mount確認 | 未実施 |
-| DGX 1TB機 mount確認 | 未実施 |
+| Apps VM Compose反映 | 2026-09-19に完了。PR [#43](https://github.com/koji-genba/homelab/pull/43)（merge commit `a5c2e3e`）のmerge後、`homelab-app-reconcile.service`でVM側cloneを`a5c2e3e`へ更新。Sambaが再作成され`healthy`、bind `/srv/homelab/nfs/ai -> /mnt/ai`、`smbclient -L`に`ai`が出ることを確認 |
+| SMB書き込み確認 | 2026-09-19。container内でsamba uid（`10002:10004`）として`/mnt/ai/models`へ作成・削除が通り、所有者が`koji-genba:samba-users`になることを確認 |
+| DGX 4TB機 mount確認 | 未実施（ユーザーが実施予定） |
+| DGX 1TB機 mount確認 | 未実施（ユーザーが実施予定） |
 | 実測read速度 | 未測定 |
-| 対応commit | 未記録 |
+| 対応commit | `a5c2e3e`（PR #43）。手順Cの結果はこの表へ追記する |
 
 ## 切り戻し
 
