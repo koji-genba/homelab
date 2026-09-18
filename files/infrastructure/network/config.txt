@@ -142,9 +142,9 @@ device GigaEthernet2
   sflow sampling-rate 512 in
   sflow sampling-rate 512 out
   sflow polling-interval 30
-  vlan-group 1 port 3
+  vlan-group 1 port 3 4
   vlan-group 2 port 2
-  vlan-group 4 port 4 5 6 7
+  vlan-group 4 port 5 6 7
   vlan-group 6 port 1
 !
 device BRI0
@@ -231,7 +231,7 @@ interface GigaEthernet2:6.1
   bridge-group 10
   no shutdown
 !
-! vlan-group1 と bridge-group10 (=BVI10) の関連付け
+! vlan-group1（Port 3/4）と bridge-group10 (=BVI10) の関連付け
 interface GigaEthernet2:1.0
   no ip address
   bridge-group 10
@@ -249,7 +249,7 @@ interface GigaEthernet2:3.0
   bridge-group 30
   no shutdown
 !
-! vlan-group4 と bridge-group40 (=BVI40) の関連付け
+! vlan-group4（Port 5-7）と bridge-group40 (=BVI40) の関連付け
 interface GigaEthernet2:4.0
   no ip address
   bridge-group 40

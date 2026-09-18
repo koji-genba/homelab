@@ -8,7 +8,8 @@
   **受入試験は12項目すべて合格した**（自動確認5項目に加え、2026-09-06にユーザーが残り7項目を確認）。
   **Kubernetes VM 14日保持期間は2026-09-06に開始し、2026-09-20に満了する。**
   **Phase 4のIX/VLAN/ECW移行は2026-09-13に実機反映・受入・保存まで完了した。**
-- 更新日: 2026-09-13
+  **2026-09-18にPort 4をVLAN 10 accessとする管理構成を追加した。実機反映は未確認である。**
+- 更新日: 2026-09-18
 - 手順書: [KubernetesからComposeへの移行](k8s-to-compose.md)
 - 関連文書: [Phase 2A事前調査結果](phase2a-inventory.md)（実測値、cutover/rollback手順）、
   [次セッションへの作業指示](next-session.md)（最新の実機状態と残作業の一次情報）
@@ -564,6 +565,8 @@ Apps VM/PVEのLAN IP直指定で実施した。
 - Apps VMを`.10.101`、Tailscale gatewayを`.102`、ElastiFlowを`.103`へ集約した。
 - VLAN 11/63を撤去し、VLAN 10/20/30/40、ECW5211、IX2215のACLとportを最終設計へ移行した。
 - port 1/8はタグ専用trunk、port 2/3はそれぞれVLAN 20/10 access、空きport 4～7はVLAN 40 accessとした。
+- その後、2026-09-18にGit管理の期待構成を更新し、port 4もport 3と同じVLAN 10 access、VLAN 40
+  accessはport 5～7とした。この追加変更の実機反映は未確認である。
 - sFlowはcollector（`.10.103:6343`）への着信をtcpdumpで確認。ElastiFlowのElasticsearch取り込みは2026-07-07から
   index/alias名の衝突で失敗し続けている既存障害（[#34](https://github.com/koji-genba/homelab/issues/34)）。
 - Apps VM自身のhost resolverをAnsibleで明示管理した（内部ゾーンだけAdGuard、それ以外は`1.1.1.1`/`8.8.8.8`）。

@@ -1,6 +1,6 @@
 # 次セッションへの作業指示
 
-- 更新日: 2026-09-13
+- 更新日: 2026-09-18
 - 対象リポジトリ: `/home/s-sato/homelab`
 - 作業ブランチ: **`main`**。Phase 4の作業ブランチ`docs-phase4-prep`はPR #26として2026-09-13にmergeし、
   削除済みである。新しい作業は`origin/main`からbranchを切って行う。
@@ -23,6 +23,8 @@
   壊れている件は、Phase 4とは無関係の既存障害として[#34](https://github.com/koji-genba/homelab/issues/34)で追跡する。
   詳細は「Phase 4: ネットワーク移行」の「現在地」にある。
   満了日までにrollbackが発生しなければ、その後にPhase 5の廃止へ進む。
+- **2026-09-18にPort 4をPort 3と同じVLAN 10 accessへ移す管理構成を追加した。** `config.txt`と
+  設計文書は更新済みだが、実機への適用、保存、疎通確認は未記録である。
 - **Phase 3は、Proxmoxのuser・role・API token・ACLがGitにもTerraformにも宣言されておらず、
   しかも`/vms/<vmid>`のACLはVMのdestroyで道連れに消えることを明らかにした。
   「GitとIaCだけから復旧できる」という前提は現状では成立していない。** 詳細は
@@ -422,7 +424,7 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
 影響を受けるのは宅内のユーザー1人だけである。短時間の停止は許容し、各段階の後に実際の疎通で
 確かめて進める。全段階を1つの窓でやろうとしない。
 
-#### 現在地（2026-09-13）
+#### 現在地（2026-09-18）
 
 | 対象 | 状態 |
 | --- | --- |
@@ -433,12 +435,14 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
 | `.11.0/24`広告の撤去 | 完了（2026-09-12） |
 | VLAN 11/63の撤去 | 完了（2026-09-13）。`write memory`と再起動まで実施済み。untaggedの扱いは下のport再編で確定 |
 | IX2215のACL・port再編 | 完了（2026-09-13）。stateful ACL、管理plane制限、PVE/APのタグ専用trunk、access port分離を反映して`write memory`済み |
+| Port 4のVLAN 10 access化 | `config.txt`と関連文書を更新済み（2026-09-18）。実機反映、`write memory`、疎通確認は未記録 |
 | 受入試験 | 完了。zone間allow/deny、DHCP、Internet、管理plane、tailnet/exit node、Guest isolationに合格 |
 | Apps VM host resolver | 完了（2026-09-13）。内部ゾーンだけAdGuard、それ以外は公開DNSへ送るsplit DNS |
 | sFlow受信 | collector（`.10.103:6343`）への着信を確認済み。**ElastiFlowのElasticsearch取り込みは2026-07-07から壊れている**既存障害（[#34](https://github.com/koji-genba/homelab/issues/34)、Phase 4とは無関係） |
 
-次にやること: Phase 4は完了した。2026-09-20の保持期間満了を待ち、Phase 5（Kubernetes廃止）の判断へ進む。
-IX2215のrunning/startup configは一致しているので再投入しない。
+次にやること: Port 4だけをVLAN 10 accessへ変更し、VLAN 10のDHCP取得とgateway/Internet疎通を確認して
+`write memory`する。既存のACLや他portは再投入しない。その後、2026-09-20の保持期間満了を待ち、
+Phase 5（Kubernetes廃止）の判断へ進む。
 
 #### 残りの手順
 
@@ -497,7 +501,8 @@ IX2215のrunning/startup configは一致しているので再投入しない。
    動的フィルタのキャッシュはインタフェース単位でしか効かないので、遮断は宛先BVIの`out`に置く。
    **`out`方向にフィルタを入れると暗黙denyが発生する**ため、末尾の`permit any any`を維持した。
 9. **untaggedのGuest化とVLAN 63の撤去。** 完了（2026-09-13）。`BVI63`、`default-dhcp`、`default-out`を
-   削除した。最終port設計ではport 4～7の`GigaEthernet2:4.0`だけをuntagged Guestとする。
+   削除した。当時はport 4～7の`GigaEthernet2:4.0`をuntagged Guestとした。2026-09-18の構成更新で
+   port 4をServer用`GigaEthernet2:1.0`へ移し、Guest accessはport 5～7とした。
    PVE用port 1の`GigaEthernet2:6.0`とECW用port 8の`GigaEthernet2.0`はbridge-groupへ入れず、
    タグ専用trunkとした。
 10. **VLAN 11の撤去。** 完了（2026-09-13）。14日保持期間の満了を待たず、ユーザー判断で前倒しした。
@@ -542,14 +547,15 @@ IX2215（採取物は2026-09-06の`tmp/ix/`、実機状態は2026-09-13更新）
 - `tmp/ix/startup-config.txt`は認証hashを含むsession logで、復元元として使えるがそのままupload
   できるfileではない。Gitへは追加しない。
 
-GE2の物理port:
+GE2の物理port期待状態（Port 4は実機反映未確認）:
 
 | port | 接続先 | untagged | tagged |
 | ---: | --- | --- | --- |
 | 1 | pve1 | 破棄 | VLAN 10（group 6） |
 | 2 | 管理端末 | VLAN 20（access） | 破棄 |
 | 3 | edgeXpert `.10.51` | VLAN 10（access） | 破棄 |
-| 4-7 | 未使用 | VLAN 40（access、group 4） | 破棄 |
+| 4 | Server access | VLAN 10（access、group 1） | 破棄 |
+| 5-7 | 未使用 | VLAN 40（access、group 4） | 破棄 |
 | 8 | ECW5211-L `.10.2` | 破棄 | VLAN 10/20/30/40 |
 
 port 1と8はタグ専用trunk、port 2～7は1 VLANだけのaccess portである。PVE host（`vmbr0.10`）と

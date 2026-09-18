@@ -1,13 +1,13 @@
 # 目標ネットワークゾーン
 
-- 状態: IX/ECW/ACL/portは実機適用・受入確認済み（2026-09-13）
+- 状態: 2026-09-13構成は実機適用・受入確認済み。Port 4のVLAN 10変更は適用確認待ち
 - 初版: 2026-08-29
-- 最終更新: 2026-09-13
+- 最終更新: 2026-09-18
 - 設計判断: [ADR-0003](../adr/0003-four-network-zones.md)
 - 移行: [KubernetesからComposeへの移行、フェーズ4](../migration/k8s-to-compose.md#phase-4-network-migration)
 
-この文書はIX2215、switch、ECW5211へ手動反映した期待状態を定義する。credentialや機器MACは
-記録せず、port/VLAN対応と受入結果を管理する。
+この文書はIX2215、switch、ECW5211の期待状態を定義する。credentialや機器MACは記録せず、
+port/VLAN対応と受入結果を管理する。
 
 ## ゾーンとアドレス計画
 
@@ -72,9 +72,9 @@ Apps VM自身でも多層防御（defense in depth）として、Trusted CIDRと
   taggedで収容し、untagged frameはどのbridge-groupにも入れない。
 - GE2 port 1はProxmox専用trunkとし、Server VLAN 10だけをtaggedで運ぶ。PVE hostは`vmbr0.10`、
   Terraform管理VMの現用NICはPVE側の`vlan_id = 10`であるため、物理uplinkではtagged VLAN 10となる。
-- GE2 port 2はTrusted VLAN 20、port 3はServer VLAN 10のaccess portとする。
-- 空きのGE2 port 4～7はGuest VLAN 40のaccess portとする。edgeXpertを増設するときは、使用するportを
-  Guest用VLAN groupからport 3と同じServer用VLAN groupへ移す。
+- GE2 port 2はTrusted VLAN 20、port 3と4はServer VLAN 10のaccess portとする。
+- 空きのGE2 port 5～7はGuest VLAN 40のaccess portとする。Server機器を増設するときは、使用するportを
+  Guest用VLAN groupからport 3/4と同じServer用VLAN groupへ移す。
 - ECW5211の管理interfaceはServer VLAN 10へtaggedで置く。ECW5211はuntaggedを使用せず、uplinkでは
   tagged VLAN 10/20/30/40だけを受ける。
 - Trusted、IoT、GuestのSSIDをそれぞれVLAN 20、30、40へtag付けする。
@@ -108,6 +108,7 @@ IPv4と同等のゾーンポリシーを設計した新しいADRを先に作成�
 | コンソール/OOB試験 | 2026-09-12、IX2215のconsole loginを確認 |
 | ポート/VLANインベントリのcommit | 2026-09-13、`docs-phase4-prep`へcommit・push済み |
 | 適用設定のcommit | 実機反映・startup-config保存済み。`files/infrastructure/network/config.txt`を保存構成へ同期し、2026-09-13に`docs-phase4-prep`へcommit・push済み |
+| Port 4のVLAN 10変更 | 2026-09-18、`config.txt`と設計文書を更新。実機への適用、`write memory`、疎通確認は未記録 |
 | allow/deny試験結果 | 2026-09-13、全zoneのInternet、Trusted→Server/IoT、各deny方向、管理plane、DHCP、tailnet route/exit node、Guest isolationを確認。sFlowはcollector（`.10.103:6343`）への着信をtcpdumpで確認。ElastiFlowのElasticsearch取り込みは2026-07-07から壊れている既存障害で、Phase 4とは無関係（[#34](https://github.com/koji-genba/homelab/issues/34)） |
 | ロールバック結果/判断 | 不要。受入合格後に`write memory`し、`configuration status is already saved`、再起動不要を確認 |
 
