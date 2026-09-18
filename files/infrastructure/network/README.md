@@ -6,7 +6,7 @@
 - ホスト名: `IX2215-HOME`
 - ソフトウェア: 10.11.6
 - 実機保存確認: 2026-09-19（Port 4変更後）
-- 管理構成更新: 2026-09-18（Port 4をVLAN 10 accessへ変更）
+- 管理構成更新: 2026-09-18（Port 4をVLAN 10 accessへ変更）、2026-09-19（Port 3/4の接続先をDGX Spark×2へ更新）
 - 構成ファイル: [config.txt](config.txt)
 
 `config.txt`は、実機の保存済み`startup-config`を基準にコメントを加えた管理用コピーである。
@@ -36,10 +36,15 @@ DNSは全profileで`1.1.1.1`と`8.8.8.8`を配布する。
 |---:|---|---|---|
 | 1 | PVE1 | 収容しない | VLAN 10 |
 | 2 | Windows desktop | VLAN 20 | 収容しない |
-| 3 | edgeXpert | VLAN 10 | 収容しない |
-| 4 | Server access | VLAN 10 | 収容しない |
+| 3 | DGX Spark（4TB機、`192.168.10.51`） | VLAN 10 | 収容しない |
+| 4 | DGX Spark（1TB機、`192.168.10.52`） | VLAN 10 | 収容しない |
 | 5-7 | 空き / default Guest access | VLAN 40 | 収容しない |
 | 8 | ECW5211 AP trunk | 収容しない | VLAN 10, 20, 30, 40 |
+
+Port 3/4はいずれもVLAN 10のaccess portであり、DGX Spark 2台を収容する。2026-09-18のPort 4
+変更がこの2台目の席にあたるため、**`config.txt`側の変更は不要**である。この表の更新は接続先の記録
+だけを変えている。Port 3にあったedgeXpertは現在この表の管理外であり、再接続する場合は空きGuest
+access（Port 5-7）ではなくServer VLAN 10のportへ移す判断を別途記録する。
 
 実装上、Port 2/3-4/5-7はそれぞれ`vlan-group 2/1/4`のbase interfaceをBVIへbridgeするaccess
 portである。Port 1は`vlan-group 6`のtagged VLAN 10だけを`GigaEthernet2:6.1`へ収容する。

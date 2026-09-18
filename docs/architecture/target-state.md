@@ -80,12 +80,17 @@ VLAN移行後は`.10.101`へ集約する。実値はinventory/preflight確認後
 | Samba shared | `/mnt/shared` |
 | Samba shared-hdd | `/mnt/tank-gen2/data/shared` |
 | Samba archive | `/mnt/tank-gen1/data/archive` |
+| Samba ai / DGX Spark | `/mnt/tank-gen2/data/ai` |
 
 最初のcutoverではopaque PVC pathをそのままmountする。安定後、Kubernetes停止中に
 `/mnt/tank-gen2/data/apps/{sillytavern,stashpad-prod,stashpad-staging}/`へcopy/検証してから
 宣言を切り替える。`mv`は使わず、UID/GID、ACL、xattr、hardlinkを保持する。
 
 ### NFS exportメモ
+
+`/mnt/tank-gen2/data/ai`はDGX Spark 2台とApps VMが共有する単一exportで、client範囲は
+`192.168.10.0/24`のままとする（[ADR-0006](../adr/0006-ai-dataset-single-export.md)）。以下の
+`/32`への収束計画は既存4 exportに対するものである。
 
 最終exportのclientはApps VM `192.168.10.101/32`だけとし、基本optionは
 `rw,sync,no_subtree_check,no_root_squash`とする。`no_root_squash`は初期互換性のためで、

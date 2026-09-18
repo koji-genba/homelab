@@ -27,6 +27,8 @@ Serverの確定済みaddressは次のとおり。
 | `192.168.10.101` | Apps VM | 現行。旧管理IPは`.10.42` |
 | `192.168.10.102` | Tailscale gateway | 現行。旧IPは`.10.30` |
 | `192.168.10.103` | ElastiFlow | 現行。旧IPは`.10.40` |
+| `192.168.10.51` | DGX Spark（4TB機） | GE2 port 3。NFS `ai` exportの主clientとする |
+| `192.168.10.52` | DGX Spark（1TB機） | GE2 port 4 |
 
 新規割当はIP inventory、ARP、DHCP lease、Proxmox inventoryを照合してから確定する。
 
@@ -72,7 +74,8 @@ Apps VM自身でも多層防御（defense in depth）として、Trusted CIDRと
   taggedで収容し、untagged frameはどのbridge-groupにも入れない。
 - GE2 port 1はProxmox専用trunkとし、Server VLAN 10だけをtaggedで運ぶ。PVE hostは`vmbr0.10`、
   Terraform管理VMの現用NICはPVE側の`vlan_id = 10`であるため、物理uplinkではtagged VLAN 10となる。
-- GE2 port 2はTrusted VLAN 20、port 3と4はServer VLAN 10のaccess portとする。
+- GE2 port 2はTrusted VLAN 20、port 3と4はServer VLAN 10のaccess portとする。port 3/4はDGX Spark
+  2台を収容する。
 - 空きのGE2 port 5～7はGuest VLAN 40のaccess portとする。Server機器を増設するときは、使用するportを
   Guest用VLAN groupからport 3/4と同じServer用VLAN groupへ移す。
 - ECW5211の管理interfaceはServer VLAN 10へtaggedで置く。ECW5211はuntaggedを使用せず、uplinkでは

@@ -1,6 +1,6 @@
 # NFS export契約
 
-- 状態: marker反映済み、export client範囲の変更は未適用
+- 状態: marker反映済み、export client範囲の変更は未適用。`ai` export（ADR-0006）は未反映
 - サーバー: Proxmox/NFS host `192.168.10.11`
 - データ復旧: このリポジトリの対象外
 - 関連設計: [目標ストレージ契約](../architecture/target-state.md#storage-contract)
@@ -41,6 +41,33 @@ stashPad mediaは`/mnt/shared`の子であり、同じclientに親exportのwrite
 別のread-only exportにするだけではserver側のsecurity boundaryにならない。実際の書込み防止はComposeの
 read-only bind mountで行う。
 
+## AI dataset export（ADR-0006）
+
+DGX Spark 2台とApps VMが共有する、モデルと学習データ（tar.gz）の置き場である。既存4 exportとは
+別のdatasetにして、mergerfsのSSDキャッシュ、`mover.sh`、`tank-gen2/data/shared`のsnapshotの
+いずれも働かせない。
+
+| 項目 | 値 |
+| --- | --- |
+| dataset | `tank-gen2/data/ai` |
+| 明示するproperty | `recordsize=1M`のみ（`atime=off`と`compression=lz4`はpool継承） |
+| server側path | `/mnt/tank-gen2/data/ai` |
+| client範囲 | `192.168.10.0/24` |
+| option | `rw,sync,no_subtree_check,no_root_squash`（固有optionなし。`fsid`は指定しない） |
+| owner / mode | `root:root` / `0777` |
+| marker | `/mnt/tank-gen2/data/ai/.homelab-export`、内容は`ai` |
+| snapshot | 取らない（再取得可能なデータとして扱う） |
+
+clientは次の3つで、いずれも同じ条件でmountする。read-only mountもclientごとのexport分割も行わない。
+
+| client | mount先 | 用途 |
+| --- | --- | --- |
+| Apps VM `192.168.10.101` | `/srv/homelab/nfs/ai` | Samba `[ai]` shareの再export |
+| DGX Spark 4TB機 `192.168.10.51` | `/mnt/ai` | 主client |
+| DGX Spark 1TB機 `192.168.10.52` | `/mnt/ai` | 同上 |
+
+DGX側の手順は[DGX Sparkストレージ運用](dgx-storage.md)にある。
+
 ## フェーズごとのclient範囲
 
 | フェーズ | client指定 |
@@ -48,6 +75,10 @@ read-only bind mountで行う。
 | Kubernetes稼働中 | 既存node clauseを維持し、Apps `192.168.10.42/32`を追加 |
 | Kubernetes停止後 | Apps `192.168.10.42/32`だけ |
 | VLAN移行後 | Apps `192.168.10.101/32`だけ |
+
+この収束計画の対象は既存4 exportである。`ai` exportはDGX Spark 2台もclientであるため、
+`192.168.10.0/24`のままとする。Server VLAN内を同一trust boundaryとして扱う
+[ADR-0003](../adr/0003-four-network-zones.md)の前提に従い、host単位の`/32`へは狭めない。
 
 基本optionは `rw,sync,no_subtree_check,no_root_squash` とする。client mount optionへ`sync`は付けない。
 `no_root_squash`は既存UID/GIDとの初期互換性のためで、移行後の所有者検証を終えたら
@@ -59,7 +90,7 @@ cutover確認後だけApps VM側mountを`rw`へ変更する。
 ## Apps VMの`nconnect`
 
 `nconnect`はmountごとではなく、server address、protocol、NFS versionが同じNFS client単位で共有される。
-このため、`192.168.10.11`への7つのmountは全て`nconnect=8`を指定する。
+このため、`192.168.10.11`への8つのmount（既存7つ＋ADR-0006の`ai`）は全て`nconnect=8`を指定する。DGX側はこのserverへのmountが`ai`の1つだけなので、この制約は生じない。
 
 既存mountへのremountでは接続数を変更できない。設定反映には`192.168.10.11`へのmountを全てunmount
 してからmountし直す必要があり、Apps VMではrebootで実施する。reboot後は次のcommandで確認する。
@@ -80,7 +111,7 @@ awk '/^device 192.168.10.11/{d=$2} /xprt:/{c[d]++} END{for(k in c) print c[k], k
 `tank-gen2/data/shared`を共有する。同じ`.homelab-export`へ異なる値を置けないため、この2 mountだけ
 固有のmarker名を使う。両markerはmover対象のcacheではなくsnapshot対象のHDD側へ直接作成する。
 
-必要なmarkerは次の7つである。2026-08-30の時点では全て未作成である。
+既存の必要なmarkerは次の7つである。2026-08-30の時点では全て未作成である。
 
 | server側の実体path | marker内容 |
 | --- | --- |
@@ -91,6 +122,12 @@ awk '/^device 192.168.10.11/{d=$2} /xprt:/{c[d]++} END{for(k in c) print c[k], k
 | `/mnt/tank-gen2/data/k8s-volumes/sillytavern-sillytavern-data-pvc-85f01a24-9480-4341-a6ad-f44b17cbecaa/.homelab-export` | `sillytavern-data` |
 | `/mnt/tank-gen2/data/k8s-volumes/stashpad-prod-stashpad-data-pvc-c96b1813-be70-49ca-865f-989e77359a6b/.homelab-export` | `stashpad-prod-data` |
 | `/mnt/tank-gen2/data/k8s-volumes/stashpad-staging-stashpad-data-pvc-ecc8b17c-bd0a-47db-b169-248d5d98995b/.homelab-export` | `stashpad-staging-data` |
+
+ADR-0006の`ai` exportを追加した時点で、次の1件が加わって8つになる。
+
+| server側の実体path | marker内容 |
+| --- | --- |
+| `/mnt/tank-gen2/data/ai/.homelab-export` | `ai` |
 
 markerはApps VMの未mount directoryには絶対に作らない。NFS server local consoleで対象datasetとpathを
 確認して作成し、snapshot/backup対象に含める。`archive`と`k8s-volumes`には自動snapshotがないため、

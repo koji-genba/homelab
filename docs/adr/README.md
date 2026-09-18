@@ -11,3 +11,4 @@ ADR は採用時点の判断を固定するもので、前提が変わった場�
 | [0003](0003-four-network-zones.md) | 承認済み | VLAN を Server、Trusted、IoT、Guest の4ゾーンへ整理する |
 | [0004](0004-dns-and-minimal-observability.md) | 承認済み | AdGuard Home と最小監視を採用する |
 | [0005](0005-secrets-and-terraform-state.md) | 承認済み | SOPS/age と暗号化 state recovery copy を採用する |
+| [0006](0006-ai-dataset-single-export.md) | 承認済み | DGX Spark のデータ置き場を単一 NFS export にする |

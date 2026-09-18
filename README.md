@@ -40,6 +40,7 @@ Proxmox VE 192.168.10.11
 - [Apps VM復旧手順](docs/operations/apps-vm-recovery.md)
 - [アプリ更新・promotion・rollback](docs/operations/application-lifecycle.md)
 - [NFS export契約と手動反映メモ](docs/operations/nfs-export.md)
+- [DGX Sparkストレージ運用](docs/operations/dgx-storage.md)
 
 設計を変更するときは、コードだけでなく該当ADRまたは運用手順も更新します。
 

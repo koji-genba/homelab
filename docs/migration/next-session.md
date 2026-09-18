@@ -227,6 +227,11 @@ pve1のroot crontabにある`/usr/local/bin/mover.sh`（05:00）は`tank-gen2/da
 - **4の再びApps VMをdestroyする場合の注意と、Proxmox権限がIaCの外にあること。**
   Phase 4のApps VM IP変更でTerraform applyを行うため、403の診断手順を知っておく必要がある。
 
+**移行フェーズとは独立した追加作業が1件ある。** DGX Spark 2台用のNFS export（ADR-0006）を
+Gitへ実装済みで、実機未反映である。手順は[DGX Sparkストレージ運用](../operations/dgx-storage.md)に
+まとまっている。pve1の`/etc/exports`追記とDGX側`/etc/fstab`は手動、Apps VMは
+`make ansible-apply`。IX2215の変更は不要。Phase 5のゲートには影響しない。
+
 ### 1. 受入試験の結果（合格、2026-09-05）
 
 自動確認できる範囲は合格済みである（7 FQDNのTLS、DNSの通常応答・内部record・ブロック、
