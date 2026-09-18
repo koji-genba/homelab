@@ -23,8 +23,8 @@
   壊れている件は、Phase 4とは無関係の既存障害として[#34](https://github.com/koji-genba/homelab/issues/34)で追跡する。
   詳細は「Phase 4: ネットワーク移行」の「現在地」にある。
   満了日までにrollbackが発生しなければ、その後にPhase 5の廃止へ進む。
-- **2026-09-18にPort 4をPort 3と同じVLAN 10 accessへ移す管理構成を追加した。** `config.txt`と
-  設計文書は更新済みだが、実機への適用、保存、疎通確認は未記録である。
+- **2026-09-18にPort 4をPort 3と同じVLAN 10 accessへ移す管理構成を追加し、2026-09-19に
+  ユーザーが実機反映済みと確認した。** `write memory`と疎通確認は未記録である。
 - **Phase 3は、Proxmoxのuser・role・API token・ACLがGitにもTerraformにも宣言されておらず、
   しかも`/vms/<vmid>`のACLはVMのdestroyで道連れに消えることを明らかにした。
   「GitとIaCだけから復旧できる」という前提は現状では成立していない。** 詳細は
@@ -435,14 +435,14 @@ Kubernetes VM 101/102/103を起動し、nodeがReadyになるのを待ってか�
 | `.11.0/24`広告の撤去 | 完了（2026-09-12） |
 | VLAN 11/63の撤去 | 完了（2026-09-13）。`write memory`と再起動まで実施済み。untaggedの扱いは下のport再編で確定 |
 | IX2215のACL・port再編 | 完了（2026-09-13）。stateful ACL、管理plane制限、PVE/APのタグ専用trunk、access port分離を反映して`write memory`済み |
-| Port 4のVLAN 10 access化 | `config.txt`と関連文書を更新済み（2026-09-18）。実機反映、`write memory`、疎通確認は未記録 |
+| Port 4のVLAN 10 access化 | `config.txt`と関連文書を更新済み（2026-09-18）。2026-09-19に実機反映済みと確認。`write memory`と疎通確認は未記録 |
 | 受入試験 | 完了。zone間allow/deny、DHCP、Internet、管理plane、tailnet/exit node、Guest isolationに合格 |
 | Apps VM host resolver | 完了（2026-09-13）。内部ゾーンだけAdGuard、それ以外は公開DNSへ送るsplit DNS |
 | sFlow受信 | collector（`.10.103:6343`）への着信を確認済み。**ElastiFlowのElasticsearch取り込みは2026-07-07から壊れている**既存障害（[#34](https://github.com/koji-genba/homelab/issues/34)、Phase 4とは無関係） |
 
-次にやること: Port 4だけをVLAN 10 accessへ変更し、VLAN 10のDHCP取得とgateway/Internet疎通を確認して
-`write memory`する。既存のACLや他portは再投入しない。その後、2026-09-20の保持期間満了を待ち、
-Phase 5（Kubernetes廃止）の判断へ進む。
+次にやること: Port 4でVLAN 10のDHCP取得とgateway/Internet疎通を確認し、未保存なら`write memory`する。
+既存のACLや他portは再投入しない。その後、2026-09-20の保持期間満了を待ち、Phase 5（Kubernetes廃止）の
+判断へ進む。
 
 #### 残りの手順
 
@@ -547,7 +547,7 @@ IX2215（採取物は2026-09-06の`tmp/ix/`、実機状態は2026-09-13更新）
 - `tmp/ix/startup-config.txt`は認証hashを含むsession logで、復元元として使えるがそのままupload
   できるfileではない。Gitへは追加しない。
 
-GE2の物理port期待状態（Port 4は実機反映未確認）:
+GE2の物理port期待状態（Port 4まで実機反映済み）:
 
 | port | 接続先 | untagged | tagged |
 | ---: | --- | --- | --- |
