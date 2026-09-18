@@ -596,9 +596,19 @@ clientごとの分割も行わず、Apps VMとDGX 2台が同条件でmountする
 | Samba `compose.yaml` / `smb.conf` | `[ai]` share（この1つだけ`0666/0777`） |
 | IX2215 | **変更なし。** port 3/4はすでにVLAN 10 accessで、`config.txt`は触っていない |
 
-実機反映は3段階である。**pve1（`zfs create`・marker作成・`/etc/exports`追記）は2026-09-19に
-完了し、export稼働・dataset property・markerを確認した。** Apps VMへの`make ansible-apply`と
-DGX 2台の`/etc/fstab`追記は未実施である。
+実機反映は3段階である。**pve1（`zfs create`・marker作成・`/etc/exports`追記）とApps VM
+（`make ansible-apply`、PR #43 merge後の`homelab-app-reconcile`）は2026-09-19に完了した。**
+export稼働、`/srv/homelab/nfs/ai`のmountとmarker、`homelab-mount-guard.service` active、
+Samba `[ai]` shareの公開とsamba uidでの書き込みまで確認した。DGX 2台の`/etc/fstab`追記は未実施で、
+ユーザーが実施する。
+
+**Gitに実装済み**を再掲すると、この節の変更はPR #43（merge commit `a5c2e3e`）で`main`へ入っている。
+
+適用時に2度つまずいた点を手順書へ残した。toolboxはSSH private keyもage鍵もimageに持たず、
+`SSH_AUTH_SOCK`と`AGE_IDENTITY_FILE`があるときだけmountする。前者が無いと`Gathering Facts`で
+`UNREACHABLE`、後者が無いと`secrets`ロールが`no_log: true`のまま原因不明の`non-zero return code`で
+落ちる。また、Apps VMのComposeはGitHubの`main`から引くため、ローカル未コミットの変更は
+`make ansible-apply`だけでは反映されない。
 
 ## 後続のゲート
 
