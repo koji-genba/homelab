@@ -112,4 +112,5 @@ QoSでは対象UDP trafficをDSCP 48へ設定する`output-policy`をBVI10/20/40
 - [最終ゾーン設計](../../../docs/network/target-zones.md)
 - [IX ACL stateful化runbook](../../../docs/network/ix-acl-stateful-runbook.md)
 - [4ゾーン化ADR](../../../docs/adr/0003-four-network-zones.md)
-- [移行状況](../../../docs/migration/implementation-status.md)
+- [次セッションへの作業指示](../../../docs/migration/next-session.md)
+- [移行記録アーカイブ](../../../docs/migration/archive/README.md)

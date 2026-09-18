@@ -1,5 +1,9 @@
 # Phase 2A 事前調査結果
 
+> **この文書はアーカイブである。** 2026-09-05のapplication cutover前に実施した読み取り専用調査の
+> 記録であり、更新しない。cutoverもrollback判断も完了している。
+> 現在の作業指示は[次セッションへの作業指示](../next-session.md)にある。
+
 - 調査日: 2026-09-05
 - 対象: `origin/main` `371fc31`、Kubernetes cluster、pve1（NFS/ZFS）、IX2215、Tailscale tailnet
 - 方法: Kubernetes APIの読み取り、`root@192.168.10.11`と`deploy@192.168.10.42`への読み取り専用SSH、
@@ -7,7 +11,7 @@
 - 変更: **実機・クラスタ・ネットワーク機器への変更は一切行っていない**
 
 この文書はPhase 2Bのcutover判断に使う実測値を日付付きで固定する。
-[作業指示](next-session.md)の「Phase 2A: 読み取り専用の事前調査」に対応する。
+[作業指示](../next-session.md)の「Phase 2A: 読み取り専用の事前調査」に対応する。
 
 ## 1. Git基準
 
@@ -350,7 +354,7 @@ mountする。データのコピーは発生しない。
 | 9 | 4 datasetのsnapshotを取得し存在確認（第5節） | 4件そろう |
 | 10 | `legacy_service_addresses_enabled=true`、`legacy_service_cutover_confirmed=true`、`application_cutover_confirmed=true`、`network_migration_complete=false`でAnsible適用 | pre-task gateが通過し、`homelab-service-addresses`の`arping -D`が重複を検出せず起動 |
 | 11 | Caddy、AdGuard Home、Samba、applications、Gatusの順に起動 | 各container healthy |
-| 12 | [受入試験](k8s-to-compose.md#acceptance)を実施 | 全項目合格 |
+| 12 | [受入試験](../k8s-to-compose.md#acceptance)を実施 | 全項目合格 |
 | 13 | 合格後にKubernetes VMを停止（**削除しない**） | 14日保持を開始しない（起点は再構築試験の合格日） |
 
 手順書に対する追加・変更点は次の3つである。

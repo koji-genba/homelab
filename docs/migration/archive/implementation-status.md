@@ -1,5 +1,8 @@
 # 実装状況
 
+> **この文書はアーカイブである。** Phase 0〜4の完了記録であり、更新しない。
+> 現在の作業指示は[次セッションへの作業指示](../next-session.md)にある。
+
 - 状態: フェーズ0/1 apply・受入確認、Phase 2A読み取り専用調査、2026-09-05のPhase 2B
   application cutoverに続けて、2026-09-06に**Phase 3の再構築性試験を実施した**。
   Apps VM（VMID 112）をTerraformでdestroyし、Terraform・Ansible・Gitから再構築して復旧させた。
@@ -10,9 +13,9 @@
   **Phase 4のIX/VLAN/ECW移行は2026-09-13に実機反映・受入・保存まで完了した。**
   **2026-09-18にPort 4をVLAN 10 accessとする管理構成を追加し、2026-09-19に実機反映・疎通確認・保存まで完了した。**
 - 更新日: 2026-09-19
-- 手順書: [KubernetesからComposeへの移行](k8s-to-compose.md)
+- 手順書: [KubernetesからComposeへの移行](../k8s-to-compose.md)
 - 関連文書: [Phase 2A事前調査結果](phase2a-inventory.md)（実測値、cutover/rollback手順）、
-  [次セッションへの作業指示](next-session.md)（最新の実機状態と残作業の一次情報）
+  [次セッションへの作業指示](../next-session.md)（最新の実機状態と残作業の一次情報）
 
 この文書は設計、ローカル実装、実機反映を区別する。2026-09-05のPhase 2B application cutoverにより、
 Apps VMが唯一のwriterとなり、Caddy/AdGuard Home/Samba/stashPad prod・staging/SillyTavern/Gatusの
@@ -50,7 +53,7 @@ application cutoverの受入試験を完了した（詳細は「今後の残作�
 - toolbox 1.0.1の任意UID/GID OpenSSH対応、Debian 13のcloud-init/Ansible bootstrap修正、
   `deb822_repository`によるDocker repository設定とそのregression fixture
 - cloud-init creation-time snippetの更新で既存VMをreplaceしないTerraform lifecycle guard
-- 2026-08-30に取得した実機インベントリ（[詳細](../architecture/live-inventory-2026-08-30.md)）
+- 2026-08-30に取得した実機インベントリ（[詳細](../../architecture/live-inventory-2026-08-30.md)）
 - application cutoverで実機適用時に判明した3件の実装バグ修正（PR #19）: AdGuardHome.yaml.j2の
   `trim_blocks=True`起因のYAML生成不正、`homelab-apps.service.j2`/`homelab-app-reconcile.service.j2`の
   改行消失による`PartOf=docker.service`/`Wants=network-online.target`無効化、Samba image内蔵
@@ -193,10 +196,10 @@ application cutoverを実施した。実施した操作は次のとおりで、�
 
 cutover適用中に、AdGuardHome.yaml.j2のYAML生成不正によるDNS起動失敗を含む3件の実装バグを
 実機で初めて検出し、PR #19（`e1117b3`、`4e28a08`でmain merge済み）で修正した。詳細は
-[「Gitに実装済み」](#gitに実装済み)と[next-session.mdの該当節](next-session.md)を参照。
+[「Gitに実装済み」](#gitに実装済み)と[next-session.mdの該当節](../next-session.md)を参照。
 
 実施後に確認できた状態は次のとおりである（2026-09-05 19:11時点、詳細は
-[next-session.mdの「現在のシステム状態」](next-session.md)）。
+[next-session.mdの「現在のシステム状態」](../next-session.md)）。
 
 - Apps VMの`ens19`が`192.168.11.100/.101/.103`を保持し、`eth0`は管理用`192.168.10.42/24`のまま
 - NFS 7 mountのうち`stashpad-media`のみ`ro`、他6つが`rw`
@@ -274,7 +277,7 @@ Phase 3の再構築試験に合格するまで削除しない。
 ### 停止前に取得したもの
 
 停止すると`kubectl`が使えなくなるため、rollbackに必要な値を
-[rollback用 状態スナップショット](k8s-rollback-state.md)へ恒久保存した。Service 3件の完全なJSON、
+[rollback用 状態スナップショット](../k8s-rollback-state.md)へ恒久保存した。Service 3件の完全なJSON、
 Deployment replicas、`metallb-speaker`のnodeSelector、Flux suspend状態、PVC/PV一覧、
 NFS open stateのベースラインを含む。それまで変更前のService定義はセッションのscratchpadにしか
 存在せず、恒久保存されていなかった。
@@ -468,7 +471,7 @@ Proxmoxのuser `terraform@pve`、role `HomelabTerraform`、API token `terraform@
 7 ACL pathはいずれもGitにもTerraformにも宣言されておらず、手動作成である。
 **したがって「Proxmoxインストール済みの状態からGitとIaCだけで再構築できる」という前提は、
 現状では成立していない。** 前提条件と復旧手順は
-[Apps VM復旧手順の「Terraform実行前のProxmox側準備」](../operations/apps-vm-recovery.md)へ明文化した。
+[Apps VM復旧手順の「Terraform実行前のProxmox側準備」](../../operations/apps-vm-recovery.md)へ明文化した。
 恒久対策（Proxmox側の権限をTerraformまたは冪等なスクリプトで宣言する）は未実施である。
 
 ### ユーザー確認項目（2026-09-06、すべて合格）
@@ -588,9 +591,9 @@ clientごとの分割も行わず、Apps VMとDGX 2台が同条件でmountする
 
 | 変更 | 内容 |
 | --- | --- |
-| [ADR-0006](../adr/0006-ai-dataset-single-export.md) | 単一export、`/mnt/shared`配下に置かない判断とその理由 |
-| [DGX Sparkストレージ運用](../operations/dgx-storage.md) | pve1 / Apps VM / DGX 2台の手順と検証、切り戻し |
-| [NFS export契約](../operations/nfs-export.md) | `ai` exportの契約、8つ目のmarker、client範囲の例外 |
+| [ADR-0006](../../adr/0006-ai-dataset-single-export.md) | 単一export、`/mnt/shared`配下に置かない判断とその理由 |
+| [DGX Sparkストレージ運用](../../operations/dgx-storage.md) | pve1 / Apps VM / DGX 2台の手順と検証、切り戻し |
+| [NFS export契約](../../operations/nfs-export.md) | `ai` exportの契約、8つ目のmarker、client範囲の例外 |
 | `group_vars/apps.yml` | `nfs_mounts`に`ai`（`/srv/homelab/nfs/ai`、marker内容`ai`） |
 | `compose.env.j2` / `.env.example` / `compose-config.sh` | `AI_MOUNT_PATH` |
 | Samba `compose.yaml` / `smb.conf` | `[ai]` share（この1つだけ`0666/0777`） |
@@ -617,7 +620,7 @@ Phase 3の再構築性試験（Apps VMをTerraform/Ansible/Gitから実際に削
 **合格日は2026-09-06であり、保持期間は2026-09-20に満了する。** application flagをfalseへ戻すrollbackが必要な場合は、Apps VMの
 `homelab-apps.service`停止とservice IP解放、NFS open state 0件の確認、MetalLB/Service/Flux/
 Unboundの復旧を、新旧を同時にwriterにしないことを最優先して行う。手順の詳細は
-[next-session.mdのrollback手順](next-session.md)を参照。
+[next-session.mdのrollback手順](../next-session.md)を参照。
 
 VLAN 10/20/30/40の配線・ACL再編とApps VMのhost resolver修正は2026-09-13に完了した。
 保持期間が満了した後にPhase 5の廃止判断へ進む。それまでは旧Kubernetes VM、
