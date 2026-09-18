@@ -96,4 +96,4 @@ trunk portは必要なtagged VLANだけを収容し、trunkのuntagged traffic�
 - GE2 port 4をGuest用VLAN groupからServer用VLAN groupへ移し、port 3と同じServer VLAN 10のaccess
   portとする。これにより、Server accessはport 3/4、空きGuest accessはport 5～7となる。
 - access portでtagged frameを転送しない方針と、port 1/8をタグ専用trunkとする方針は変更しない。
-- 2026-09-19にユーザーが実機反映済みと確認した。Port 4のVLAN 10 DHCP/疎通と`write memory`は未記録である。
+- 2026-09-19に実機へ反映し、Port 4の疎通確認後に`write memory`でstartup-configへ保存した。
