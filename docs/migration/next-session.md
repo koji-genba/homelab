@@ -28,7 +28,10 @@ Phase 5着手前の詳細な安全条件は[旧引き継ぎ](archive/next-sessio
    DNS定義のmergeを先に行う。
 2. 旧Kubernetes/Cloudflare用credentialの発行元と利用状況を確認し、現行サービスと共用でないものだけ
    revokeする。GitHubの旧Flux keyは失効済み。Apps VMが使うCloudflare DNS-01 tokenを
-   誤って無効化しない。GitHub Actionsは組み込み`GITHUB_TOKEN`だけを使用し、カスタムsecretは0件。
+   誤って無効化しない。現行Caddy tokenはCloudflareのaccount-owned tokenで、2026-09-23の
+   account token verify APIではactive、IDは`320a174f49c55be79e026ec6d2c4d4a1`。
+   旧cert-manager tokenのIDと比較する。現行tokenには他のtokenを一覧する権限がない。
+   GitHub Actionsは組み込み`GITHUB_TOKEN`だけを使用し、カスタムsecretは0件。
 3. 受入試験のうち、Trusted LAN・tailnetからのアプリ操作、SMB read/write、通知など対話が必要な項目を
    再実施する。実施結果を[移行手順書](k8s-to-compose.md)へ記録する。
 4. Phase 5の全項目が揃ったら、不要な保管snapshotの期限と削除を別途判断する。
