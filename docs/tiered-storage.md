@@ -35,6 +35,13 @@ SSDを先頭ブランチに置き、常にSSD優先で書き込む。`minfreespa
 **settling time判定にctimeを使う**
 一部ディレクトリでWindowsクライアントがlastWriteTimeを過去日時に書き換える運用があるため、mtimeベースのsettling timeが機能しない。ctimeはカーネル管理でクライアントから変更不可なのでこちらを使う。
 
+**cache-poolのSSDはマザーボードのSATA (AHCI) に接続する**
+LSI SAS2008 HBA経由ではTRIMが通らない。SAS2008はRZAT/DRATビットを持つドライブだけをUNMAP対応と
+報告し、KIOXIA EXCERIAはこのビットを持たないためである。moverが毎日書いては消すこのpoolでTRIMが
+効かないと、書き込みレイテンシが48msまで悪化した実績がある
+（[SMB転送速度トラブルシューティング](smb-performance-troubleshooting.md#2026-09-速度が出たり0になったりを繰り返す)）。
+`zpool status -t cache-pool`に`trim unsupported`が出ていないことと、`autotrim=on`を維持すること。
+
 **nightly（毎朝5時）**
 cache-pool 860GBに対して日次書き込みが満杯になることはないため、随時moveではなくnightly実行。SSDが埋まったとしてもmergerfsのフォールバックで機能継続する。
 
