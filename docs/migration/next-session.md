@@ -24,20 +24,19 @@ Phase 5着手前の詳細な安全条件は[旧引き継ぎ](archive/next-sessio
 - Caddy専用Cloudflare account tokenを作成し、対象zoneのReadと一時TXT recordの作成・削除で
   Zone Read / DNS Editを確認。SOPS bundleとApps VMのruntime secretを更新してCaddyだけを再作成し、
   新tokenがactiveであること、現行HTTPS endpointと7 containerが正常であることを確認。
+- Phase 5変更をPR #50でmainへmergeし、Apps VMのreconcile成功と稼働commitを確認。
+- stashPad PR #107のimageをstagingで確認後、PR #51でproductionへ昇格。prod/stagingとも
+  digest `sha256:4e3005005acf63d6295ae1b3b81fd421376bae42cdc13f7d26d6495ec1e4a2ad`でhealthy。
 
 ## 引き続き必要なこと
 
-1. このブランチをreviewしてmainへmergeし、Apps VMのreconcile後に稼働commitを確認する。
-   AdGuardの変更は実機へ手動反映済み。merge後にAnsibleで宣言状態を再適用する際はssh-agentと
-   `AGE_IDENTITY_FILE`を用意する。merge前にmainのAnsibleを適用すると旧rewriteが戻るため、
-   DNS定義のmergeを先に行う。
-2. 旧Kubernetes/Cloudflare用credentialをrevokeする。GitHubの旧Flux keyは失効済み。
+1. 旧Kubernetes/Cloudflare用credentialをrevokeする。GitHubの旧Flux keyは失効済み。
    Caddyは専用tokenへ切替・検証済みなので、旧cert-manager tokenをCloudflare UIで失効する。
    新tokenには他のtokenを一覧・削除する権限を付けていない。
    GitHub Actionsは組み込み`GITHUB_TOKEN`だけを使用し、カスタムsecretは0件。
-3. 受入試験のうち、Trusted LAN・tailnetからのアプリ操作、SMB read/write、通知など対話が必要な項目を
+2. 受入試験のうち、Trusted LAN・tailnetからのアプリ操作、SMB read/write、通知など対話が必要な項目を
    再実施する。実施結果を[移行手順書](k8s-to-compose.md)へ記録する。
-4. Phase 5直前snapshotは保持する。削除は今回の承認範囲外とし、別途明示承認があるまで残す。
+3. Phase 5直前snapshotは保持する。削除は今回の承認範囲外とし、別途明示承認があるまで残す。
 
 ## 安全条件と既知の制約
 
@@ -47,4 +46,4 @@ Phase 5着手前の詳細な安全条件は[旧引き継ぎ](archive/next-sessio
 - `stashPadDev`（VMID 111）、ElastiFlow、Tailscale gatewayは今回の削除対象外。
 - Apps VMを再構築する際は[復旧手順](../operations/apps-vm-recovery.md)のProxmox ACL再付与に注意。
 - DGX Spark 2台の`/etc/fstab`追記は別作業として未実施。
-- Apps VMのCompose定義は`origin/main`から供給される。ブランチ上の変更はmerge前に実機へ反映されない。
+- Apps VMのCompose定義は`origin/main`から供給される。
