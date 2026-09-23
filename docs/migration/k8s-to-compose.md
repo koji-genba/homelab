@@ -182,9 +182,8 @@ IX/VLAN/ECW部分とApps VM host resolverは2026-09-13に完了した。ElastiFl
   certificateは現行Caddyfileにある7 FQDNだけ（2026-09-23）。
 - [ ] 旧Proxmox/Kubernetes/Cloudflare/registry credentialをrotate/revokeする。GitHubの旧Flux専用
   deploy key（ID 156354019）は2026-09-23に失効、key 0件を確認。Proxmoxに旧Kubernetes専用user/ACLは
-  なく、GitHub Actionsのカスタムsecretも0件。Cloudflareの旧cert-manager用tokenは現行Caddyと
-  共用中と確認した。
-  Caddy専用tokenを作成・切替・検証後に旧tokenを失効する。
+  なく、GitHub Actionsのカスタムsecretも0件。Caddy専用Cloudflare tokenは作成、権限検証、
+  SOPS/Apps VMへの反映、Caddy再作成とHTTPS確認まで完了。旧cert-manager tokenのUI上の失効だけが残る。
 - [x] 平文state/secretがGit履歴に混入していないことを再確認する。`make secrets-scan`と
   全branchの履歴中の対象filename・既知token/private key pattern検査に合格（2026-09-23）。
 - [x] READMEを現行構成に更新し、recovery runbookへの導線を確認する（このブランチ）。

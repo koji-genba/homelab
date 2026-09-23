@@ -19,6 +19,9 @@ Phase 5着手前の詳細な安全条件は[旧引き継ぎ](archive/next-sessio
   `/etc/homelab/adguard/AdGuardHome.yaml.pre-phase5-20260923`。
 - GitHubの旧Flux専用deploy key（ID 156354019）を失効。repository deploy keyは0件。
 - Docker復旧後、`make ansible-lint ansible-check adguard-config-check secrets-scan`に合格。
+- Caddy専用Cloudflare account tokenを作成し、対象zoneのReadと一時TXT recordの作成・削除で
+  Zone Read / DNS Editを確認。SOPS bundleとApps VMのruntime secretを更新してCaddyだけを再作成し、
+  新tokenがactiveであること、現行HTTPS endpointと7 containerが正常であることを確認。
 
 ## 引き続き必要なこと
 
@@ -26,11 +29,9 @@ Phase 5着手前の詳細な安全条件は[旧引き継ぎ](archive/next-sessio
    AdGuardの変更は実機へ手動反映済み。merge後にAnsibleで宣言状態を再適用する際はssh-agentと
    `AGE_IDENTITY_FILE`を用意する。merge前にmainのAnsibleを適用すると旧rewriteが戻るため、
    DNS定義のmergeを先に行う。
-2. 旧Kubernetes/Cloudflare用credentialの発行元と利用状況を確認し、現行サービスと共用でないものだけ
-   revokeする。GitHubの旧Flux keyは失効済み。Apps VMが使うCloudflare DNS-01 tokenを
-   誤って無効化しない。現行Caddy tokenは旧cert-managerから引き継いだCloudflareの
-   account-owned tokenであることを確認済み。Caddy専用tokenを作成・切替・検証してから失効する。
-   現行tokenには他のtokenを一覧する権限がない。
+2. 旧Kubernetes/Cloudflare用credentialをrevokeする。GitHubの旧Flux keyは失効済み。
+   Caddyは専用tokenへ切替・検証済みなので、旧cert-manager tokenをCloudflare UIで失効する。
+   新tokenには他のtokenを一覧・削除する権限を付けていない。
    GitHub Actionsは組み込み`GITHUB_TOKEN`だけを使用し、カスタムsecretは0件。
 3. 受入試験のうち、Trusted LAN・tailnetからのアプリ操作、SMB read/write、通知など対話が必要な項目を
    再実施する。実施結果を[移行手順書](k8s-to-compose.md)へ記録する。
