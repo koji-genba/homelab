@@ -1,7 +1,7 @@
 # KubernetesからComposeへの移行手順書
 
-- 状態: **フェーズ0〜4は完了。残るのはフェーズ5（廃止）だけである。**
-- 更新日: 2026-09-19
+- 状態: **フェーズ0〜4完了。フェーズ5はVM・旧データ廃止を実施し、DNS・credential・受入確認が残る。**
+- 更新日: 2026-09-23
 - 目標設計: [目標アーキテクチャ](../architecture/target-state.md)
 - 実施記録: [archive/実装状況](archive/implementation-status.md)
 - 現在の作業指示: [次セッションへの作業指示](next-session.md)
@@ -16,7 +16,7 @@
 | 2 現在のVLANでのアプリケーション切替 | 完了（2026-09-05） |
 | 3 再構築性の証明 | 完了（2026-09-06、合格） |
 | 4 ネットワーク移行 | 完了（2026-09-13。Port 4のVLAN 10 access化は2026-09-19） |
-| **5 廃止** | **未着手。ゲートは2026-09-20の保持期間満了** |
+| **5 廃止** | **2026-09-23実施中。VM・旧データ・NFS exportは完了** |
 
 ## フェーズ 0: インベントリと安全確認
 
@@ -163,19 +163,29 @@ IX/VLAN/ECW部分とApps VM host resolverは2026-09-13に完了した。ElastiFl
 
 ## フェーズ 5: 廃止
 
-**未着手。これが残っている唯一のフェーズである。**
+**2026-09-23に着手。未完了の項目は下のチェック欄に残す。**
 再構築試験から14日経過し、rollbackが発生していないことを条件とする。
 合格日は2026-09-06、**保持期間の満了は2026-09-20**である。それ以前に着手しない。
 判断が要る点は[次セッションへの作業指示](next-session.md)にまとめてある。
 
-- [ ] Kubernetes VMを削除する。
-- [ ] k8s Terraform、Kubespray、Flux、manifestをactive treeから削除する。
-- [ ] 旧PVC dataは保持期限とsnapshotを確認してから削除する。
-- [ ] 旧NFS exportをApps VM `/32`だけへ狭める。
-- [ ] 不要なDNS recordとcertificateを削除する。
+- [x] Kubernetes VM 103 → 102 → 101をProxmoxから削除。disk残存なし（2026-09-23）。
+- [x] k8s Terraform、Kubespray、Flux、manifestをactive treeから削除（このブランチ）。
+- [x] 旧PVC dataは保持期限とsnapshotを確認してから削除。削除直前に
+  `tank-gen2/data/k8s-volumes@pre-phase5-retire-20260923`を追加し、未使用8 directoryを削除。
+  現行アプリが使う3 directoryは保持（2026-09-23）。
+- [x] 旧4 NFS exportをApps VM `192.168.10.101/32`へ狭める。`ai` exportはDGX Spark用に
+  `192.168.10.0/24`を維持（2026-09-23）。
+- [ ] 不要なDNS recordとcertificateを削除する。旧LDAP/phpadmin/LDAPS rewriteは定義から
+  削除済みだが、Ansibleの実機適用と公開DNS/certificateの確認は未実施。
 - [ ] 旧Proxmox/Kubernetes/Cloudflare/registry credentialをrotate/revokeする。
-- [ ] 平文state/secretがGit履歴に混入していないことを再確認する。
-- [ ] READMEとrecovery runbookだけで現行構成を辿れることを確認する。
+- [x] 平文state/secretがGit履歴に混入していないことを再確認する。`make secrets-scan`と
+  全branchの履歴中の対象filename・既知token/private key pattern検査に合格（2026-09-23）。
+- [x] READMEを現行構成に更新し、recovery runbookへの導線を確認する（このブランチ）。
+
+実機の確認ではApps VMの7 container、8 NFS mount、`homelab-apps.service`とreconcile timerが
+稼働していた。旧4 exportの変更前設定はpve1の`/etc/exports.pre-phase5-20260923`に保管した。
+旧Kubernetesのcloud-init snippetは参照元を確認したうえで
+`/var/lib/vz/snippets/k8s-cloud-init.yaml.retired-20260923`へ改名した。
 
 <a id="acceptance"></a>
 

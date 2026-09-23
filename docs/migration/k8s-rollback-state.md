@@ -1,5 +1,8 @@
 # Kubernetes rollback用 状態スナップショット
 
+> 履歴資料。Kubernetes VM 101/102/103は2026-09-23に削除済みであり、この手順は現在適用できない。
+> 現行Apps VMの復旧は[Apps VM復旧手順](../operations/apps-vm-recovery.md)に従う。
+
 - 取得日: 2026-09-05
 - 取得時点: **Kubernetes VM（VMID 101/102/103）を`qm shutdown`で停止する直前**
 - 目的: 停止後は`kubectl`が使えなくなるため、rollbackに必要な変更前後の値をここへ恒久保存する。
