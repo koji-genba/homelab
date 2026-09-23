@@ -1,7 +1,7 @@
 services:
   stashpad-prod:
     # Production is promoted manually; keep this independent from staging.
-    image: ghcr.io/koji-genba/stashpad@sha256:b2218a610f91632758a2811e2bb23b8850c7dec87481f26d9abc95cf8c0a33f1
+    image: ghcr.io/koji-genba/stashpad@sha256:4e3005005acf63d6295ae1b3b81fd421376bae42cdc13f7d26d6495ec1e4a2ad
     environment:
       STASHPAD_ADDR: ":8080"
       STASHPAD_DATA_DIR: /data
