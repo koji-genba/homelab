@@ -15,20 +15,23 @@ Phase 5着手前の詳細な安全条件は[旧引き継ぎ](archive/next-sessio
   Apps VMが使うSillyTavern、stashPad prod/stagingの3件は保持。
 - Kubernetes Terraform、Kubespray、Flux、manifestを作業ブランチのactive treeから削除。
 - 参照されなくなったpve1の`k8s-cloud-init.yaml`を`.retired-20260923`へ改名。
+- AdGuard実機とAnsible定義から旧LDAP/phpadmin/LDAPS rewriteを削除。実機設定のbackupは
+  `/etc/homelab/adguard/AdGuardHome.yaml.pre-phase5-20260923`。
+- GitHubの旧Flux専用deploy key（ID 156354019）を失効。repository deploy keyは0件。
+- Docker復旧後、`make ansible-lint ansible-check adguard-config-check secrets-scan`に合格。
 
 ## 引き続き必要なこと
 
 1. このブランチをreviewしてmainへmergeし、Apps VMのreconcile後に稼働commitを確認する。
-   Ansible templateの変更は別途適用が必要。`make ansible-apply`の前にssh-agentと
-   `AGE_IDENTITY_FILE`を用意する。
-2. AdGuardの旧LDAP/phpadmin/LDAPS rewrite削除を適用し、公開DNS側に不要recordがないか確認する。
-   Caddyが現在使うFQDNは`files/services/compose/edge/Caddyfile`が基準。
-3. 旧Kubernetes/Flux/registry/Cloudflare用credentialの発行元と利用状況を確認し、現行サービスと
-   共用でないものだけrevokeする。Apps VMが使うCloudflare DNS-01 tokenやregistry credentialを
-   誤って無効化しない。
-4. 受入試験のうち、Trusted LAN・tailnetからのアプリ操作、SMB read/write、通知など対話が必要な項目を
+   AdGuardの変更は実機へ手動反映済み。merge後にAnsibleで宣言状態を再適用する際はssh-agentと
+   `AGE_IDENTITY_FILE`を用意する。merge前にmainのAnsibleを適用すると旧rewriteが戻るため、
+   DNS定義のmergeを先に行う。
+2. 旧Kubernetes/Cloudflare用credentialの発行元と利用状況を確認し、現行サービスと共用でないものだけ
+   revokeする。GitHubの旧Flux keyは失効済み。Apps VMが使うCloudflare DNS-01 tokenを
+   誤って無効化しない。GitHub Actionsは組み込み`GITHUB_TOKEN`だけを使用し、カスタムsecretは0件。
+3. 受入試験のうち、Trusted LAN・tailnetからのアプリ操作、SMB read/write、通知など対話が必要な項目を
    再実施する。実施結果を[移行手順書](k8s-to-compose.md)へ記録する。
-5. Phase 5の全項目が揃ったら、不要な保管snapshotの期限と削除を別途判断する。
+4. Phase 5の全項目が揃ったら、不要な保管snapshotの期限と削除を別途判断する。
 
 ## 安全条件と既知の制約
 

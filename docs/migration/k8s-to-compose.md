@@ -1,6 +1,6 @@
 # KubernetesからComposeへの移行手順書
 
-- 状態: **フェーズ0〜4完了。フェーズ5はVM・旧データ廃止を実施し、DNS・credential・受入確認が残る。**
+- 状態: **フェーズ0〜4完了。フェーズ5はVM・旧データ・DNS廃止を実施し、credential・受入確認が残る。**
 - 更新日: 2026-09-23
 - 目標設計: [目標アーキテクチャ](../architecture/target-state.md)
 - 実施記録: [archive/実装状況](archive/implementation-status.md)
@@ -175,9 +175,15 @@ IX/VLAN/ECW部分とApps VM host resolverは2026-09-13に完了した。ElastiFl
   現行アプリが使う3 directoryは保持（2026-09-23）。
 - [x] 旧4 NFS exportをApps VM `192.168.10.101/32`へ狭める。`ai` exportはDGX Spark用に
   `192.168.10.0/24`を維持（2026-09-23）。
-- [ ] 不要なDNS recordとcertificateを削除する。旧LDAP/phpadmin/LDAPS rewriteは定義から
-  削除済みだが、Ansibleの実機適用と公開DNS/certificateの確認は未実施。
-- [ ] 旧Proxmox/Kubernetes/Cloudflare/registry credentialをrotate/revokeする。
+- [x] 不要なDNS recordとcertificateを削除する。旧LDAP/phpadmin/LDAPS rewriteは定義と
+  AdGuard実機から削除（設定backupはApps VMの
+  `/etc/homelab/adguard/AdGuardHome.yaml.pre-phase5-20260923`）。3件ともA recordが解決されず、
+  現行`prod`の解決が続くことを確認。公開DoHでも旧3件のA recordは空。Caddy保存領域の
+  certificateは現行Caddyfileにある7 FQDNだけ（2026-09-23）。
+- [ ] 旧Proxmox/Kubernetes/Cloudflare/registry credentialをrotate/revokeする。GitHubの旧Flux専用
+  deploy key（ID 156354019）は2026-09-23に失効、key 0件を確認。Proxmoxに旧Kubernetes専用user/ACLは
+  なく、GitHub Actionsのカスタムsecretも0件。Cloudflareの旧cert-manager用tokenが現行Caddy用tokenと
+  別かは未確認であり、誤失効を避けるため保留。
 - [x] 平文state/secretがGit履歴に混入していないことを再確認する。`make secrets-scan`と
   全branchの履歴中の対象filename・既知token/private key pattern検査に合格（2026-09-23）。
 - [x] READMEを現行構成に更新し、recovery runbookへの導線を確認する（このブランチ）。
