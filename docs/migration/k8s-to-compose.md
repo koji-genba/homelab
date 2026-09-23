@@ -172,7 +172,8 @@ IX/VLAN/ECW部分とApps VM host resolverは2026-09-13に完了した。ElastiFl
 - [x] k8s Terraform、Kubespray、Flux、manifestをactive treeから削除（このブランチ）。
 - [x] 旧PVC dataは保持期限とsnapshotを確認してから削除。削除直前に
   `tank-gen2/data/k8s-volumes@pre-phase5-retire-20260923`を追加し、未使用8 directoryを削除。
-  現行アプリが使う3 directoryは保持（2026-09-23）。
+  現行アプリが使う3 directoryは保持。Phase 2B/3以前のrollback用snapshot 8件は削除し、
+  Phase 5直前snapshotだけを保持（2026-09-24）。
 - [x] 旧4 NFS exportをApps VM `192.168.10.101/32`へ狭める。`ai` exportはDGX Spark用に
   `192.168.10.0/24`を維持（2026-09-23）。
 - [x] 不要なDNS recordとcertificateを削除する。旧LDAP/phpadmin/LDAPS rewriteは定義と
@@ -190,8 +191,7 @@ IX/VLAN/ECW部分とApps VM host resolverは2026-09-13に完了した。ElastiFl
 
 実機の確認ではApps VMの7 container、8 NFS mount、`homelab-apps.service`とreconcile timerが
 稼働していた。旧4 exportの変更前設定はpve1の`/etc/exports.pre-phase5-20260923`に保管した。
-旧Kubernetesのcloud-init snippetは参照元を確認したうえで
-`/var/lib/vz/snippets/k8s-cloud-init.yaml.retired-20260923`へ改名した。
+旧Kubernetesのcloud-init snippetは参照元を確認して退避した後、2026-09-24に削除した。
 
 <a id="acceptance"></a>
 

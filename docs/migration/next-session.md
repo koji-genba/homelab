@@ -14,7 +14,9 @@ Phase 5着手前の詳細な安全条件は[旧引き継ぎ](archive/next-sessio
 - `tank-gen2/data/k8s-volumes@pre-phase5-retire-20260923`を取得後、未使用PVC directory 8件を削除。
   Apps VMが使うSillyTavern、stashPad prod/stagingの3件は保持。
 - Kubernetes Terraform、Kubespray、Flux、manifestを作業ブランチのactive treeから削除。
-- 参照されなくなったpve1の`k8s-cloud-init.yaml`を`.retired-20260923`へ改名。
+- 参照されなくなったpve1の`k8s-cloud-init.yaml`を退避後に削除。
+- Phase 2B/3以前のrollback用snapshot 8件を削除し、
+  `tank-gen2/data/k8s-volumes@pre-phase5-retire-20260923`だけを保持。
 - AdGuard実機とAnsible定義から旧LDAP/phpadmin/LDAPS rewriteを削除。実機設定のbackupは
   `/etc/homelab/adguard/AdGuardHome.yaml.pre-phase5-20260923`。
 - GitHubの旧Flux専用deploy key（ID 156354019）を失効。repository deploy keyは0件。
@@ -35,7 +37,7 @@ Phase 5着手前の詳細な安全条件は[旧引き継ぎ](archive/next-sessio
    GitHub Actionsは組み込み`GITHUB_TOKEN`だけを使用し、カスタムsecretは0件。
 3. 受入試験のうち、Trusted LAN・tailnetからのアプリ操作、SMB read/write、通知など対話が必要な項目を
    再実施する。実施結果を[移行手順書](k8s-to-compose.md)へ記録する。
-4. Phase 5の全項目が揃ったら、不要な保管snapshotの期限と削除を別途判断する。
+4. Phase 5直前snapshotは保持する。削除は今回の承認範囲外とし、別途明示承認があるまで残す。
 
 ## 安全条件と既知の制約
 
