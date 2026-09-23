@@ -1,6 +1,6 @@
 # NFS export契約
 
-- 状態: marker反映済み、export client範囲の変更は未適用。`ai` export（ADR-0006）は未反映
+- 状態: marker・`ai` export反映済み。旧4 exportは2026-09-23にApps VM `/32`へ制限済み
 - サーバー: Proxmox/NFS host `192.168.10.11`
 - データ復旧: このリポジトリの対象外
 - 関連設計: [目標ストレージ契約](../architecture/target-state.md#storage-contract)
@@ -12,15 +12,15 @@
 
 ## 実測された親export
 
-2026-08-30の確認では、次の4つの親pathが`192.168.10.0/24`に公開され、主要optionは全て同じだった。
-これは現状の記録であり、フェーズ2のwriter停止後にApps VMの`/32`へ狭める。
+2026-08-30の確認では、次の4つの親pathが`192.168.10.0/24`に公開されていた。
+2026-09-23にApps VMの`/32`へ狭め、`exportfs -v`で確認した。
 
 | サーバーpath | client範囲 | 主要option（実測） | 固有option |
 | --- | --- | --- | --- |
-| `/mnt/tank-gen2/data/k8s-volumes` | `192.168.10.0/24` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | なし |
-| `/mnt/tank-gen1/data/archive` | `192.168.10.0/24` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | なし |
-| `/mnt/tank-gen2/data/shared` | `192.168.10.0/24` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid=101` |
-| `/mnt/shared` | `192.168.10.0/24` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid=100` |
+| `/mnt/tank-gen2/data/k8s-volumes` | `192.168.10.101/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | なし |
+| `/mnt/tank-gen1/data/archive` | `192.168.10.101/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | なし |
+| `/mnt/tank-gen2/data/shared` | `192.168.10.101/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid=101` |
+| `/mnt/shared` | `192.168.10.101/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid=100` |
 
 ## Apps VMの利用path
 
@@ -75,6 +75,10 @@ DGX側の手順は[DGX Sparkストレージ運用](dgx-storage.md)にある。
 | Kubernetes稼働中 | 既存node clauseを維持し、Apps `192.168.10.42/32`を追加 |
 | Kubernetes停止後 | Apps `192.168.10.42/32`だけ |
 | VLAN移行後 | Apps `192.168.10.101/32`だけ |
+
+最終行の状態を2026-09-23に適用した。変更前の`/etc/exports`はpve1の
+`/etc/exports.pre-phase5-20260923`に保管した。変更後のSHA-256は
+`062c8bf15dfd10bbd75ebd336d1aa6a9eddb96c99a222ee4644b277e581f3d04`。
 
 この収束計画の対象は既存4 exportである。`ai` exportはDGX Spark 2台もclientであるため、
 `192.168.10.0/24`のままとする。Server VLAN内を同一trust boundaryとして扱う

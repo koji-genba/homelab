@@ -2,7 +2,7 @@
 
 自宅サーバーの構成、アプリケーション、ネットワークを管理するためのIaCリポジトリです。
 
-現在は、同一物理ホスト上のKubernetes基盤を、Debian 13の単一Apps VMとDocker Composeへ移行中です。既存Kubernetesが本番サービスを提供しており、新構成はまだ実環境へ適用していません。
+本番アプリケーションはDebian 13のApps VM上でDocker Composeにより稼働しています。旧Kubernetes VMは2026-09-23に廃止しました。
 
 ## 目標
 
@@ -12,20 +12,20 @@
 - Gitに望ましい状態と設計理由を残し、手作業は切替確認など必要な箇所に限定する
 - NFS上の既存データを保護し、誤った空ディレクトリへの書き込みをfail closedにする
 
-## 移行先の概要
+## 現行構成の概要
 
 ```text
 Proxmox VE 192.168.10.11
-└── Apps VM (Debian 13, 管理IP: 192.168.10.101)
-    ├── Caddy                         192.168.11.100 (移行中)
-    ├── AdGuard Home                  192.168.11.101 (移行中)
-    ├── Samba                         192.168.11.103 (移行中)
-    ├── stashPad production/staging
-    ├── SillyTavern
-    └── Gatus + Healthchecks.io dead-man
+├── Apps VM (Debian 13, 192.168.10.101)
+│   ├── Caddy / AdGuard Home / Samba  192.168.10.101
+│   ├── stashPad production/staging
+│   ├── SillyTavern
+│   └── Gatus + Healthchecks.io dead-man
+├── Tailscale gateway                 192.168.10.102
+└── ElastiFlow                        192.168.10.103
 ```
 
-最終的にはVLAN 10をServer、20をTrusted、30をIoT、40をGuestとして整理し、Apps VMを `192.168.10.101` に移します。VLAN 11と63は段階的に廃止します。
+VLAN 10はServer、20はTrusted、30はIoT、40はGuestです。VLAN 11と63は廃止済みです。
 
 ## まず読むもの
 
@@ -35,7 +35,7 @@ Proxmox VE 192.168.10.11
 - [設計判断（ADR）](docs/adr/README.md)
 - [ネットワークゾーン仕様](docs/network/target-zones.md)
 - [KubernetesからComposeへの移行手順](docs/migration/k8s-to-compose.md)
-- [次セッションへの作業指示](docs/migration/next-session.md)
+- [Phase 5の引き継ぎ](docs/migration/next-session.md)
 - [移行記録アーカイブ（Phase 0〜4の完了記録）](docs/migration/archive/README.md)
 - [Apps VM復旧手順](docs/operations/apps-vm-recovery.md)
 - [アプリ更新・promotion・rollback](docs/operations/application-lifecycle.md)
@@ -56,14 +56,13 @@ docs/
 files/
 ├── infrastructure/
 │   ├── terraform/apps-vm/       # Apps VM
-│   ├── terraform/tailscale/     # Tailscale設定（移行作業中）
+│   ├── terraform/tailscale/     # Tailscale設定
 │   ├── ansible/apps/            # OS、NFS、firewall、Compose lifecycle
 │   ├── network/                 # IX2215の設定と手動変更記録
 │   └── secrets/                 # SOPS暗号化済みruntime secrets
 ├── services/
 │   ├── compose/                 # サービス単位のCompose project
 │   └── images/                  # カスタムイメージ
-└── kubernetes/                  # 移行完了までの現行定義
 scripts/                         # preflight、rollback、state backup/restore
 ```
 
@@ -80,8 +79,4 @@ scripts/                         # preflight、rollback、state backup/restore
 - Terraform stateはローカル管理し、同じリポジトリの `state-backup` branchへage暗号化した復旧コピーを保存する
 - NFS mountとmarkerの検証に失敗した場合はアプリケーションを起動しない
 
-新構成を実機へ適用する前は、必ず移行runbookのPhase gateとpreflightを確認してください。
-
-## 現行Kubernetesについて
-
-`files/kubernetes/` と `files/infrastructure/terraform/k8s-cluster/` は移行完了まで本番の参照元として残します。Apps VMの再構築試験に合格し、14日間の安定稼働を確認するまでは削除しません。`stashPadDev` は作業用VMのため今回の移行対象外です。
+実機へ変更を適用する前は、対象の運用手順とpreflightを確認してください。`stashPadDev`（VMID 111）は作業用VMで、この移行の対象外です。
