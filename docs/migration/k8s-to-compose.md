@@ -192,6 +192,9 @@ IX/VLAN/ECW部分とApps VM host resolverは2026-09-13に完了した。ElastiFl
 実機の確認ではApps VMの7 container、8 NFS mount、`homelab-apps.service`とreconcile timerが
 稼働していた。旧4 exportの変更前設定はpve1の`/etc/exports.pre-phase5-20260923`に保管した。
 旧Kubernetesのcloud-init snippetは参照元を確認して退避した後、2026-09-24に削除した。
+Phase 5変更はPR #50でmainへmergeし、Apps VMのreconcile後に稼働commitがmainと一致することを確認した。
+同日にstashPad更新をstagingで確認してPR #51でproductionへ昇格し、prod/stagingの実image digest、
+health、4つのHTTPS endpointを照合した。
 
 <a id="acceptance"></a>
 
