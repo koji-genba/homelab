@@ -181,10 +181,11 @@ IX/VLAN/ECW部分とApps VM host resolverは2026-09-13に完了した。ElastiFl
   `/etc/homelab/adguard/AdGuardHome.yaml.pre-phase5-20260923`）。3件ともA recordが解決されず、
   現行`prod`の解決が続くことを確認。公開DoHでも旧3件のA recordは空。Caddy保存領域の
   certificateは現行Caddyfileにある7 FQDNだけ（2026-09-23）。
-- [ ] 旧Proxmox/Kubernetes/Cloudflare/registry credentialをrotate/revokeする。GitHubの旧Flux専用
+- [x] 旧Proxmox/Kubernetes/Cloudflare/registry credentialをrotate/revokeする。GitHubの旧Flux専用
   deploy key（ID 156354019）は2026-09-23に失効、key 0件を確認。Proxmoxに旧Kubernetes専用user/ACLは
   なく、GitHub Actionsのカスタムsecretも0件。Caddy専用Cloudflare tokenは作成、権限検証、
-  SOPS/Apps VMへの反映、Caddy再作成とHTTPS確認まで完了。旧cert-manager tokenのUI上の失効だけが残る。
+  SOPS/Apps VMへの反映、Caddy再作成とHTTPS確認まで完了。旧cert-manager tokenはUIで失効し、APIの
+  403応答を確認後、旧tokenを含むApps VMの切替前backupを削除（2026-09-24）。
 - [x] 平文state/secretがGit履歴に混入していないことを再確認する。`make secrets-scan`と
   全branchの履歴中の対象filename・既知token/private key pattern検査に合格（2026-09-23）。
 - [x] READMEを現行構成に更新し、recovery runbookへの導線を確認する（このブランチ）。
