@@ -10,4 +10,6 @@
     name: homelab-apps.service
     daemon_reload: true
     state: restarted
-  when: application_cutover_confirmed | default(false) | bool
+  when:
+    - application_cutover_confirmed | default(false) | bool
+    - "'homelab-apps.service' in ansible_facts.services"

@@ -7,12 +7,11 @@ output "tailscale_gateway_ip" {
 }
 
 output "advertised_routes" {
-  description = "Routes currently advertised by the existing Tailscale device home-gateway"
+  description = "Routes advertised by the Tailscale gateway"
   value = {
     exit_ipv4  = "0.0.0.0/0"
     exit_ipv6  = "::/0"
     management = "192.168.10.0/24"
-    services   = "192.168.11.0/24"
   }
 }
 

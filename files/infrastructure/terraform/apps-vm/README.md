@@ -12,10 +12,9 @@ host-key fingerprintを確認する。VMが提示するkeyと照合してから�
 検証していない単独の`ssh-keyscan`結果を信頼してはならない。toolboxはhost-key検証を有効にしたままにする。
 
 指定したimage URLの公式SHA-512 checksumはsecretではないdefault値として含めている。default VMIDは
-`112`で、101〜103はKubernetesが使用中である。defaultの`.42`管理アドレスは現在のVLAN 10 DHCP pool外にある。
-legacy cutover用に、アドレスを持たないVLAN 11 NICを2本目として作成する。Ansibleは、明示的なDHCP/MetalLB
-停止とARP確認が終わった後だけCaddy `.11.100`、AdGuard `.11.101`、Samba `.11.103`を割り当てる。
-`192.168.10.101`は将来の単一アドレスであり、このrootが取得することはない。
+`101`、管理アドレスは`192.168.10.101/24`である。旧Kubernetes VM 101〜103は2026-09-23に削除済み。
+VMIDを変更する際はTerraform planのVM replacementを確認し、同じIPを持つ旧VMと新VMを同時に
+起動しない。
 
 ```sh
 terraform init
@@ -38,11 +37,11 @@ Ansibleでruntime設定を収束させる。
 
 対象Proxmox datastoreではcontent type `Import`を有効にする。applyで使うAPI tokenには、対象node/datastore
 上で必要なstorage/VM権限だけを与える。`Sys.Audit`、`Sys.Modify`、`Datastore.AllocateTemplate`を含める。
-apply前にVMID `112`と未使用のフェーズ1 IP `192.168.10.42`を確認する。このrootは重複確認のためにIPを取得しない。
+apply前にVMID `101`が空いていることと、旧Apps VMが`192.168.10.101`を解放したことを確認する。
+このrootは重複確認のためにIPを取得しない。
 
-2本目のVLAN 11 NICは意図的にcloud-initで設定しない。providerのdeviceごとの`ip_config`は管理deviceにだけ
-適用されるため、legacy NICはこのrootからDHCP leaseもaddressも受け取らない。Ansibleのoneshot helperは、
-旧所有者をfenceし、重複address検出に成功した後だけ3つのaddressを割り当てる。
+VLAN 11 NICと旧service IP用の設定は移行時の互換性のために残っているが、現行のdefaultでは無効である。
+現行サービスは管理アドレス`192.168.10.101`へ集約されている。
 
 stateはlocalで管理し、mode `0600`を維持する。明示的なage暗号化recovery copyにはrepositoryの
 `make state-backup` entry pointを使用する。

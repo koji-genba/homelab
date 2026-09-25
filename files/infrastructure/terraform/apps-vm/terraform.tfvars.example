@@ -8,10 +8,10 @@ ssh_public_key    = "ssh-ed25519 AAAA... operator@example"
 node_name           = "pve1"
 datastore_id        = "vmpool"
 snippet_datastore_id = "local"
-vm_id               = 112
+vm_id               = 101
 vm_name             = "apps"
-management_ip       = "192.168.10.42/24"
-legacy_service_nic  = true
+management_ip       = "192.168.10.101/24"
+legacy_service_nic  = false
 final_management_ip = "192.168.10.101/24"
 
 # This is the official SHA512SUMS value for the pinned Debian image. If the

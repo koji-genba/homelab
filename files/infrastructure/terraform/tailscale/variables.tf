@@ -81,7 +81,7 @@ variable "advertised_routes" {
   description = "Routes already advertised by the imported subnet-router device, including exit-node routes"
   type        = set(string)
   # Preserve every route currently advertised by home-gateway. The default
-  # includes both exit-node routes and both local subnet routes so enabling
+  # includes both exit-node routes and the Server subnet route so enabling
   # Terraform management cannot withdraw an existing capability implicitly.
   default = [
     "0.0.0.0/0",

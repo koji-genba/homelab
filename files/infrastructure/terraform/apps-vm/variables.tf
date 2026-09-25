@@ -86,9 +86,7 @@ variable "domain" {
 variable "vm_id" {
   description = "Proxmox VMID reserved for the Apps VM"
   type        = number
-  # 101-103 are still occupied by the Kubernetes VMs. Keep this distinct
-  # until the old cluster has been removed and the VMID is explicitly moved.
-  default = 112
+  default     = 101
 }
 
 variable "vm_name" {
