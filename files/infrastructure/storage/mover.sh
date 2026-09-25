@@ -3,9 +3,10 @@ SETTLE_MINUTES=${SETTLE_MINUTES:-30}
 SRC=${SRC:-/mnt/cache-sata}
 DST=${DST:-/mnt/tank-gen2/data/shared}
 DATASET=tank-gen2/data/shared
-LOCKFILE=/var/run/mover.lock
+LOCKFILE=${MOVER_LOCKFILE:-/var/run/mover.lock}
+LOGFILE=${MOVER_LOGFILE:-/var/log/mover.log}
 
-exec >> /var/log/mover.log 2>&1
+exec >> "$LOGFILE" 2>&1
 
 if ! mountpoint -q "$SRC" || ! mountpoint -q "$DST"; then
     echo "$(date '+%F %T') ERROR: $SRC or $DST not mounted, abort"
@@ -25,18 +26,22 @@ while IFS= read -r -d '' src_file; do
     rel="${src_file#$SRC/}"
     dst_file="$DST/$rel"
 
-    mtime_before=$(stat -c %Y "$src_file" 2>/dev/null) || continue
+    source_before=$(stat -c '%Y:%u:%g' "$src_file" 2>/dev/null) || continue
 
-    mkdir -p "$(dirname "$dst_file")"
-
-    if rsync -a "$src_file" "$dst_file"; then
-        mtime_after=$(stat -c %Y "$src_file" 2>/dev/null)
-        if [ "$mtime_before" = "$mtime_after" ]; then
-            rm -f "$src_file"
-            echo "moved: $rel"
-        else
+    # /./ marks the start of the destination-relative path. With --relative,
+    # rsync also creates the parent directories with their source metadata.
+    if rsync -a --numeric-ids --relative "$SRC/./$rel" "$DST/"; then
+        source_after=$(stat -c '%Y:%u:%g' "$src_file" 2>/dev/null)
+        if [ "$source_before" != "$source_after" ]; then
             rm -f "$dst_file"
             echo "SKIP (modified during transfer): $rel"
+        elif [ "$(stat -c '%u:%g' "$dst_file" 2>/dev/null)" != "${source_after#*:}" ]; then
+            rm -f "$dst_file"
+            echo "FAILED (owner mismatch): $rel"
+            ((errors++))
+        else
+            rm -f "$src_file"
+            echo "moved: $rel"
         fi
     else
         rm -f "$dst_file"
