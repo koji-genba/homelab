@@ -68,7 +68,7 @@ resource "proxmox_virtual_environment_file" "tailscale_cloud_config" {
 resource "proxmox_virtual_environment_vm" "tailscale_gateway" {
   name        = "tailscale-gateway"
   node_name   = var.node_name
-  vm_id       = 105
+  vm_id       = 102
   description = "Tailscale Subnet Router for external access"
   tags        = ["infrastructure", "network", "tailscale"]
 

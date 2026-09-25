@@ -1,41 +1,33 @@
 #!/bin/sh
 set -eu
 
-phase1_ip=${PHASE1_IP:-192.168.10.42}
-vmid=${APPS_VMID:-112}
-service_iface=${LEGACY_SERVICE_INTERFACE:-ens19}
+management_ip=${APPS_MANAGEMENT_IP:-192.168.10.101}
+vmid=${APPS_VMID:-101}
+test $# -eq 0 || { echo "usage: $0" >&2; exit 2; }
 
-case "$phase1_ip" in
+case "$management_ip" in
   192.168.10.*) ;;
-  *) echo "Phase 1 address must be on VLAN 10: $phase1_ip" >&2; exit 1 ;;
+  *) echo "Apps management address must be on VLAN 10: $management_ip" >&2; exit 1 ;;
 esac
 case "$vmid" in
   ''|*[!0-9]*) echo "APPS_VMID must be numeric: $vmid" >&2; exit 1 ;;
 esac
-
-cat <<EOF
-Apps preflight (no address is assigned by this script)
-  VMID:        $vmid (must not be 101-103 while Kubernetes exists)
-  Phase 1 IP:  $phase1_ip (confirm unused; current DHCP pool is .100-.200)
-  VLAN 11 NIC: $service_iface (address-less until explicit cutover)
-  final mgmt:  192.168.10.101 (manual migration target)
-  legacy IPs:  192.168.11.100, .101, .103 (manual takeover targets)
-EOF
-
-if [ "${1:-}" != "--cutover" ]; then
-  echo "Static preflight complete. Use --cutover only after old owners are stopped and ARP is checked."
-  exit 0
+last_octet=${management_ip##*.}
+case "$last_octet" in
+  ''|*[!0-9]*) echo "APPS_MANAGEMENT_IP must be an IPv4 address: $management_ip" >&2; exit 1 ;;
+esac
+if [ "$last_octet" -lt 100 ] || [ "$last_octet" -gt 254 ]; then
+  echo "Apps management address must use a valid Proxmox VMID octet: $management_ip" >&2
+  exit 1
 fi
-
-test "${CUTOVER_CONFIRM:-}" = "I_HAVE_STOPPED_OLD_OWNERS" || {
-  echo "set CUTOVER_CONFIRM=I_HAVE_STOPPED_OLD_OWNERS after stopping old MetalLB/DHCP owners" >&2
+test "$vmid" -eq "$last_octet" || {
+  echo "APPS_VMID ($vmid) must match the management IP's fourth octet ($last_octet)" >&2
   exit 1
 }
-command -v arping >/dev/null 2>&1 || { echo "arping is required for cutover checks" >&2; exit 1; }
-command -v ip >/dev/null 2>&1 || { echo "iproute2 is required for cutover checks" >&2; exit 1; }
 
-for address in 192.168.11.100 192.168.11.101 192.168.11.103; do
-  echo "ARP duplicate-address check: $address on $service_iface"
-  arping -D -I "$service_iface" -c 2 -w 3 "$address"
-done
-echo "ARP checks passed; assigning addresses remains a separate explicit Ansible run."
+cat <<EOF
+Apps preflight (static check only; no address is assigned)
+  VMID:          $vmid
+  Management IP: $management_ip
+  Confirm that the ID is free and the previous VM has released this IP before apply.
+EOF

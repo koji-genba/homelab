@@ -55,7 +55,7 @@ VMが起動したら、Tailscale Admin Consoleでサブネットルーターを�
 1. [Tailscale Admin Console](https://login.tailscale.com/admin/machines)にアクセス
 2. tailscale-gatewayデバイスを選択
 3. "Edit route settings"をクリック
-4. アドバタイズされたルート（192.168.10.0/24, 192.168.11.0/24）を承認
+4. アドバタイズされたルート（192.168.10.0/24）とexit nodeを承認
 
 ### 5. 動作確認
 
@@ -78,10 +78,10 @@ Tailscaleクライアントをインストールしたデバイスから、ホ�
 
 ```bash
 # Sambaアクセス例（macOS/Linux）
-open smb://192.168.11.103
+open smb://192.168.10.101
 
 # SSH接続例
-ssh ubuntu@192.168.10.21
+ssh deploy@192.168.10.101
 ```
 
 ## トラブルシューティング
@@ -90,7 +90,7 @@ ssh ubuntu@192.168.10.21
 
 ```bash
 # VM内でTailscale設定確認
-sudo tailscale up --advertise-routes=192.168.10.0/24,192.168.11.0/24 --accept-routes
+sudo tailscale up --advertise-exit-node --advertise-routes=192.168.10.0/24 --accept-dns=false --hostname=home-gateway
 
 # Admin Consoleでルート承認状態確認
 ```

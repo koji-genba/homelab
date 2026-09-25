@@ -11,7 +11,7 @@ TerraformでProxmox VE上にElastiFlow（ネットワークフロー分析）用
 
 ## 構築されるVM
 
-- **elastiflow**: 192.168.10.40（管理VLAN10、VMID 110）
+- **elastiflow**: 192.168.10.103（管理VLAN10、VMID 103）
   - CPU 4core / メモリ32GB / ディスク128GB（初期値、`variables.tf`で調整可）
   - root disk: Proxmox storage `vmpool` 上に作成（`variables.tf` の `datastore_id` / `disk_size_gb` で変更可）
   - VM template: `template_vm_id`（初期値 9000）から full clone
@@ -30,14 +30,14 @@ ElastiFlow公式のSingle "Lab" Server構成は、Elasticsearch/Kibana/NetObserv
 - Kibanaデータ: `/var/lib/kibana`
 - ElastiFlow flow-collector設定: `/etc/elastiflow/flowcoll.yml`
 
-Proxmoxホスト側では、これらはVMID 110のdisk内に保存されます。root diskの実体パスはProxmox storage `vmpool` の種類に依存します。ホスト上で確認する場合:
+Proxmoxホスト側では、これらはVMID 103のdisk内に保存されます。root diskの実体パスはProxmox storage `vmpool` の種類に依存します。ホスト上で確認する場合:
 
 ```bash
-qm config 110
-pvesm path <qm config 110 の scsi0 に表示された volume-id>
+qm config 103
+pvesm path <qm config 103 の scsi0 に表示された volume-id>
 ```
 
-`vmpool` がZFS storageの場合は、`vm-110-disk-0` のようなZFS zvolとして管理されます。ディスクを削除するとElasticsearchの保存データも消えるため、長期保存したい場合は `disk_size_gb` の増量、Proxmox側のバックアップ、またはElasticsearchデータ用の専用ディスク追加を検討してください。
+`vmpool` がZFS storageの場合は、`vm-103-disk-0` のようなZFS zvolとして管理されます。ディスクを削除するとElasticsearchの保存データも消えるため、長期保存したい場合は `disk_size_gb` の増量、Proxmox側のバックアップ、またはElasticsearchデータ用の専用ディスク追加を検討してください。
 
 ## 前提条件
 
@@ -75,15 +75,15 @@ terraform apply
 VM作成後、`install.sh` をVM内で実行してElasticsearch/Kibana/flow-collectorをインストールします。
 
 ```bash
-scp install.sh ubuntu@192.168.10.40:/tmp/
-ssh ubuntu@192.168.10.40 sudo bash /tmp/install.sh
+scp install.sh ubuntu@192.168.10.103:/tmp/
+ssh ubuntu@192.168.10.103 sudo bash /tmp/install.sh
 ```
 
 SSH秘密鍵を明示する場合:
 
 ```bash
-scp -i ~/.ssh/k8s_ed25519 install.sh ubuntu@192.168.10.40:/tmp/
-ssh -i ~/.ssh/k8s_ed25519 ubuntu@192.168.10.40 sudo bash /tmp/install.sh
+scp -i ~/.ssh/k8s_ed25519 install.sh ubuntu@192.168.10.103:/tmp/
+ssh -i ~/.ssh/k8s_ed25519 ubuntu@192.168.10.103 sudo bash /tmp/install.sh
 ```
 
 スクリプトの内容:
@@ -96,18 +96,18 @@ ssh -i ~/.ssh/k8s_ed25519 ubuntu@192.168.10.40 sudo bash /tmp/install.sh
 
 ### 4. ルーター側（IX2215）でsFlowエクスポートを設定
 
-[../../network/README.md](../../network/README.md) の「フローエクスポート（sFlow）設定案」を参照し、IX2215からこのVM（192.168.10.40:6343）へsFlowを送信するよう設定します。
+[../../network/README.md](../../network/README.md) の「フローエクスポート（sFlow）設定案」を参照し、IX2215からこのVM（192.168.10.103:6343）へsFlowを送信するよう設定します。
 
 ### 5. Kibanaダッシュボードのインポート
 
-1. `http://192.168.10.40:5601` を開く
+1. `http://192.168.10.103:5601` を開く
 2. ElastiFlowのKibana用ダッシュボードファイルをダウンロード（[docs](https://docs.elastiflow.com/)のバージョンに合ったもの）
 3. Stack Management → Saved Objects → Import からインポート
 
 ### 6. 動作確認
 
 ```bash
-ssh ubuntu@192.168.10.40
+ssh ubuntu@192.168.10.103
 systemctl status elasticsearch kibana flowcoll
 curl -s http://127.0.0.1:9200/_cat/indices?v | grep elastiflow
 ```

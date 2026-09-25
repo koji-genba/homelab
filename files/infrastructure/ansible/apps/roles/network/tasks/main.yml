@@ -114,14 +114,35 @@
 - name: Apply resolver changes before verifying them
   ansible.builtin.meta: flush_handlers
 
-- name: Verify that the internal zone resolves through AdGuard Home
-  ansible.builtin.command: "getent ahostsv4 {{ apps_dns_probe_name }}"
-  register: network_dns_internal_probe
+- name: Read active management DNS servers
+  ansible.builtin.command: "resolvectl dns {{ apps_management_interface }}"
+  register: network_active_dns_servers
   changed_when: false
-  retries: 5
-  delay: 3
-  until: apps_dns_probe_address in network_dns_internal_probe.stdout
   when: network_migration_complete | bool
+
+- name: Read active management DNS domains
+  ansible.builtin.command: "resolvectl domain {{ apps_management_interface }}"
+  register: network_active_dns_domains
+  changed_when: false
+  when: network_migration_complete | bool
+
+- name: Reload networkd if a previous run left the DNS drop-in unapplied
+  ansible.builtin.command: networkctl reload
+  changed_when: true
+  when:
+    - network_migration_complete | bool
+    - >-
+      apps_management_ip not in network_active_dns_servers.stdout
+      or ('~' ~ apps_internal_dns_domain) not in network_active_dns_domains.stdout
+
+- name: Reconfigure the management link if its DNS drop-in was unapplied
+  ansible.builtin.command: "networkctl reconfigure {{ apps_management_interface }}"
+  changed_when: true
+  when:
+    - network_migration_complete | bool
+    - >-
+      apps_management_ip not in network_active_dns_servers.stdout
+      or ('~' ~ apps_internal_dns_domain) not in network_active_dns_domains.stdout
 
 - name: Verify that public names still resolve through the upstreams
   ansible.builtin.command: getent ahostsv4 deb.debian.org

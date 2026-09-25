@@ -42,6 +42,29 @@
           and ARP ownership is checked. NFS mounts must remain read-only until
           this gate is satisfied.
 
+    - name: Check whether a previous run installed the public DNS drop-in
+      ansible.builtin.stat:
+        path: /etc/systemd/resolved.conf.d/50-homelab.conf
+      register: apps_public_dns_dropin
+      when: network_migration_complete | default(false) | bool
+
+    - name: Read active global DNS before package installation
+      ansible.builtin.command: resolvectl dns
+      register: apps_active_global_dns
+      changed_when: false
+      when:
+        - network_migration_complete | default(false) | bool
+        - apps_public_dns_dropin.stat.exists | default(false)
+
+    - name: Resume an interrupted public DNS rollout
+      ansible.builtin.systemd:
+        name: systemd-resolved
+        state: restarted
+      when:
+        - network_migration_complete | default(false) | bool
+        - apps_public_dns_dropin.stat.exists | default(false)
+        - apps_upstream_dns_servers[0] not in (apps_active_global_dns.stdout | default(''))
+
     - name: Gather service facts before changing NFS access mode
       ansible.builtin.service_facts:
 

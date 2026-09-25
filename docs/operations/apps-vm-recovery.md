@@ -31,9 +31,9 @@ Proxmoxのuser・role・API token・ACLはGitにもTerraformにも宣言され�
 - API token `terraform@pve!apps-vm`（現在の有効期限は2026-12-04 23:59 JST。期限切れでも同様に403で失敗する）。
   現行tokenは`privsep=0`で作成されており、user `terraform@pve`のACLをそのまま継承する。`privsep=1`で
   作り直すとtoken自身へのACL付与が別途必要になるため、下記のACLだけでは足りなくなる。
-- 次の7 ACL path。`/vms/112`と`/nodes/pve1`はVM操作、`/storage/local`と`/storage/vmpool`はimage/disk
+- 次の7 ACL path。`/vms/101`と`/nodes/pve1`はVM操作、`/storage/local`と`/storage/vmpool`はimage/disk
   配置、`/sdn/zones/localnetwork`とその子2件はNIC割当に必要。
-  - `/vms/112`
+  - `/vms/101`
   - `/storage/local`
   - `/storage/vmpool`
   - `/nodes/pve1`
@@ -63,7 +63,7 @@ pve1のシェルで次を実行する（値は例。tokenのsecretは作成時�
 pveum role add HomelabTerraform -privs "Datastore.Allocate,Datastore.AllocateSpace,Datastore.AllocateTemplate,Datastore.Audit,SDN.Use,Sys.AccessNetwork,Sys.Audit,Sys.Modify,VM.Allocate,VM.Audit,VM.Config.CDROM,VM.Config.CPU,VM.Config.Cloudinit,VM.Config.Disk,VM.Config.HWType,VM.Config.Memory,VM.Config.Network,VM.Config.Options,VM.GuestAgent.Audit,VM.PowerMgmt"
 pveum user add terraform@pve
 pveum user token add terraform@pve apps-vm --expire <unixtime> --output-format json
-pveum acl modify /vms/112 --user terraform@pve --role HomelabTerraform
+pveum acl modify /vms/101 --user terraform@pve --role HomelabTerraform
 pveum acl modify /storage/local --user terraform@pve --role HomelabTerraform
 pveum acl modify /storage/vmpool --user terraform@pve --role HomelabTerraform
 pveum acl modify /nodes/pve1 --user terraform@pve --role HomelabTerraform

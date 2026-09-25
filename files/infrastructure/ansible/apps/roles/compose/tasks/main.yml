@@ -216,3 +216,14 @@
   when:
     - application_cutover_confirmed | default(false) | bool
     - compose_runtime_changed | default(false) | bool
+
+- name: Verify that the internal zone resolves through AdGuard Home
+  ansible.builtin.command: "getent ahostsv4 {{ apps_dns_probe_name }}"
+  register: compose_dns_internal_probe
+  changed_when: false
+  retries: 5
+  delay: 3
+  until: apps_dns_probe_address in compose_dns_internal_probe.stdout
+  when:
+    - network_migration_complete | bool
+    - application_cutover_confirmed | default(false) | bool

@@ -61,7 +61,7 @@ variable "domain" {
 variable "vm_id" {
   description = "VM ID"
   type        = number
-  default     = 110
+  default     = 103
 }
 
 variable "ip_address" {
