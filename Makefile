@@ -64,7 +64,7 @@ TOOLBOX_TAILSCALE_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_TAILSCALE_ENV) $(TOOLBOX_I
 .PHONY: ansible-lint ansible-check ansible-apply ansible-bootstrap-paths-test compose-reconcile-fixture terraform-apps-vm-lifecycle-test toolbox-uid-test cloud-init-test compose-config adguard-config-check gatus-config-check mover-test shellcheck secrets-scan preflight
 .PHONY: state-backup-preflight state-backup-preflight-test state-backup state-backup-push state-restore state-restore-test state-backup-test rollback-app
 .PHONY: secrets-encrypt secrets-decrypt-check
-.PHONY: tailscale-init tailscale-acl-preflight tailscale-plan tailscale-apply tailscale-import-core tailscale-import-acl tailscale-import-magic-dns tailscale-import-dns tailscale-import-router tailscale-acl-path-test
+.PHONY: tailscale-init tailscale-acl-preflight tailscale-plan tailscale-apply tailscale-import-core tailscale-import-acl tailscale-import-dns tailscale-import-router tailscale-acl-path-test
 
 toolbox-build:
 	docker build --tag $(TOOLBOX_BUILD_IMAGE) files/tools/homelab-toolbox
@@ -110,7 +110,6 @@ tailscale-apply: tailscale-init
 # resource address, not a shell glob.
 tailscale-import-core:
 	$(MAKE) tailscale-import-acl MANAGE_TAILNET="$(MANAGE_TAILNET)" ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
-	$(MAKE) tailscale-import-magic-dns MANAGE_TAILNET="$(MANAGE_TAILNET)" ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
 
 tailscale-import-acl: tailscale-init
 	test "$(MANAGE_TAILNET)" = true
@@ -118,18 +117,12 @@ tailscale-import-acl: tailscale-init
 	$(TOOLBOX_TAILSCALE_RUN) terraform -chdir=$(TAILSCALE_ROOT) import -input=false -var='manage_tailnet=true' -var="acl_policy_file=$(TAILSCALE_ACL_POLICY_CONTAINER)" 'tailscale_acl.policy[0]' acl
 	$(MAKE) tailscale-plan MANAGE_TAILNET=true ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
 
-tailscale-import-magic-dns: tailscale-init
-	test "$(MANAGE_TAILNET)" = true
-	$(MAKE) tailscale-acl-preflight MANAGE_TAILNET=true ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
-	$(TOOLBOX_TAILSCALE_RUN) terraform -chdir=$(TAILSCALE_ROOT) import -input=false -var='manage_tailnet=true' -var="acl_policy_file=$(TAILSCALE_ACL_POLICY_CONTAINER)" 'tailscale_dns_preferences.magic_dns[0]' dns_preferences
-	$(MAKE) tailscale-plan MANAGE_TAILNET=true ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
-
 tailscale-import-dns: tailscale-init
 	test "$(MANAGE_TAILNET)" = true
 	test "$(ENABLE_ADGUARD_DNS)" = true
 	test "$(ADGUARD_READY)" = true
 	$(MAKE) tailscale-acl-preflight MANAGE_TAILNET=true ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
-	$(TOOLBOX_TAILSCALE_RUN) terraform -chdir=$(TAILSCALE_ROOT) import -input=false -var='manage_tailnet=true' -var='enable_adguard_dns=true' -var='adguard_ready=true' -var="acl_policy_file=$(TAILSCALE_ACL_POLICY_CONTAINER)" 'tailscale_dns_nameservers.adguard[0]' dns_nameservers
+	$(TOOLBOX_TAILSCALE_RUN) terraform -chdir=$(TAILSCALE_ROOT) import -input=false -var='manage_tailnet=true' -var='enable_adguard_dns=true' -var='adguard_ready=true' -var="acl_policy_file=$(TAILSCALE_ACL_POLICY_CONTAINER)" 'tailscale_dns_configuration.adguard[0]' dns_configuration
 	$(MAKE) tailscale-plan MANAGE_TAILNET=true ENABLE_ADGUARD_DNS=true ADGUARD_READY=true ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
 
 tailscale-import-router: tailscale-init

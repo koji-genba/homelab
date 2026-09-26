@@ -22,7 +22,7 @@ variable "acl_policy_file" {
 }
 
 variable "enable_adguard_dns" {
-  description = "Permit Tailscale global DNS to use the ready Apps VM AdGuard address"
+  description = "Gate the whole tailnet DNS configuration: MagicDNS and the AdGuard global nameserver"
   type        = bool
   default     = false
 

@@ -62,6 +62,8 @@ Apps VM自身でも多層防御（defense in depth）として、Trusted CIDRと
 - 通常のDHCP clientにはpublic resolverを配布し、宅内全通信をAdGuardへ強制しない。
 - TailscaleのグローバルネームサーバーはAdGuard Homeの`192.168.10.101`とする。旧DNS service address
   `192.168.11.101`は撤去済みである。
+- このnameserverの`Use with exit node`を有効にし、exit node使用中のclientも内部名をAdGuardで解決する。
+  無効ならTailscaleは全DNSをexit nodeへ送り、そのresolverには内部recordがない。clientにはTailscale v1.88.1以上が必要である。
 - Tailscale gatewayの既存exit node機能を維持する。VLAN 20/30/40と撤去済みVLAN 11は広告せず、
   LAN向けAdvertiseRoutesはServerの`192.168.10.0/24`だけとする。
 - 固定宅内clientはsubnet routeを受け入れない。宅内外を移動するroaming clientは、宅外からServerへ
