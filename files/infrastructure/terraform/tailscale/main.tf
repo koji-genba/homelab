@@ -31,19 +31,45 @@ resource "tailscale_acl" "policy" {
   }
 }
 
-resource "tailscale_dns_preferences" "magic_dns" {
-  count      = var.manage_tailnet ? 1 : 0
-  magic_dns  = true
-  depends_on = [tailscale_acl.policy]
-}
-
 # The tailnet uses one global nameserver for AdGuard. This is gated until the
 # Apps VM has passed the final-address/AdGuard readiness check; no split-DNS
-# resource is created because the agreed design is global DNS only.
-resource "tailscale_dns_nameservers" "adguard" {
-  count       = local.manage_dns ? 1 : 0
-  nameservers = [var.final_apps_ip]
-  depends_on  = [tailscale_acl.policy]
+# configuration is created because the agreed design is global DNS only.
+resource "tailscale_dns_configuration" "adguard" {
+  count     = local.manage_dns ? 1 : 0
+  magic_dns = true
+  # Match the live value; if import plans a change here, stop and investigate.
+  override_local_dns = true
+
+  nameservers {
+    address = var.final_apps_ip
+    # Exit nodes otherwise receive all DNS; clients need Tailscale v1.88.1+.
+    use_with_exit_node = true
+  }
+
+  depends_on = [tailscale_acl.policy]
+
+  lifecycle {
+    # This owns all tailnet DNS; missing gates must fail instead of wiping DNS.
+    prevent_destroy = true
+  }
+}
+
+# Forget only the old state addresses, never delete live DNS settings.
+# These are harmless no-ops on a fresh state.
+removed {
+  from = tailscale_dns_preferences.magic_dns
+
+  lifecycle {
+    destroy = false
+  }
+}
+
+removed {
+  from = tailscale_dns_nameservers.adguard
+
+  lifecycle {
+    destroy = false
+  }
 }
 
 data "tailscale_device" "subnet_router" {
