@@ -32,8 +32,8 @@ resource "tailscale_acl" "policy" {
 }
 
 # The tailnet uses one global nameserver for AdGuard. This is gated until the
-# Apps VM has passed the final-address/AdGuard readiness check; no split-DNS
-# configuration is created because the agreed design is global DNS only.
+# Apps VM has passed the final-address/AdGuard readiness check. Clients use
+# its tailnet address without a gateway subnet route; DNS stays global.
 resource "tailscale_dns_configuration" "adguard" {
   count     = local.manage_dns ? 1 : 0
   magic_dns = true
@@ -41,7 +41,7 @@ resource "tailscale_dns_configuration" "adguard" {
   override_local_dns = true
 
   nameservers {
-    address = var.final_apps_ip
+    address = var.adguard_nameserver_ip
     # Exit nodes otherwise receive all DNS; clients need Tailscale v1.88.1+.
     use_with_exit_node = true
   }

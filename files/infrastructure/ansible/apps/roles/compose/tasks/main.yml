@@ -227,3 +227,18 @@
   when:
     - network_migration_complete | bool
     - application_cutover_confirmed | default(false) | bool
+
+- name: Verify the internal service answer through AdGuard Home
+  ansible.builtin.command: getent ahostsv4 dns.kojigenba-srv.com
+  register: compose_dns_answer_probe
+  changed_when: false
+  retries: 5
+  delay: 3
+  until: >-
+    (compose_dns_answer_probe.stdout_lines | default([])
+     | map('regex_replace', '\\s+.*$', '') | unique | list)
+    == [apps_tailnet_ip if (internal_records_use_tailnet_ip | default(false) | bool)
+        else '192.168.10.101']
+  when:
+    - network_migration_complete | bool
+    - application_cutover_confirmed | default(false) | bool

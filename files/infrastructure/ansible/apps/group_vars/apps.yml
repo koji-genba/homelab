@@ -20,6 +20,7 @@ apps_upstream_dns_servers:
 apps_dns_probe_name: dnsTestRecord.kojigenba-srv.com
 apps_dns_probe_address: 192.168.63.254
 network_migration_complete: true
+internal_records_use_tailnet_ip: true
 
 # Both flags remain false until the old Kubernetes/MetalLB/DHCP writers are
 # fenced and ARP ownership has been checked by an operator.

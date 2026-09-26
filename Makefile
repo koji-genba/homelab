@@ -14,6 +14,7 @@ TAILSCALE_VAR_ARGS := $(if $(MANAGE_TAILNET),-var="manage_tailnet=$(MANAGE_TAILN
 	$(if $(MANAGE_SUBNET_ROUTER),-var="manage_subnet_router=$(MANAGE_SUBNET_ROUTER)",) \
 	$(if $(ENABLE_ADGUARD_DNS),-var="enable_adguard_dns=$(ENABLE_ADGUARD_DNS)",) \
 	$(if $(ADGUARD_READY),-var="adguard_ready=$(ADGUARD_READY)",) \
+	$(if $(ADGUARD_NAMESERVER_IP),-var="adguard_nameserver_ip=$(ADGUARD_NAMESERVER_IP)",) \
 	$(if $(ACL_POLICY_FILE),-var="acl_policy_file=$(TAILSCALE_ACL_POLICY_CONTAINER)",)
 # toolboxはdigestで固定して実行する。publish workflowは`.github/workflows/toolbox-image.yml`
 # 自身の変更でも起動し、同じ`:1.0.1`タグを上書きするため、タグ参照では引かれるimageが再現しない。

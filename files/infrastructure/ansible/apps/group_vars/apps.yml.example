@@ -18,6 +18,8 @@ apps_upstream_dns_servers:
 apps_dns_probe_name: dnsTestRecord.kojigenba-srv.com
 apps_dns_probe_address: 192.168.63.254
 network_migration_complete: false
+# Keep LAN answers until the Apps VM tailnet DNS cutover is ready.
+internal_records_use_tailnet_ip: false
 legacy_service_addresses_enabled: false
 legacy_service_cutover_confirmed: false
 legacy_service_interface_name: ens19

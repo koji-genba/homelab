@@ -37,6 +37,10 @@ tailscale set --accept-routes=false
 | exit node利用 | 影響なし (`--exit-node` は別スイッチ) |
 | このマシンを宅外に持ち出して192.168.x.xへアクセス | **不可になる**(必要時はtrueに戻す) |
 
+ADR-0007適用後はroaming machineでも`accept-routes=false`のまま、Apps VMのserviceへ
+100.xで宅外から接続できる。上表の「不可になる」はApps VM以外のLAN hostに限り、
+それらへはgateway exit node経由で接続する（[ADR-0007](adr/0007-apps-vm-tailnet-dns.md)）。
+
 デスクトップ(常時宅内)なら実質ノーデメリット。
 
 ## 切り分けの記録

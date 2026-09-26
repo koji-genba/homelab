@@ -1,6 +1,6 @@
-# Apps VMのtailnet参加（issue #30 Stage 1）
+# Apps VMのtailnet参加（issue #30）
 
-Apps VMを`tag:apps`付きnodeとしてtailnetへ参加させ、Caddy（80/443）、AdGuard DNS（53/tcp、53/udp）、Samba（445）をVM自身の100.x addressでも公開する。Stage 1ではclientの接続先を変更しない。AdGuardのrewriteとtailnetのnameserverは`192.168.10.101`のままであり、DNS cutoverは後続stageで行う。
+Apps VMを`tag:apps`付きnodeとしてtailnetへ参加させ、Caddy（80/443）、AdGuard DNS（53/tcp、53/udp）、Samba（445）をVM自身の100.x addressでも公開する。Stage 1ではclientの接続先を変更せず、Stage 2でAdGuardのrewriteとtailnet nameserverを`100.86.147.127`へ切り替える。
 
 ## 前提とACL
 
@@ -56,6 +56,53 @@ curl -sS -o /dev/null -w '%{http_code}\n' --resolve dns.kojigenba-srv.com:443:<a
 curlが403ならsource NATと`tailscale debug prefs`の`NoSNAT`を確認する。必要ならSMBの`\\<apps_tailnet_ip>\shared`も確認する。VMでは`ss -lntup`でdocker-proxyがLAN addressと100.x addressの両方をlistenしていることを確認する。
 あわせて`ip route get 192.168.10.11`が`dev eth0`を返し、NFSがtailscale0へ迂回していないことを確認する。
 
-## 戻し方
+## Stage 1の戻し方
 
 このPRのCompose bindingと`APPS_TAILNET_IP` env追加をrevertし、Ansibleを再適用する。VMで`tailscale down`または`tailscale logout`を実行し、admin consoleからdeviceを削除する。`ip_nonlocal_bind` sysctlは残しても無害である。
+
+## Stage 2: DNS cutover
+
+Stage 1の`tag:apps`、固定IP、両addressでの80/443/53/445、direct経路を確認済みとする。
+常時宅内desktopのSMB shareを先に`\\192.168.10.101\<share>`へ再設定する。
+roaming clientのTailscaleはv1.88.1以上へ更新する。方針は[ADR-0007](../adr/0007-apps-vm-tailnet-dns.md)を参照する。
+
+1. このbranchから`make ansible-apply`を実行する。AdGuardの内部service名が100.xを返すようになり、
+   runtime変更によりcontainerがforce-recreateされる。DNSとSMBは短時間途切れる。
+   `nslookup dns.kojigenba-srv.com 192.168.10.101`と
+   `nslookup dns.kojigenba-srv.com 100.86.147.127`が、どちらも`100.86.147.127`を返すことを確認する。
+2. AdGuardの確認後、保存planを作成する。
+
+   ```sh
+   make tailscale-plan MANAGE_TAILNET=true ENABLE_ADGUARD_DNS=true \
+     ADGUARD_READY=true \
+     ACL_POLICY_FILE=files/infrastructure/terraform/tailscale/acl-policy.live.json
+   make tailscale-apply
+   ```
+
+   planでは`tailscale_dns_configuration.adguard[0]`の`nameservers[0].address`だけが
+   `192.168.10.101`から`100.86.147.127`へin-place変更されることを確認する。
+   その他の差分があれば適用を止める（[Terraform手順](../../files/infrastructure/terraform/tailscale/README.md)）。
+3. `accept-routes=false`のclientを宅外またはphone hotspotに接続し、
+   `https://dns.kojigenba-srv.com`が403にならず開くこと、
+   `\\samba.kojigenba-srv.com\shared`へ接続できることを確認する。
+   gateway exit nodeを有効にしても内部名が解決すること、`tailscale status`でApps VMへの
+   経路がdirectと表示されることも確認する。
+4. 全roaming clientの`accept-routes=false`を永続化する。Windows GUIでは
+   「Use Tailscale subnets」をoffにする。CLIでは`tailscale set --accept-routes=false`を使う。
+
+手順1と2を実環境へ適用し、確認してからPRをmergeする。
+
+### Stage 2のrollback
+
+`files/infrastructure/ansible/apps/group_vars/apps.yml`の`internal_records_use_tailnet_ip: false`へ戻して
+`make ansible-apply`を実行する。Terraformは次のplan/applyでnameserverをLAN IPへ戻す。
+
+```sh
+make tailscale-plan MANAGE_TAILNET=true ENABLE_ADGUARD_DNS=true \
+  ADGUARD_READY=true ADGUARD_NAMESERVER_IP=192.168.10.101 \
+  ACL_POLICY_FILE=files/infrastructure/terraform/tailscale/acl-policy.live.json
+make tailscale-apply
+```
+
+admin consoleで先にnameserverを戻した場合は後でTerraformと整合させる。
+宅外roaming clientは旧LAN IPへ到達するため、`accept-routes`を再び有効にする。

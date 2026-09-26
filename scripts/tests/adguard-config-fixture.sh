@@ -45,6 +45,8 @@ env.filters["quote"] = quote
 env.filters["bool"] = as_bool
 context = {
     "network_migration_complete": False,
+    "internal_records_use_tailnet_ip": False,
+    "apps_tailnet_ip": "100.86.147.127",
     "legacy_ldaps_ip": "192.168.11.102",
     "secrets_runtime": {
         "adguard": {
@@ -53,7 +55,8 @@ context = {
         }
     },
 }
-rendered = env.get_template("AdGuardHome.yaml.j2").render(**context)
+template = env.get_template("AdGuardHome.yaml.j2")
+rendered = template.render(**context)
 parsed = yaml.safe_load(rendered)
 assert parsed["schema_version"] == 34
 assert parsed["http"]["doh"]["routes"]
@@ -73,6 +76,29 @@ assert [item["url"] for item in parsed["filters"]] == expected_filters
 assert [item["id"] for item in parsed["filters"]] == list(range(1, 7))
 assert len({item["name"] for item in parsed["filters"]}) == len(parsed["filters"])
 assert parsed["user_rules"] == ["@@||t.co^", "@@||tailscale.com^"]
+service_names = {
+    "staging.kojigenba-srv.com",
+    "prod.kojigenba-srv.com",
+    "samba.kojigenba-srv.com",
+    "staging.stashpad.kojigenba-srv.com",
+    "prod.stashpad.kojigenba-srv.com",
+    "sillytavern.kojigenba-srv.com",
+    "dns.kojigenba-srv.com",
+    "status.kojigenba-srv.com",
+}
+for migrated, gate, expected_web, expected_smb in (
+    (False, False, "192.168.11.100", "192.168.11.103"),
+    (True, False, "192.168.10.101", "192.168.10.101"),
+    (True, True, "100.86.147.127", "100.86.147.127"),
+):
+    context.update(network_migration_complete=migrated,
+                   internal_records_use_tailnet_ip=gate)
+    rewrites = {item["domain"]: item["answer"] for item in yaml.safe_load(
+        template.render(**context))["filtering"]["rewrites"]}
+    assert rewrites["dnsTestRecord.kojigenba-srv.com"] == "192.168.63.254"
+    assert set(rewrites) == service_names | {"dnsTestRecord.kojigenba-srv.com"}
+    for name in service_names:
+        assert rewrites[name] == (expected_smb if name.startswith("samba.") else expected_web)
 destination.write_text(rendered, encoding="utf-8")
 PY
 

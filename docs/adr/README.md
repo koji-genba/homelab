@@ -12,3 +12,4 @@ ADR は採用時点の判断を固定するもので、前提が変わった場�
 | [0004](0004-dns-and-minimal-observability.md) | 承認済み | AdGuard Home と最小監視を採用する |
 | [0005](0005-secrets-and-terraform-state.md) | 承認済み | SOPS/age と暗号化 state recovery copy を採用する |
 | [0006](0006-ai-dataset-single-export.md) | 承認済み | DGX Spark のデータ置き場を単一 NFS export にする |
+| [0007](0007-apps-vm-tailnet-dns.md) | 承認済み | Apps VMのtailnet addressへ内部DNSを切り替える（0003と0004の一部を更新） |

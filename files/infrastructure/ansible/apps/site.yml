@@ -42,6 +42,22 @@
           and ARP ownership is checked. NFS mounts must remain read-only until
           this gate is satisfied.
 
+    - name: Validate the internal DNS tailnet address gate
+      ansible.builtin.assert:
+        that:
+          - network_migration_complete | default(false) | bool
+          - apps_tailnet_ip | default('') | length > 0
+          - >-
+            apps_tailnet_ip | default('') is match(
+              '^100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.'
+              ~ '(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\\.'
+              ~ '(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])$'
+            )
+        fail_msg: >-
+          internal_records_use_tailnet_ip requires the completed network
+          migration and an Apps VM IPv4 address inside 100.64.0.0/10.
+      when: internal_records_use_tailnet_ip | default(false) | bool
+
     - name: Check whether a previous run installed the public DNS drop-in
       ansible.builtin.stat:
         path: /etc/systemd/resolved.conf.d/50-homelab.conf
