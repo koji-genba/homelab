@@ -30,7 +30,12 @@ sudo rmdir /run/tailscale-auth
 trap - EXIT
 ```
 
-登録後、admin consoleの **Machines > Apps VMのdevice > Edit IPv4** で割り当てられた100.x addressを固定する。`tailscale ip -4`で実値を確認し、管理端末のignore対象`files/infrastructure/ansible/apps/group_vars/apps.yml`に`apps_tailnet_ip`として設定する。exampleの`100.64.0.101`を実値として使わない。Ansibleは未設定または不一致なら検出値を表示して停止する。
+登録後、VMで`tailscale status --json | jq '.Self.Tags, .Self.KeyExpiry'`を実行し、`["tag:apps"]`と`null`を
+確認する。tagが空ならauth keyにtagが付いていなかった。user所有nodeとして登録され、key expiryが有効になる。
+admin consoleの **Edit ACL tags** で`tag:apps`を付け、それでもexpiryが残る場合は **Disable key expiry** を実行する。
+expiryが残ると、失効日にtailnetからApps VMが外れる。
+
+admin consoleの **Machines > Apps VMのdevice > Edit IPv4** で割り当てられた100.x addressを固定する。`tailscale ip -4`で実値を確認し、管理端末のignore対象`files/infrastructure/ansible/apps/group_vars/apps.yml`に`apps_tailnet_ip`として設定する。exampleの`100.64.0.101`を実値として使わない。Ansibleは未設定または不一致なら検出値を表示して停止する。
 
 ## 適用順序
 
