@@ -15,6 +15,14 @@ fail() {
   exit 1
 }
 
+systemctl is-active --quiet tailscaled.service || fail "tailscaled is inactive"
+tailnet_status=$(tailscale status --json) || fail "unable to read Tailscale status"
+tailnet_backend=$(printf '%s\n' "$tailnet_status" | sed -n 's/^[[:space:]]*"BackendState": *"\([^"]*\)".*/\1/p')
+test "$tailnet_backend" = Running || fail "Tailscale backend is not Running: $tailnet_backend"
+tailnet_ip=$(tailscale ip -4) || fail "unable to read Tailscale IPv4"
+test "$tailnet_ip" = {{ apps_tailnet_ip | quote }} \
+  || fail "Tailscale IPv4 is $tailnet_ip; expected {{ apps_tailnet_ip }}"
+
 rootfs_max_percent={{ healthchecks_rootfs_max_percent | default(90) | int }}
 rootfs_usage=$(df -P / | awk 'NR == 2 { sub(/%$/, "", $5); print $5 }')
 case "$rootfs_usage" in

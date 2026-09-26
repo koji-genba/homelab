@@ -11,7 +11,9 @@ services:
       CADDY_TRUSTED_NETWORKS: "${CADDY_TRUSTED_NETWORKS:?set CADDY_TRUSTED_NETWORKS}"
     ports:
       - "${EDGE_BIND_IP:-0.0.0.0}:80:80/tcp"
+      - "${APPS_TAILNET_IP:?set APPS_TAILNET_IP}:80:80/tcp"
       - "${EDGE_BIND_IP:-0.0.0.0}:443:443/tcp"
+      - "${APPS_TAILNET_IP:?set APPS_TAILNET_IP}:443:443/tcp"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

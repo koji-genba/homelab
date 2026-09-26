@@ -98,6 +98,7 @@
     - docker
     - storage
     - network
+    - tailscale
     - firewall
     - role: secrets
       when: application_cutover_confirmed | default(false) | bool

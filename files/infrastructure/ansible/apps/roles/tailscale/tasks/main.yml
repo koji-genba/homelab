@@ -1,0 +1,113 @@
+---
+- name: Install Tailscale signing key directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Download Tailscale's official repository key
+  ansible.builtin.get_url:
+    url: "https://pkgs.tailscale.com/stable/debian/{{ ansible_facts.distribution_release }}.noarmor.gpg"
+    dest: /etc/apt/keyrings/tailscale.gpg
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Configure Tailscale's official repository
+  ansible.builtin.deb822_repository:
+    name: tailscale
+    types: deb
+    uris: https://pkgs.tailscale.com/stable/debian
+    suites: "{{ ansible_facts.distribution_release }}"
+    components: main
+    architectures:
+      - >-
+        {{ 'amd64' if ansible_architecture == 'x86_64'
+           else 'arm64' if ansible_architecture in ['aarch64', 'arm64']
+           else ansible_architecture }}
+    signed_by: /etc/apt/keyrings/tailscale.gpg
+    state: present
+
+- name: Install Tailscale
+  ansible.builtin.apt:
+    name: tailscale
+    state: present
+    update_cache: true
+
+# Docker publishes ports on the 100.x address. Let dockerd bind it even when
+# tailscale0 is not up yet, so LAN Compose services never depend on tailscaled.
+- name: Permit Docker to bind the tailnet address before tailscale0 exists
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-homelab-tailnet.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      net.ipv4.ip_nonlocal_bind = 1
+  notify: Apply sysctl
+
+- name: Apply nonlocal bind before Compose starts
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable Tailscale daemon
+  ansible.builtin.systemd:
+    name: tailscaled
+    enabled: true
+    state: started
+
+- name: Read Tailscale status
+  ansible.builtin.command: tailscale status --json
+  register: tailscale_status
+  changed_when: false
+
+- name: Require manual Tailscale registration
+  ansible.builtin.assert:
+    that: (tailscale_status.stdout | from_json).BackendState == 'Running'
+    fail_msg: >-
+      Apps VM Tailscale is not Running. Complete the manual registration step
+      in docs/operations/apps-vm-tailnet.md, then re-run Ansible.
+
+- name: Read Tailscale preferences
+  ansible.builtin.command: tailscale debug prefs
+  register: tailscale_prefs
+  changed_when: false
+
+# RouteAll=false keeps 192.168.10.0/24, including NFS at .10.11, off the
+# gateway subnet router. CorpDNS=false preserves network role's resolved setup.
+# NoSNAT=true preserves the 100.x client source through Docker DNAT; otherwise
+# Caddy sees the bridge address and rejects protected UIs with HTTP 403.
+- name: Enforce Apps VM Tailscale routing and DNS preferences
+  ansible.builtin.command: >-
+    tailscale set --accept-routes=false --accept-dns=false
+    --snat-subnet-routes=false
+  # Only reached when a preference differs, so running it is a change.
+  changed_when: true
+  when: >-
+    (tailscale_prefs.stdout | from_json).RouteAll | bool
+    or (tailscale_prefs.stdout | from_json).CorpDNS | bool
+    or not ((tailscale_prefs.stdout | from_json).NoSNAT | bool)
+
+- name: Read Apps VM Tailscale IPv4
+  ansible.builtin.command: tailscale ip -4
+  register: tailscale_detected_ip
+  changed_when: false
+
+- name: Require a pinned Apps VM Tailscale IPv4 setting
+  ansible.builtin.assert:
+    that:
+      - apps_tailnet_ip is defined
+      - apps_tailnet_ip | default('') | length > 0
+    fail_msg: >-
+      Detected Apps VM Tailscale IPv4: {{ tailscale_detected_ip.stdout | trim }}.
+      Pin this address in the admin console, set apps_tailnet_ip in
+      group_vars/apps.yml, and re-run Ansible.
+
+- name: Verify pinned Apps VM Tailscale IPv4
+  ansible.builtin.assert:
+    that: (tailscale_detected_ip.stdout | trim) == apps_tailnet_ip
+    fail_msg: >-
+      Detected Apps VM Tailscale IPv4: {{ tailscale_detected_ip.stdout | trim }};
+      expected {{ apps_tailnet_ip }}. Pin the address in the admin console or
+      update apps_tailnet_ip in group_vars/apps.yml, then re-run Ansible.
