@@ -63,7 +63,8 @@ curlが403ならsource NATと`tailscale debug prefs`の`NoSNAT`を確認する�
 ## Stage 2: DNS cutover
 
 Stage 1の`tag:apps`、固定IP、両addressでの80/443/53/445、direct経路を確認済みとする。
-常時宅内desktopのSMB shareを先に`\\192.168.10.101\<share>`へ再設定する。
+常時宅内desktopのSMB shareは名前のままでよい（切替後はApps VMとのdirect WireGuard経路になる。
+[target-zones](../network/target-zones.md#dnsとtailscale)参照）。
 roaming clientのTailscaleはv1.88.1以上へ更新する。方針は[ADR-0007](../adr/0007-apps-vm-tailnet-dns.md)を参照する。
 
 1. このbranchから`make ansible-apply`を実行する。AdGuardの内部service名が100.xを返すようになり、

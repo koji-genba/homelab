@@ -65,10 +65,18 @@ Apps VM自身でも多層防御（defense in depth）として、Trusted CIDRと
   同addressを返す。`Use with exit node`を有効にし、exit node使用中も内部名を解決する。
   clientにはTailscale v1.88.1以上が必要である。
 - Tailscale gatewayの既存exit node機能を維持する。VLAN 20/30/40と撤去済みVLAN 11は広告せず、
-  LAN向けAdvertiseRoutesは当面Serverの`192.168.10.0/24`だけとする。広告撤去は後日の選択肢である。
-- roaming clientを含む全tailnet clientで`accept-routes=false`を維持する。常時宅内desktopのSMBは
-  `\\192.168.10.101\<share>`を指定する。Apps VM以外のLAN管理UIは宅外でgateway exit nodeから利用する。
-  判断は[ADR-0007](../adr/0007-apps-vm-tailnet-dns.md)を参照する。
+  LAN向けAdvertiseRoutesはServerの`192.168.10.0/24`を維持する。exit nodeは自身が接続するLANを
+  subnet routeとして広告しない限り、そのLANへ転送しない（Tailscaleの仕様。2026-09-26に広告を外すと
+  exit node経由でPVE、IX2215、ElastiFlowへ届かなくなることを確認した）。したがってこの広告は、宅外から
+  exit node経由でApps VM以外のLAN管理UIへ入るために必要である。
+- Apps VMのserviceは名前（`100.86.147.127`）で使う。Apps VM宛てtrafficは`192.168.10.0/24`を通らないため、
+  clientの`accept-routes`設定はApps VMとの通信に影響しない。常時宅内desktopのSMBも名前のままでよく、
+  Apps VMとのdirect WireGuard経路で1GbE相当の速度が出ることを2026-09-26に確認した。
+  IX2215の単一flowが低速側に落ちる既知事象（[SMB調査記録](../smb-performance-troubleshooting.md)）に
+  当たる場合だけ`\\192.168.10.101\<share>`へ切り替える。
+- roaming clientを含む全tailnet clientで`accept-routes=false`を推奨とする。trueでも影響はApps VM以外の
+  `192.168.10.x`宛てtrafficがgateway経由になることに限られる。Apps VM以外のLAN管理UIは宅外で
+  gateway exit nodeから利用する。判断は[ADR-0007](../adr/0007-apps-vm-tailnet-dns.md)を参照する。
 
 ## 有線ポートと無線AP
 

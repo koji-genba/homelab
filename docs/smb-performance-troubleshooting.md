@@ -40,6 +40,9 @@ tailscale set --accept-routes=false
 ADR-0007適用後はroaming machineでも`accept-routes=false`のまま、Apps VMのserviceへ
 100.xで宅外から接続できる。上表の「不可になる」はApps VM以外のLAN hostに限り、
 それらへはgateway exit node経由で接続する（[ADR-0007](adr/0007-apps-vm-tailnet-dns.md)）。
+2026-09-26時点で、desktopから名前でSMBへ接続するとApps VMとのdirect WireGuard経路（gatewayを経由しない）
+となり、1GbE相当の速度で実用上の劣化はなかった。2026-07の低速はWireGuardそのものではなく、
+当時1vCPU/768MBのgateway VMでの暗号化・転送がボトルネックだった。
 
 デスクトップ(常時宅内)なら実質ノーデメリット。
 
