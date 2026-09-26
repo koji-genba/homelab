@@ -118,6 +118,7 @@ pveum acl modify /sdn/zones/localnetwork/vmbr0/11 --user terraform@pve --role Ho
 10. review済みの保存planだけを`make terraform-apply`でapplyする。targetはplanの欠落、symlink、緩すぎる
     modeを拒否し、`-auto-approve`を使用しない。apply後に暗号化state recovery copyを作成する。
 11. Ansible bootstrapとservice deploymentを実行する。
+    VM再構築時は[Apps VMのtailnet参加手順](apps-vm-tailnet.md)で手動再登録する。古いdeviceをadmin consoleから先に削除して100.x addressを解放し、新しいdeviceで同じIPv4を再固定してから`apps_tailnet_ip`を確認し、Ansibleを適用する。
 12. containerを起動する前に、全NFS mountとmarkerを検証する。
 13. Compose projectをdeployし、移行runbookの受入試験を実行する。
 14. 必要な場合だけ、別Terraform rootを使ってTailscale DNS/route/grantを復元する。

@@ -4,6 +4,7 @@ services:
     image: ghcr.io/koji-genba/samba@sha256:72441fe92383b35e12f7cd9c31c89a5f1e711101fad9deccc31e99995601dbb5
     ports:
       - "${SMB_BIND_IP:-0.0.0.0}:445:445/tcp"
+      - "${APPS_TAILNET_IP:?set APPS_TAILNET_IP}:445:445/tcp"
     volumes:
       - ./config/smb.conf:/etc/samba/smb.conf:ro
       - ./config/users.json:/etc/samba/users/users.json:ro

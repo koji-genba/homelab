@@ -59,6 +59,7 @@ Apps VM自身でも多層防御（defense in depth）として、Trusted CIDRと
 
 ## DNSとTailscale
 
+- Apps VMは`tag:apps`付きtailnet nodeであり、VM自身の100.x addressでもCaddy、DNS、Sambaを公開する。issue #30のDNS cutoverまではclientの参照先を`192.168.10.101`のままにする。
 - 通常のDHCP clientにはpublic resolverを配布し、宅内全通信をAdGuardへ強制しない。
 - TailscaleのグローバルネームサーバーはAdGuard Homeの`192.168.10.101`とする。旧DNS service address
   `192.168.11.101`は撤去済みである。

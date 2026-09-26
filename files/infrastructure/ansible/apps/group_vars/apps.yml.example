@@ -3,6 +3,8 @@
 # NFS export. This file contains no credentials.
 apps_management_ip: 192.168.10.42
 apps_final_management_ip: 192.168.10.101
+# Required: Apps VM's Tailscale IPv4, fixed in the admin console. Example only.
+apps_tailnet_ip: 100.64.0.101
 apps_hostname: apps
 
 # Host resolver. The internal zone is routed to the local AdGuard Home only;
