@@ -54,6 +54,20 @@ variable "final_apps_ip" {
   }
 }
 
+variable "adguard_nameserver_ip" {
+  description = "Address tailnet clients use for AdGuard; the Apps VM tailnet IP keeps DNS independent of the gateway subnet route"
+  type        = string
+  default     = "100.86.147.127"
+
+  validation {
+    condition = can(cidrhost("${var.adguard_nameserver_ip}/32", 0)) && (
+      try(cidrhost("${var.adguard_nameserver_ip}/10", 0), "") == "100.64.0.0" ||
+      var.adguard_nameserver_ip == var.final_apps_ip
+    )
+    error_message = "adguard_nameserver_ip must be an IPv4 address in 100.64.0.0/10 or equal final_apps_ip for rollback."
+  }
+}
+
 variable "subnet_router_hostname" {
   description = "Existing Tailscale device hostname to tag and enable routes on (Tailnet hostname, not the PVE VM name)"
   type        = string

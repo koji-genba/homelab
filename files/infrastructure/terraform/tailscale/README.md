@@ -57,8 +57,8 @@ importは自動実行せず、live valueをconfigurationへコピーもしない
 import済みdeviceのrouteを有効化するだけである。
 
 `enable_adguard_dns`は別のdefault false gateである。`manage_tailnet=true`かつ`adguard_ready=true`でなければ
-有効にできない。有効にするとMagicDNSとtailnet global DNS serverを管理し、後者を最終Apps address
-`192.168.10.101`へ向ける。
+有効にできない。有効にするとMagicDNSとtailnet global DNS serverを管理し、後者をApps VMのtailnet IP
+`100.86.147.127`へ向ける。`final_apps_ip`はreadinessの基準とrollback用LAN addressとして残す。
 Split DNSは意図的に管理しない。フェーズ1ではreadyでないaddressへTailscale DNSを変更しない。
 
 ### Exit node使用時のDNSと既存stateの移行
@@ -67,7 +67,7 @@ Tailscaleは通常、exit node使用時に全DNS queryをexit nodeへ送る。ga
 AdGuard nameserverで`Use with exit node`（`use_with_exit_node = true`）を有効にし、内部名もAdGuardで解決する。
 この設定を使うclientにはTailscale v1.88.1以上が必要である。
 
-旧2 resourceからの移行は一度だけ、次を実行して保存planをreviewする。
+以下は旧2 resourceからの初回移行時の記録である。一度だけ次を実行して保存planをreviewする。
 
 ```sh
 make tailscale-import-dns MANAGE_TAILNET=true ENABLE_ADGUARD_DNS=true \
@@ -91,6 +91,27 @@ stateから除外され、`tailscale_dns_configuration.adguard[0]`では最大�
 `prevent_destroy`ごとresourceが消え、planがtailnet DNS設定全体のdestroyになる。その後にrevertし、
 旧2 resourceをrevert後のMake target `tailscale-import-magic-dns`と`tailscale-import-dns`で再importする
 （`tailscale-import-core`はstate済みのACLもimportしようとして失敗する）。
+
+### Apps VM tailnet DNS cutover（issue #30 Stage 2）
+
+AdGuardの内部recordを先に`100.86.147.127`へ切り替え、LAN IPとtailnet IPの両方から
+正しい回答を確認する。その後、次の保存planをreviewする。
+
+```sh
+make tailscale-plan MANAGE_TAILNET=true ENABLE_ADGUARD_DNS=true \
+  ADGUARD_READY=true \
+  ACL_POLICY_FILE=files/infrastructure/terraform/tailscale/acl-policy.live.json
+make tailscale-apply
+```
+
+期待するplanは`tailscale_dns_configuration.adguard[0]`のin-place変更1件だけであり、
+`nameservers[0].address`が`192.168.10.101`から`100.86.147.127`へ変わる。
+`use_with_exit_node`、`magic_dns`、`override_local_dns`、`search_paths`、`split_dns`は変えない。
+これ以外の差分や`known after apply`があれば停止する。
+
+rollback時は`ADGUARD_NAMESERVER_IP=192.168.10.101`を上記`make tailscale-plan`に追加する。
+Makeが`-var="adguard_nameserver_ip=192.168.10.101"`を渡すので、addressだけ戻るplanを確認して
+`make tailscale-apply`する。admin consoleで先に戻した場合も、後でTerraformと整合させる。
 
 OAuth/API credentialはproviderが環境変数から読み取るため、KeePassXCから管理端末へ一時的に注入する。
 Tailscale Terraform toolbox runnerにだけ渡し、runtime SOPS bundle、Terraform variable、file、Apps VMには保存しない。

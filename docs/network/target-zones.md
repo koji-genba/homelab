@@ -59,17 +59,16 @@ Apps VM自身でも多層防御（defense in depth）として、Trusted CIDRと
 
 ## DNSとTailscale
 
-- Apps VMは`tag:apps`付きtailnet nodeであり、VM自身の100.x addressでもCaddy、DNS、Sambaを公開する。issue #30のDNS cutoverまではclientの参照先を`192.168.10.101`のままにする。
+- Apps VMは`tag:apps`付きtailnet nodeであり、`100.86.147.127`でもCaddy、DNS、Sambaを公開する。
 - 通常のDHCP clientにはpublic resolverを配布し、宅内全通信をAdGuardへ強制しない。
-- TailscaleのグローバルネームサーバーはAdGuard Homeの`192.168.10.101`とする。旧DNS service address
-  `192.168.11.101`は撤去済みである。
-- このnameserverの`Use with exit node`を有効にし、exit node使用中のclientも内部名をAdGuardで解決する。
-  無効ならTailscaleは全DNSをexit nodeへ送り、そのresolverには内部recordがない。clientにはTailscale v1.88.1以上が必要である。
+- Tailscaleのglobal nameserverはApps VMのtailnet IP `100.86.147.127`とし、AdGuardの内部service recordも
+  同addressを返す。`Use with exit node`を有効にし、exit node使用中も内部名を解決する。
+  clientにはTailscale v1.88.1以上が必要である。
 - Tailscale gatewayの既存exit node機能を維持する。VLAN 20/30/40と撤去済みVLAN 11は広告せず、
-  LAN向けAdvertiseRoutesはServerの`192.168.10.0/24`だけとする。
-- 固定宅内clientはsubnet routeを受け入れない。宅内外を移動するroaming clientは、宅外からServerへ
-  接続するときだけ`Use Tailscale subnets`（`accept-routes`）を有効にする。自動切替はPhase 4の要件にしない。
-- DNS切替後、AdGuardの通常解決、内部record、block、allowlistとtailnetからの名前解決を確認済みである。
+  LAN向けAdvertiseRoutesは当面Serverの`192.168.10.0/24`だけとする。広告撤去は後日の選択肢である。
+- roaming clientを含む全tailnet clientで`accept-routes=false`を維持する。常時宅内desktopのSMBは
+  `\\192.168.10.101\<share>`を指定する。Apps VM以外のLAN管理UIは宅外でgateway exit nodeから利用する。
+  判断は[ADR-0007](../adr/0007-apps-vm-tailnet-dns.md)を参照する。
 
 ## 有線ポートと無線AP
 
