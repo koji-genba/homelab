@@ -10,7 +10,7 @@ TailscaleのACL `tagOwners`に`tag:apps`を含める。既存のACLを置き換�
 "tagOwners": {"tag:apps": ["autogroup:admin"]}
 ```
 
-管理端末のignore対象`files/infrastructure/terraform/tailscale/acl-policy.live.json`にreview済みlive exportを保存して編集し、[Tailscale Terraform手順](../../files/infrastructure/terraform/tailscale/README.md)の`make tailscale-plan MANAGE_TAILNET=true ACL_POLICY_FILE=files/infrastructure/terraform/tailscale/acl-policy.live.json`でplanを確認し、同手順の`make tailscale-apply`で反映する。ACLの他の定義を維持する。
+管理端末のignore対象`files/infrastructure/terraform/tailscale/acl-policy.live.json`にreview済みlive exportを保存して編集し、[Tailscale Terraform手順](../../files/infrastructure/terraform/tailscale/README.md)の`make tailscale-plan MANAGE_TAILNET=true ENABLE_ADGUARD_DNS=true ADGUARD_READY=true ACL_POLICY_FILE=files/infrastructure/terraform/tailscale/acl-policy.live.json`でplanを確認し（DNS設定がstateにあるため、ACLだけの変更でもDNS gateを付ける）、同手順の`make tailscale-apply`で反映する。ACLの他の定義を維持する。
 
 ## 手動登録
 
