@@ -1,7 +1,12 @@
 # Docker Compose projectの構成
 
 各directoryは独立してdeployできるprojectである。全projectが外部の`homelab_frontend` networkに参加する。
-HTTP(S)のentry pointはedge projectだけで、DNSとSMBは必要なhost portだけを公開する。Ansible roleはNFS
+HTTP(S)のentry pointはedge projectだけで、DNSとSMBは必要なhost portだけを公開する。
+内部名はApps VMのtailnet IPへ解決される（[ADR-0007](../../../docs/adr/0007-apps-vm-tailnet-dns.md)）。
+host portを公開するprojectは、LAN側の`*_BIND_IP`に加えて`${APPS_TAILNET_IP}`にもbindする。
+LAN側だけだとtailnet clientから届かない。新しいFQDNは
+`files/infrastructure/ansible/apps/roles/secrets/templates/AdGuardHome.yaml.j2`の`rewrites`へ
+`{{ web_ip }}`で追加し、`scripts/tests/adguard-config-fixture.sh`の`service_names`も更新する。Ansible roleはNFS
 mount guardの成功後にnetworkを作成し、projectを起動する。Composeには意図的にrestart policyを設定しない。
 systemdの`homelab-apps.service`を唯一の起動主体とすることで、Dockerがboot時に未検証のlocal directoryを
 bind mountして復旧することを防ぐ。

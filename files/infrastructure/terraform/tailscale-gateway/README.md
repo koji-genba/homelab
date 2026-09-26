@@ -74,15 +74,28 @@ ip route
 
 ### 外部からのアクセス
 
-Tailscaleクライアントをインストールしたデバイスから、ホームラボのサービスにアクセスできます。
+Apps VMは自身がtailnet node（`tag:apps`、`100.86.147.127`）であり、内部名は100.xへ解決される。
+Apps VMのserviceへはgatewayを経由せず、名前で接続する（[ADR-0007](../../../../docs/adr/0007-apps-vm-tailnet-dns.md)）。
 
 ```bash
 # Sambaアクセス例（macOS/Linux）
-open smb://192.168.10.101
+open smb://samba.kojigenba-srv.com
 
-# SSH接続例
-ssh deploy@192.168.10.101
+# SSH接続例（MagicDNS名またはtailnet IP）
+ssh deploy@apps
 ```
+
+gatewayの役割はexit nodeと、exit node経由でApps VM以外のLAN機器（PVE、IX2215、ElastiFlow）へ
+入ることである。宅外からこれらの管理画面を使うときはexit nodeを有効にする。
+
+### `192.168.10.0/24`の広告を外さない
+
+exit nodeは、自身が接続するLANをsubnet routeとして広告しない限り、そのLANへ転送しない
+（Tailscaleの仕様。default routeを提供するnodeはlocal LANを"guest wifi"としてfilterする）。
+2026-09-26に広告を外すと、exit node経由でPVE、IX2215、ElastiFlowへ届かなくなることを確認した。
+AdvertiseRoutesは`0.0.0.0/0`、`::/0`、`192.168.10.0/24`を維持する
+（`sudo tailscale set --advertise-exit-node --advertise-routes=192.168.10.0/24`）。
+prefsの宣言的管理は[#29](https://github.com/koji-genba/homelab/issues/29)で扱う。
 
 ## トラブルシューティング
 

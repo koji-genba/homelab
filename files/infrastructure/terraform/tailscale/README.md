@@ -16,6 +16,14 @@ make tailscale-plan MANAGE_TAILNET=true \
   ACL_POLICY_FILE=files/infrastructure/terraform/tailscale/acl-policy.live.json
 ```
 
+上の例はDNS設定をimportする前の初回用である。`tailscale_dns_configuration`がstateにある現在は、
+ACLだけを変える場合も`ENABLE_ADGUARD_DNS=true ADGUARD_READY=true`を付ける（後述）。
+
+```sh
+make tailscale-plan MANAGE_TAILNET=true ENABLE_ADGUARD_DNS=true ADGUARD_READY=true \
+  ACL_POLICY_FILE=files/infrastructure/terraform/tailscale/acl-policy.live.json
+```
+
 `tailscale-plan`はreview対象planをignore対象、mode `0600`の
 `files/infrastructure/terraform/tailscale/terraform.tfplan`へ書き込む。保存planをreviewしてから
 `make tailscale-apply`を実行する。欠落、symlink、緩すぎるmodeのplanを拒否し、variableやACL pathを再指定
@@ -83,8 +91,9 @@ stateから除外され、`tailscale_dns_configuration.adguard[0]`では最大�
 `will be created`と表示される場合もimportが抜けているので停止する。createはlive DNS設定全体を上書きする。
 確認後に`make tailscale-apply`を実行する。
 
-以後、DNSに影響するすべてのplanには`ENABLE_ADGUARD_DNS=true ADGUARD_READY=true`を指定する。
-指定しない場合はresourceのcountが0となり、`prevent_destroy`によりplanは意図的に失敗する。
+以後、`MANAGE_TAILNET=true`のplanには、ACLだけの変更であっても必ず`ENABLE_ADGUARD_DNS=true ADGUARD_READY=true`を
+指定する。指定しない場合はresourceのcountが0となり、`prevent_destroy`によりplanは意図的に失敗する
+（`Instance cannot be destroyed`）。このerrorはflagの付け忘れを示すだけで、tailnetは変更されていない。
 即時rollbackはadmin consoleの`Use with exit node`を無効にすることである。その変更はTerraformにdriftとして
 表示されるため、後で整合させる。codeをrollbackする場合は、revertより先に
 `terraform state rm 'tailscale_dns_configuration.adguard[0]'`でstateから外す。先にrevertすると
