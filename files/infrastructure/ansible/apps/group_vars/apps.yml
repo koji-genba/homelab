@@ -3,6 +3,9 @@
 # intentionally absent from Git and are loaded from runtime.sops.yaml only
 # after the cutover gate is enabled.
 apps_management_ip: 192.168.10.101
+# Apps VM's Tailscale IPv4 (tag:apps, key expiry disabled). Clients reach it
+# after the issue #30 DNS cutover; keep it in sync with the admin console.
+apps_tailnet_ip: 100.86.147.127
 apps_final_management_ip: 192.168.10.101
 apps_hostname: apps
 

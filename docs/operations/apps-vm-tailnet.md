@@ -35,7 +35,7 @@ trap - EXIT
 admin consoleの **Edit ACL tags** で`tag:apps`を付け、それでもexpiryが残る場合は **Disable key expiry** を実行する。
 expiryが残ると、失効日にtailnetからApps VMが外れる。
 
-admin consoleの **Machines > Apps VMのdevice > Edit IPv4** で割り当てられた100.x addressを固定する。`tailscale ip -4`で実値を確認し、管理端末のignore対象`files/infrastructure/ansible/apps/group_vars/apps.yml`に`apps_tailnet_ip`として設定する。exampleの`100.64.0.101`を実値として使わない。Ansibleは未設定または不一致なら検出値を表示して停止する。
+割り当てられた100.x addressはそのまま使ってよい。変える場合はadmin consoleの **Machines > Apps VMのdevice > Edit IPv4** で変更する。`tailscale ip -4`で実値を確認し、Git管理の`files/infrastructure/ansible/apps/group_vars/apps.yml`に`apps_tailnet_ip`として設定してcommitする。exampleの`100.64.0.101`を実値として使わない。Ansibleは未設定または不一致なら検出値を表示して停止する。
 
 ## 適用順序
 
