@@ -41,6 +41,15 @@ stashPad mediaは`/mnt/shared`の子であり、同じclientに親exportのwrite
 別のread-only exportにするだけではserver側のsecurity boundaryにならない。実際の書込み防止はComposeの
 read-only bind mountで行う。
 
+Open WebUIのdata用に、次のpathを2026-10に宣言へ追加した。`k8s-volumes`親exportの下のdirectoryなので
+export設定は変わらない。pve1側のdirectoryとmarkerは未作成である。
+
+| 利用path | Apps VMでの用途 | アクセス |
+| --- | --- | --- |
+| `/mnt/tank-gen2/data/k8s-volumes/open-webui` | Open WebUI data | read/write |
+
+手順は[Open WebUI運用](open-webui.md)にある。
+
 ## AI dataset export（ADR-0006）
 
 DGX Spark 2台とApps VMが共有する、モデルと学習データ（tar.gz）の置き場である。既存4 exportとは
@@ -94,7 +103,7 @@ cutover確認後だけApps VM側mountを`rw`へ変更する。
 ## Apps VMの`nconnect`
 
 `nconnect`はmountごとではなく、server address、protocol、NFS versionが同じNFS client単位で共有される。
-このため、`192.168.10.11`への8つのmount（既存7つ＋ADR-0006の`ai`）は全て`nconnect=8`を指定する。DGX側はこのserverへのmountが`ai`の1つだけなので、この制約は生じない。
+このため、`192.168.10.11`への9つのmount（既存7つ＋ADR-0006の`ai`＋Open WebUI）は全て`nconnect=8`を指定する。DGX側はこのserverへのmountが`ai`の1つだけなので、この制約は生じない。
 
 既存mountへのremountでは接続数を変更できない。設定反映には`192.168.10.11`へのmountを全てunmount
 してからmountし直す必要があり、Apps VMではrebootで実施する。reboot後は次のcommandで確認する。
@@ -132,6 +141,12 @@ ADR-0006の`ai` exportを追加した時点で、次の1件が加わって8つ�
 | server側の実体path | marker内容 |
 | --- | --- |
 | `/mnt/tank-gen2/data/ai/.homelab-export` | `ai` |
+
+Open WebUIのdata pathを追加した時点で、次の1件がさらに加わる（未作成）。
+
+| server側の実体path | marker内容 |
+| --- | --- |
+| `/mnt/tank-gen2/data/k8s-volumes/open-webui/.homelab-export` | `open-webui-data` |
 
 markerはApps VMの未mount directoryには絶対に作らない。NFS server local consoleで対象datasetとpathを
 確認して作成し、snapshot/backup対象に含める。`archive`と`k8s-volumes`には自動snapshotがないため、

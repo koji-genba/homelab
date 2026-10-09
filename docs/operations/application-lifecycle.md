@@ -42,6 +42,14 @@ AGE_IDENTITY_FILE=/secure/path/age-identity.txt make ansible-apply
 Ansibleは変更を検出したときだけ、NFS markerとimage digestを再確認した上でprojectを
 force-recreateする。Apps VMにage identityを保持しない。
 
+## 新しいCompose projectの追加
+
+project一覧はAnsibleが描画するhelper（`homelab-compose-up`等）に埋め込まれている。このため新しい
+projectはGit reconcileだけでは起動しない。必要な順序は、pve1でNFS directoryとmarkerを作成、
+PRをmerge、reconcileでApps VMのcheckoutを進める、`make ansible-apply`の順である。
+markerを作る前にAnsibleを適用するとmount guardが全projectを止め、checkoutを進める前に適用すると
+digest gateが`missing Compose project`で失敗する。具体例は[Open WebUI運用](open-webui.md)を参照。
+
 ## rollbackと再開
 
 rollback先commitが現在のdata/schemaと互換性があることを先に確認する。自動的なDB/data

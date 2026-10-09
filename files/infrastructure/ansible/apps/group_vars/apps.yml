@@ -103,6 +103,13 @@ nfs_mounts:
     marker: .homelab-export
     marker_value: sillytavern-data
     options: hard,_netdev,nfsvers=4.1,noatime,nconnect=8
+  - name: open-webui-data
+    local_path: /srv/homelab/nfs/open-webui
+    server: 192.168.10.11
+    export: /mnt/tank-gen2/data/k8s-volumes/open-webui
+    marker: .homelab-export
+    marker_value: open-webui-data
+    options: hard,_netdev,nfsvers=4.1,noatime,nconnect=8
   - name: stashpad-prod-data
     local_path: /srv/homelab/nfs/stashpad-prod
     server: 192.168.10.11
@@ -132,6 +139,7 @@ stashpad_media_mount_path: /srv/homelab/nfs/stashpad-media
 stashpad_data_path: /srv/homelab/nfs/stashpad-prod
 stashpad_staging_data_path: /srv/homelab/nfs/stashpad-staging
 sillytavern_data_path: /srv/homelab/nfs/sillytavern
+open_webui_data_path: /srv/homelab/nfs/open-webui
 
 trusted_networks:
   - 192.168.10.0/24
@@ -142,5 +150,7 @@ trusted_networks:
 healthchecks_ping_period: 60
 # Dead-man pings fail closed when rootfs usage reaches this percentage.
 healthchecks_rootfs_max_percent: 90
-compose_wait_timeout_seconds: 120
+# Upper bound for `compose up --wait` per project. Sized for Open WebUI's first
+# boot, which downloads its embedding model to NFS before it reports healthy.
+compose_wait_timeout_seconds: 300
 application_cutover_confirmed: true

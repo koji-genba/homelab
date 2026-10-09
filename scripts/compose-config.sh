@@ -30,6 +30,7 @@ STASHPAD_MEDIA_MOUNT_PATH=$tmp_dir/data
 STASHPAD_DATA_PATH=$tmp_dir/data
 STASHPAD_STAGING_DATA_PATH=$tmp_dir/data
 SILLYTAVERN_DATA_PATH=$tmp_dir/data
+OPEN_WEBUI_DATA_PATH=$tmp_dir/data
 EOF
 mkdir -p "$tmp_dir/adguard"
 
