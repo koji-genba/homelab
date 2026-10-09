@@ -1,0 +1,42 @@
+services:
+  open-webui:
+    # Tags are review-only; pin this literal to a full digest before cutover.
+    # Currently v0.11.4.
+    image: ghcr.io/open-webui/open-webui@sha256:9591b13f13843c7721c2b8eaf7382846c81b3ffe126526d1888d1fed50c6a33f
+    environment:
+      # Seed values: Open WebUI copies these into its database on first boot
+      # and ignores later changes here. Change them in the admin settings.
+      WEBUI_URL: "https://openwebui.kojigenba-srv.com"
+      ENABLE_OLLAMA_API: "false"
+      # vLLM on the DGX Spark 4TB machine; it does not require an API key.
+      OPENAI_API_BASE_URL: "http://192.168.10.51:8000/v1"
+      # Read on every boot.
+      CORS_ALLOW_ORIGIN: "https://openwebui.kojigenba-srv.com"
+      # The data directory is NFS. WAL needs same-host shared memory, so use
+      # the rollback journal with the durability level SQLite defaults to.
+      DATABASE_ENABLE_SQLITE_WAL: "false"
+      DATABASE_SQLITE_PRAGMA_SYNCHRONOUS: "FULL"
+      # Keep the generated session-signing key with the data it protects so
+      # recreating the container does not sign every user out.
+      WEBUI_SECRET_KEY_FILE: /app/backend/data/.webui_secret_key
+    volumes:
+      - "${OPEN_WEBUI_DATA_PATH:?set OPEN_WEBUI_DATA_PATH}:/app/backend/data"
+    networks:
+      - frontend
+    security_opt:
+      - no-new-privileges:true
+    # Replaces the image default (30s interval, no start period). /health does
+    # not answer until startup finishes, and the first boot on an empty data
+    # directory downloads the ~890 MB embedding model before that. Keep
+    # start_period + retries * interval below compose_wait_timeout_seconds.
+    healthcheck:
+      test: [CMD, curl, --silent, --fail, --output, /dev/null, "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 240s
+
+networks:
+  frontend:
+    name: homelab_frontend
+    external: true

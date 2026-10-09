@@ -38,6 +38,7 @@ Proxmox pve1 192.168.10.11
 │   ├── Samba                       445/tcp
 │   ├── stashPad prod/staging       内部Docker network
 │   ├── SillyTavern                 内部Docker network
+│   ├── Open WebUI                  内部Docker network
 │   └── Gatus                       内部Docker network
 ├── Tailscale gateway               維持、管理設定はTerraformで管理
 ├── ElastiFlow                      維持
@@ -57,6 +58,7 @@ VLAN移行後は`.10.101`へ集約する。実値はinventory/preflight確認後
 | `prod.stashpad.kojigenba-srv.com` | Caddy -> stashpad-prod | ネットワーク境界/現行アプリの挙動 |
 | `staging.stashpad.kojigenba-srv.com` | Caddy -> stashpad-staging | ネットワーク境界/現行アプリの挙動 |
 | `sillytavern.kojigenba-srv.com` | Caddy -> SillyTavern | 既存Basic Auth |
+| `openwebui.kojigenba-srv.com` | Caddy -> Open WebUI | Open WebUI内蔵ログイン |
 | `dns.kojigenba-srv.com` | Caddy -> AdGuard Home UI | AdGuard内蔵ログイン |
 | `status.kojigenba-srv.com` | Caddy -> Gatus | Caddy Basic Auth |
 | DNS | Apps VM port 53 | Trusted/Tailscaleからの接続制限 |
@@ -76,6 +78,7 @@ VLAN移行後は`.10.101`へ集約する。実値はinventory/preflight確認後
 | SillyTavern | `/mnt/tank-gen2/data/k8s-volumes/sillytavern-sillytavern-data-pvc-85f01a24-9480-4341-a6ad-f44b17cbecaa` |
 | stashPad prod | `/mnt/tank-gen2/data/k8s-volumes/stashpad-prod-stashpad-data-pvc-c96b1813-be70-49ca-865f-989e77359a6b` |
 | stashPad staging | `/mnt/tank-gen2/data/k8s-volumes/stashpad-staging-stashpad-data-pvc-ecc8b17c-bd0a-47db-b169-248d5d98995b` |
+| Open WebUI | `/mnt/tank-gen2/data/k8s-volumes/open-webui` |
 | stashPad media | `/mnt/shared/koji-genba/stashPadLib` |
 | Samba shared | `/mnt/shared` |
 | Samba shared-hdd | `/mnt/tank-gen2/data/shared` |

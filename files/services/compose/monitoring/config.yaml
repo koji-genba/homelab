@@ -48,6 +48,13 @@ endpoints:
       - "[STATUS] == any(200, 401)"
     alerts:
       - type: discord
+  - name: Open WebUI
+    group: applications
+    url: http://open-webui:8080/health
+    conditions:
+      - "[STATUS] == 200"
+    alerts:
+      - type: discord
   - name: Samba
     group: storage
     url: tcp://samba:445

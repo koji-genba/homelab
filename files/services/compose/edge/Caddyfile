@@ -47,3 +47,7 @@ staging.stashpad.kojigenba-srv.com {
 sillytavern.kojigenba-srv.com {
 	reverse_proxy sillytavern:8000
 }
+
+openwebui.kojigenba-srv.com {
+	reverse_proxy open-webui:8080
+}

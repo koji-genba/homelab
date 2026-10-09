@@ -7,7 +7,7 @@ host=${APPS_HOST:-192.168.10.42}
 user=${APPS_USER:-deploy}
 
 case "$project" in
-  edge|dns|samba|stashpad-prod|stashpad-staging|sillytavern|monitoring) ;;
+  edge|dns|samba|stashpad-prod|stashpad-staging|sillytavern|open-webui|monitoring) ;;
   *) echo "PROJECT must name one Compose project" >&2; exit 2 ;;
 esac
 case "$rollback_sha" in

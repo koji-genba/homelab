@@ -83,6 +83,7 @@ service_names = {
     "staging.stashpad.kojigenba-srv.com",
     "prod.stashpad.kojigenba-srv.com",
     "sillytavern.kojigenba-srv.com",
+    "openwebui.kojigenba-srv.com",
     "dns.kojigenba-srv.com",
     "status.kojigenba-srv.com",
 }
