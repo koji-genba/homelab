@@ -42,7 +42,8 @@ stashPad mediaは`/mnt/shared`の子であり、同じclientに親exportのwrite
 read-only bind mountで行う。
 
 Open WebUIのdata用に、次のpathを2026-10に宣言へ追加した。`k8s-volumes`親exportの下のdirectoryなので
-export設定は変わらない。pve1側のdirectoryとmarkerは未作成である。
+export設定は変わらない。pve1側のdirectoryとmarkerは2026-10-10に作成し、`exportfs -v`に変化がない
+ことを確認した。
 
 | 利用path | Apps VMでの用途 | アクセス |
 | --- | --- | --- |
@@ -142,7 +143,7 @@ ADR-0006の`ai` exportを追加した時点で、次の1件が加わって8つ�
 | --- | --- |
 | `/mnt/tank-gen2/data/ai/.homelab-export` | `ai` |
 
-Open WebUIのdata pathを追加した時点で、次の1件がさらに加わる（未作成）。
+Open WebUIのdata pathを追加した時点で、次の1件がさらに加わる（2026-10-10に作成）。
 
 | server側の実体path | marker内容 |
 | --- | --- |

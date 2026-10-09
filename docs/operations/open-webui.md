@@ -1,6 +1,6 @@
 # Open WebUI運用
 
-- 状態: repo定義のみ。pve1のdirectory作成とApps VMへの反映は未実施
+- 状態: 2026-10-10にpve1とApps VMへ反映済み。初回admin作成とbrowserからの確認は未実施
 - 関連: [アプリ更新・promotion・rollback](application-lifecycle.md)、
   [NFS export契約](nfs-export.md)、[DGX Sparkストレージ運用](dgx-storage.md)、
   [ADR-0001](../adr/0001-single-apps-vm-compose.md)
@@ -44,8 +44,9 @@ browser
 - **`compose_wait_timeout_seconds`を120から300へ上げた。** imageに同梱されたembedding model
   （`sentence-transformers/all-MiniLM-L6-v2`一式、約890 MB）は`/app/backend/data/cache`にあり、
   bind mountで隠れる。このため空のdata directoryでの初回起動だけ、Hugging Faceから取得し終える
-  までhealthyにならない。Apps VMからの実測は約15 MB/sで、取得だけで約1分かかる。healthcheckの
-  `start_period`（240s）は`compose_wait_timeout_seconds`より短く保つ。2回目以降の起動は取得を行わない
+  までhealthyにならない。Apps VMからの事前実測（単一stream）は約15 MB/sで、取得だけで約1分かかる
+  見込みだった。healthcheckの`start_period`（240s）は`compose_wait_timeout_seconds`より短く保つ。
+  2回目以降の起動は取得を行わない
 
 ## 手順A: pve1（`192.168.10.11`、rootで実行）
 
@@ -89,15 +90,30 @@ mountを描画した後にmarkerが無いと、mount guardが**全project**で�
 
 | 項目 | 確認方法 | 結果 |
 | --- | --- | --- |
-| pve1 directory/marker | `ls -ld /mnt/tank-gen2/data/k8s-volumes/open-webui; cat /mnt/tank-gen2/data/k8s-volumes/open-webui/.homelab-export` | 未実施 |
-| Apps VM mount + marker | `ssh deploy@192.168.10.101 'findmnt /srv/homelab/nfs/open-webui; cat /srv/homelab/nfs/open-webui/.homelab-export'` | 未実施 |
-| `docker compose ps`がhealthy | `ssh deploy@192.168.10.101 sudo docker compose --project-name homelab-open-webui --env-file /etc/homelab/compose.env -f /opt/homelab/files/services/compose/open-webui/compose.yaml ps` | 未実施 |
-| FQDNへのアクセスとTLS | `curl -sI https://openwebui.kojigenba-srv.com` | 未実施 |
+| pve1 directory/marker | `ls -ld /mnt/tank-gen2/data/k8s-volumes/open-webui; cat /mnt/tank-gen2/data/k8s-volumes/open-webui/.homelab-export` | 2026-10-10 作成・確認済み（`root:root 0750`） |
+| Apps VM mount + marker | `ssh deploy@192.168.10.101 'findmnt /srv/homelab/nfs/open-webui; cat /srv/homelab/nfs/open-webui/.homelab-export'` | 2026-10-10 確認済み（nfs4、`nconnect=8`、mount guard通過） |
+| `docker compose ps`がhealthy | `ssh deploy@192.168.10.101 sudo docker compose --project-name homelab-open-webui --env-file /etc/homelab/compose.env -f /opt/homelab/files/services/compose/open-webui/compose.yaml ps` | 2026-10-10 確認済み。初回起動は約50秒でhealthy |
+| FQDNへのアクセスとTLS | `curl -sI https://openwebui.kojigenba-srv.com` | 2026-10-10 確認済み（`/health`が200、Let's Encrypt証明書、WebSocketは101） |
 | 初回admin作成 | browserで作成 | 未実施 |
-| model一覧に`glm-5.3-flash` | `curl -s http://192.168.10.51:8000/v1/models`とmodel selector | 未実施 |
+| model一覧に`glm-5.3-flash` | `curl -s http://192.168.10.51:8000/v1/models`とmodel selector | container内からのcurlは2026-10-10 確認済み。model selectorは未実施 |
 | chat応答 | `glm-5.3-flash`へ短い入力を送る | 未実施 |
-| Gatus `Open WebUI`がgreen | `https://status.kojigenba-srv.com` | 未実施 |
+| Gatus `Open WebUI`がgreen | `https://status.kojigenba-srv.com` | 2026-10-10 確認済み（全endpointがsuccess） |
 | container再作成後もloginが維持される | `ssh deploy@192.168.10.101 sudo env HOMELAB_FORCE_RECREATE=true /usr/local/sbin/homelab-compose-up open-webui`後に再読込 | 未実施 |
+
+### 実機反映の記録（2026-10-10）
+
+PR #63（merge commit `78e6194`）を手順A、Bの順で反映した。reconcileは既存7 projectを再作成して成功し、
+`make ansible-apply`は`ok=102 changed=15 failed=0`で完了した。imageは事前に`docker pull`して
+おいた。
+
+| 項目 | 結果 |
+| --- | --- |
+| 初回起動 | container開始からserver起動まで28秒、healthyまで約50秒 |
+| 初回起動後のdata directory | 888 MB（ほぼembedding modelのcache） |
+| SQLite | NFS上で`journal_mode=delete` |
+| AdGuard rewrite | `openwebui.kojigenba-srv.com`が`100.86.147.127`へ解決 |
+| dead-man ping | `homelab-healthchecks-ping.service`が成功 |
+| rootfs | 26%（image追加後） |
 
 ### ローカル検証（2026-10-10）
 
