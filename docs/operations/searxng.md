@@ -95,8 +95,15 @@ browser (信頼network)
   htmlのみで、他のformatは403になる）
 - **Gatusが見るのは`/healthz`と`/health`だけである。** どちらも検索engineを呼ばないため、上流engineの
   障害は通知されない
-- **検索engineの選択は上流の既定のままにする。** 変更は`settings.yml`で行う。reconcileがprojectを
-  再作成して反映する
+- **一般のweb検索engineに`bing`、`yahoo`、`duckduckgo web`を足している。** 上流の既定で有効な一般
+  engineは`brave`、`duckduckgo`、`google cse`だが、この回線では`brave`がrate limit、`duckduckgo`が
+  CAPTCHAで応答せず、`google cse`だけが結果を返していた。足した3つは単独では不安定（作業端末の試験で
+  `bing`は0件が2回、`duckduckgo web`はtimeoutが1回、`yahoo`は0件が1回あった）だが、欠けるタイミングが
+  互いに違うので、まとめて使うと結果が途切れにくい。`brave`と`duckduckgo`は回復する可能性があるため
+  既定の有効のままにしてあり、`google`（access denied）と`qwant`（CAPTCHA）は試験で応答しなかったため
+  有効にしていない。中国・ロシア・韓国・チェコ向けのengineは検索語を送る先として避けた。engineの
+  変更は`settings.yml`で行い、reconcileがprojectを再作成して反映する。回線やengine側の事情で応答は
+  変わるため、定期的に見直す
 
 ## 反映手順
 
@@ -197,6 +204,7 @@ pull時間は含まない。SearXNGから外部engineへの検索は実際のイ
 | Caddy経由（同じpinned imageのcaddy-cloudflare、plain HTTP） | initialize、`tools/list`、`tools/call`、SDK clientが成功。当初は`mcp-searxng`のlogに警告が出ないと記録したが誤りで、実機反映後の再検証では`MCP_HTTP_TRUST_PROXY`なしだと`ValidationError`が出た。`MCP_HTTP_TRUST_PROXY=1`では出ず、Caddy経由と直接のどちらも200だった |
 | repoの`Caddyfile`の`caddy validate` | `Valid configuration`（検証用の環境変数で実行。`CF_API_TOKEN`はplugin側の形式検査があるため、40文字の英数字のダミー値が必要） |
 | 実際のDGXのmodelでの往復 | `glm-5.3-flash`が`searxng_web_search`と`web_url_read`を呼び、結果を受けて最新のstable kernel versionを答えた（3 round） |
+| engine追加後の検索（`bing`、`yahoo`、`duckduckgo web`を有効化。作業端末のDocker、同じdigest） | 6 query（英語4、日本語2）で、`google cse`、`duckduckgo web`、`yahoo`が毎回、`bing`が4回結果を返した。結果は1 queryあたり29〜39件（重複は統合される）、応答は平均2.0秒、最大3.2秒。`brave`と`duckduckgo`は毎回`unresponsive_engines`に出た |
 | idle時のmemory | SearXNG 約118 MiB、`mcp-searxng` 約51 MiB（検証後の計測） |
 | image size | SearXNG 384 MB、`mcp-searxng` 320 MB（`docker image ls`） |
 
@@ -229,10 +237,11 @@ rollbackは`PROJECT=searxng make rollback-app`で行え、dataに関する注意
 - 上流のsearch engineはrate limitやCAPTCHAで応答しないことがある。ローカル検証では`brave`（too many
   requests）、`duckduckgo`（CAPTCHA）、`wikidata`（timeout）が`unresponsive_engines`に出た。他のengineが
   応答するため結果は返るが、Gatusでは検知できない
-- 実機で4つのquery（英語3、日本語1）を試したところ、返った20件はいずれも`google cse`という1つの
-  engineだけの結果で、`brave`（Suspended: too many requests）と`duckduckgo`（CAPTCHA）は4回とも
-  応答しなかった。つまり実質単一engineで、これが止まると検索結果が空になる。`/healthz`と`/health`は
-  engineを呼ばないため、Gatusはこの状態を検知しない。engineを足す場合は`settings.yml`で行う
+- engineを足す前に実機で4つのquery（英語3、日本語1）を試したところ、返った20件はいずれも`google cse`
+  という1つのengineだけの結果で、`brave`（Suspended: too many requests）と`duckduckgo`（CAPTCHA）は
+  4回とも応答しなかった。`bing`、`yahoo`、`duckduckgo web`を足した後も、`brave`と`duckduckgo`は
+  `unresponsive_engines`に出続ける。`/healthz`と`/health`はengineを呼ばないため、Gatusは全engineが
+  止まった状態を検知しない
 - SearXNGのlogには、Caddyを通さない直接のrequestに対して`X-Forwarded-For nor X-Real-IP header is
   set!`のERRORが出ることがある（ローカル検証では1回）。`limiter.toml`が無いというWARNINGも出る。
   どちらもrequestは成功しており、noiseとして扱う。ほかに起動時に`torch`と`ahmia`のengineが
