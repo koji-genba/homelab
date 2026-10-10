@@ -1,6 +1,6 @@
 # Open WebUI運用
 
-- 状態: 2026-10-10にpve1とApps VMへ反映済み。初回admin作成とbrowserからの確認は未実施
+- 状態: 2026-10-10にpve1とApps VMへ反映し、browserからのログイン・chat応答まで確認済み
 - 関連: [アプリ更新・promotion・rollback](application-lifecycle.md)、
   [NFS export契約](nfs-export.md)、[DGX Sparkストレージ運用](dgx-storage.md)、
   [ADR-0001](../adr/0001-single-apps-vm-compose.md)
@@ -94,11 +94,11 @@ mountを描画した後にmarkerが無いと、mount guardが**全project**で�
 | Apps VM mount + marker | `ssh deploy@192.168.10.101 'findmnt /srv/homelab/nfs/open-webui; cat /srv/homelab/nfs/open-webui/.homelab-export'` | 2026-10-10 確認済み（nfs4、`nconnect=8`、mount guard通過） |
 | `docker compose ps`がhealthy | `ssh deploy@192.168.10.101 sudo docker compose --project-name homelab-open-webui --env-file /etc/homelab/compose.env -f /opt/homelab/files/services/compose/open-webui/compose.yaml ps` | 2026-10-10 確認済み。初回起動は約50秒でhealthy |
 | FQDNへのアクセスとTLS | `curl -sI https://openwebui.kojigenba-srv.com` | 2026-10-10 確認済み（`/health`が200、Let's Encrypt証明書、WebSocketは101） |
-| 初回admin作成 | browserで作成 | 未実施 |
-| model一覧に`glm-5.3-flash` | `curl -s http://192.168.10.51:8000/v1/models`とmodel selector | container内からのcurlは2026-10-10 確認済み。model selectorは未実施 |
-| chat応答 | `glm-5.3-flash`へ短い入力を送る | 未実施 |
+| 初回admin作成 | browserで作成 | 2026-10-10 確認済み |
+| model一覧に`glm-5.3-flash` | `curl -s http://192.168.10.51:8000/v1/models`とmodel selector | 2026-10-10 確認済み（container内のcurlとbrowserのmodel selector） |
+| chat応答 | `glm-5.3-flash`へ短い入力を送る | 2026-10-10 確認済み |
 | Gatus `Open WebUI`がgreen | `https://status.kojigenba-srv.com` | 2026-10-10 確認済み（全endpointがsuccess） |
-| container再作成後もloginが維持される | `ssh deploy@192.168.10.101 sudo env HOMELAB_FORCE_RECREATE=true /usr/local/sbin/homelab-compose-up open-webui`後に再読込 | 未実施 |
+| container再作成後もloginが維持される | `ssh deploy@192.168.10.101 sudo env HOMELAB_FORCE_RECREATE=true /usr/local/sbin/homelab-compose-up open-webui`後に再読込 | 2026-10-10 確認済み（17秒でhealthy、`.webui_secret_key`と`webui.db`は不変、browserのloginも維持） |
 
 ### 実機反映の記録（2026-10-10）
 
@@ -139,6 +139,31 @@ PR #63（merge commit `78e6194`）を手順A、Bの順で反映した。reconcil
 更新は`open-webui/compose.yaml`のdigestを上げるPRで行い、reconcileが反映する。Open WebUIは起動時に
 DBをmigrationし、自動downgradeはない。version更新の前に、利用のない時間帯にpve1で`webui.db`を
 copyしておく。
+
+## 再deploy
+
+通常はPRを`main`へmergeするだけで、reconcile（15分間隔）が変更のあるprojectだけを再作成する。
+急ぐ場合はApps VMで`sudo systemctl start homelab-app-reconcile.service`を実行する。
+
+| 変えたもの | 手順 | 影響 |
+| --- | --- | --- |
+| `open-webui/compose.yaml`（digest、環境変数） | PRをmerge。reconcileがopen-webuiだけを再作成する | 1分弱停止。loginは維持される |
+| Caddyfile、Gatusの`config.yaml` | 同上（edge / monitoringだけ） | 該当projectのみ |
+| Ansible管理のもの（`group_vars`、helper、AdGuard rewrite、NFS mount） | merge後に`make ansible-apply` | `compose.env`かAdGuard設定が変わると全projectを再作成する（DNS/SMBが短時間途切れる）。helperだけなら再作成なし |
+| 変更なしで作り直す | `ssh deploy@192.168.10.101 sudo env HOMELAB_FORCE_RECREATE=true /usr/local/sbin/homelab-compose-up open-webui` | open-webuiのみ。2026-10-10の実測は17秒 |
+
+接続先（`OPENAI_API_BASE_URL`など）の変更は`compose.yaml`では反映されない。admin設定UIで行う。
+Apps VMを作り直す場合、data・session鍵・modelのcacheはNFS上にあるため、Open WebUI固有の作業はない
+（[Apps VM復旧](apps-vm-recovery.md)）。
+
+### Gatusの通知
+
+新しいprojectの初回追加では、Gatusが監視先を読み込んでから`ansible-apply`が起動するまでの間、
+「failed 3 time(s) in a row」の通知だけが届き、復旧通知は届かないことがある。このGatusは`storage:`を
+持たずalert状態をmemoryにしか保持しないため、`ansible-apply`によるGatusの再作成で「alertが出ていた」
+記録が消え、復旧通知を送らないからである。反映後にGatusのstatusがsuccessならば問題ない。
+
+## rollback
 
 rollbackは`PROJECT=open-webui`を指定した`make rollback-app`で行う（手順は
 [アプリ更新・promotion・rollback](application-lifecycle.md#rollbackと再開)）。migration後の
