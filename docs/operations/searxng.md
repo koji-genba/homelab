@@ -1,7 +1,7 @@
 # SearXNG / MCP運用
 
-- 状態: 2026-10-10にApps VMへ反映し、両FQDNとFQDN経由のMCP呼び出しまで確認済み。Open WebUIへの
-  tool登録と、`MCP_HTTP_TRUST_PROXY`追加後の確認は未実施
+- 状態: 2026-10-10にApps VMへ反映し、両FQDN、FQDN経由のMCP呼び出し、DGXのmodelからの往復まで
+  確認済み。Open WebUIへのtool登録は未実施
 - 関連: [アプリ更新・promotion・rollback](application-lifecycle.md)、[Open WebUI運用](open-webui.md)、
   [Apps VM復旧](apps-vm-recovery.md)、[ADR-0001](../adr/0001-single-apps-vm-compose.md)、
   [ADR-0007](../adr/0007-apps-vm-tailnet-dns.md)
@@ -129,7 +129,8 @@ ssh deploy@192.168.10.101 sudo env HOMELAB_FORCE_RECREATE=true /usr/local/sbin/h
 | MCPのFQDN | `curl -s https://mcp-searxng.kojigenba-srv.com/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}'` | 2026-10-10 確認済み（`initialize`が200、`searxng_web_search`の`tools/call`が結果を返す、`web_url_read`は`http://adguard:3000/`を拒否） |
 | Gatusの`SearXNG`と`SearXNG MCP`がgreen | `https://status.kojigenba-srv.com` | 2026-10-10 確認済み（全13 endpointがsuccess） |
 | AdGuard rewrite | `nslookup searxng.kojigenba-srv.com 192.168.10.101`と`mcp-searxng`も同様（`100.86.147.127`を返す） | 2026-10-10 確認済み（両方`100.86.147.127`） |
-| Caddy経由でrate limiterの警告が出ない | FQDN経由で呼んだ後、`docker compose ... logs mcp-searxng`に`ERR_ERL_UNEXPECTED_X_FORWARDED_FOR`がないこと | 未実施（`MCP_HTTP_TRUST_PROXY`を追加するPRの反映後に確認する） |
+| Caddy経由でrate limiterの警告が出ない | FQDN経由で呼んだ後、`docker compose ... logs mcp-searxng`に`ERR_ERL_UNEXPECTED_X_FORWARDED_FOR`がないこと | 2026-10-10 確認済み（PR #69の反映後、FQDN経由の`initialize`・`tools/call`・`/health`の後もlogは起動時の4行だけ） |
+| DGXのmodelからの往復 | `glm-5.3-flash`へMCPの`tools/list`をtoolとして渡し、返ったtool callを`https://mcp-searxng.kojigenba-srv.com/mcp`へ実行して結果を返す | 2026-10-10 確認済み（`searxng_web_search`と`web_url_read`を呼び、2 roundで回答） |
 | Open WebUIのtool登録とchat | External Toolsへ登録し、最新情報を要するchatで検索が呼ばれることを確認する | 未実施 |
 
 ### 実機反映の記録（2026-10-10）
@@ -152,6 +153,10 @@ PR #68（merge commit `d477e44`）を反映手順の順で反映した。image�
 `ValidationError`）が出ていた。Caddy経由のrequestは成功しており、影響はrate limitの枠がclient間で
 共有されることである。作業端末で再現し、`MCP_HTTP_TRUST_PROXY=1`で消えること、Caddy経由と直接の
 どちらのrequestも成功することを確認して、`compose.yaml`へ追加した。
+
+この修正はPR #69（merge commit `92d3343`）で反映した。`ansible-apply`は不要で、reconcileが14秒で
+`searxng` projectだけを再作成した。他の8 containerは再作成されていない。反映後もGatusは全13 endpointが
+successだった。
 
 ### ローカル検証（2026-10-10）
 
