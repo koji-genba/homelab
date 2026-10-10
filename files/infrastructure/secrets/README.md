@@ -4,6 +4,9 @@ Apps VM用のsecretは、このdirectoryの`runtime.sops.yaml`としてSOPS/age�
 保存する。age identityの復旧copyはKeePassXCに保存し、GitやApps VMへ配置しない。keyの一覧と形式は
 [runtime.yaml.example](runtime.yaml.example)を参照する。
 
+`/etc/homelab/secrets/searxng.env`（SearXNGの`SEARXNG_SECRET`）だけはこのbundleに含めない。初回の
+`make ansible-apply`でAnsibleがApps VM上に生成し、以後は上書きしない。backupは不要である。
+
 ## 初回作成
 
 1. 管理端末で`age-keygen`を実行し、identityをmode `0600`で保存する。

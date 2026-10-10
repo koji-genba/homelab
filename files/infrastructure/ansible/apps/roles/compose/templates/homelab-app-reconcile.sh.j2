@@ -43,8 +43,9 @@ for changed in $changed_files; do
     files/services/compose/stashpad-staging/*) add_project stashpad-staging ;;
     files/services/compose/sillytavern/*) add_project sillytavern ;;
     files/services/compose/open-webui/*) add_project open-webui ;;
+    files/services/compose/searxng/*) add_project searxng ;;
     files/services/compose/monitoring/*) add_project monitoring ;;
-    files/services/compose/.env.example) add_project edge; add_project dns; add_project samba; add_project stashpad-prod; add_project stashpad-staging; add_project sillytavern; add_project open-webui; add_project monitoring ;;
+    files/services/compose/.env.example) add_project edge; add_project dns; add_project samba; add_project stashpad-prod; add_project stashpad-staging; add_project sillytavern; add_project open-webui; add_project searxng; add_project monitoring ;;
     files/services/images/caddy-cloudflare/*) add_project edge ;;
     # Non-application paths are pulled but never applied by this timer.
     *) ;;

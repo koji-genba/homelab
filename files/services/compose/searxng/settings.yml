@@ -1,0 +1,15 @@
+# Overrides merged onto the defaults shipped in the image. server.secret_key
+# is supplied through SEARXNG_SECRET and must not be written here.
+use_default_settings: true
+
+search:
+  # mcp-searxng and Open WebUI call /search?format=json. The default list is
+  # html only, and every other format is answered with 403.
+  formats:
+    - html
+    - json
+
+server:
+  # Only the trusted networks reach this instance (Caddy and nftables). The
+  # limiter needs Valkey and would throttle the API clients above.
+  limiter: false

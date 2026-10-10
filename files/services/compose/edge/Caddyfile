@@ -51,3 +51,12 @@ sillytavern.kojigenba-srv.com {
 openwebui.kojigenba-srv.com {
 	reverse_proxy open-webui:8080
 }
+
+# Neither SearXNG nor its MCP server has a login.
+searxng.kojigenba-srv.com {
+	import admin_networks searxng:8080
+}
+
+mcp-searxng.kojigenba-srv.com {
+	import admin_networks mcp-searxng:3000
+}

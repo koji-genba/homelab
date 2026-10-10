@@ -70,7 +70,7 @@
   ansible.builtin.shell: |
     set -eu
     compose_root={{ compose_install_dir | quote }}/files/services/compose
-    for project in edge dns samba stashpad-prod stashpad-staging sillytavern open-webui monitoring; do
+    for project in edge dns samba stashpad-prod stashpad-staging sillytavern open-webui searxng monitoring; do
       file="$compose_root/$project/compose.yaml"
       test -r "$file" || { echo "missing Compose project: $file" >&2; exit 1; }
       images_file=$(mktemp)

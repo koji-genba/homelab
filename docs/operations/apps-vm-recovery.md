@@ -18,6 +18,8 @@ Exportのclient scope、option、markerは[NFS export契約](nfs-export.md)に�
 
 age private keyはApps VMへコピーしない。secretの復号は管理端末で行う。
 
+`/etc/homelab/secrets/searxng.env`（SearXNGの`SEARXNG_SECRET`）はAnsibleが再生成するため、復元するものはない。
+
 ## Terraform実行前のProxmox側準備
 
 Proxmoxのuser・role・API token・ACLはGitにもTerraformにも宣言されておらず、Proxmox側へ手動で

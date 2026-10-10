@@ -21,6 +21,7 @@ Proxmox VE 192.168.10.11
 │   ├── stashPad production/staging
 │   ├── SillyTavern
 │   ├── Open WebUI
+│   ├── SearXNG + MCP
 │   └── Gatus + Healthchecks.io dead-man
 ├── Tailscale gateway                 192.168.10.102
 └── ElastiFlow                        192.168.10.103
@@ -43,6 +44,7 @@ VLAN 10はServer、20はTrusted、30はIoT、40はGuestです。VLAN 11と63は�
 - [NFS export契約と手動反映メモ](docs/operations/nfs-export.md)
 - [DGX Sparkストレージ運用](docs/operations/dgx-storage.md)
 - [Open WebUI運用](docs/operations/open-webui.md)
+- [SearXNG / MCP運用](docs/operations/searxng.md)
 
 設計を変更するときは、コードだけでなく該当ADRまたは運用手順も更新します。
 
