@@ -9,6 +9,7 @@ mkdir -p "$tmp_dir/secrets" "$tmp_dir/data"
 : >"$tmp_dir/secrets/gatus.env"
 : >"$tmp_dir/secrets/sillytavern.env"
 : >"$tmp_dir/secrets/healthchecks.env"
+: >"$tmp_dir/secrets/searxng.env"
 mkdir -p "$tmp_dir/secrets/samba"
 : >"$tmp_dir/secrets/samba/koji-genba-password"
 

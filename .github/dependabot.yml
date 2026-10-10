@@ -22,6 +22,9 @@ updates:
     directory: /files/services/compose/open-webui
     schedule: {interval: weekly}
   - package-ecosystem: docker
+    directory: /files/services/compose/searxng
+    schedule: {interval: weekly}
+  - package-ecosystem: docker
     directory: /files/services/compose/monitoring
     schedule: {interval: weekly}
   - package-ecosystem: docker

@@ -56,7 +56,7 @@ rm -f "$samba_probe_file" \
   || fail "Samba writable mount cannot delete a probe file"
 trap - EXIT INT TERM
 
-for project in edge dns samba stashpad-prod stashpad-staging sillytavern open-webui monitoring; do
+for project in edge dns samba stashpad-prod stashpad-staging sillytavern open-webui searxng monitoring; do
   running=$(docker compose --project-name "homelab-$project" --env-file "$compose_env" \
     --file "$repo/files/services/compose/$project/compose.yaml" ps --status running --services)
   test -n "$running" || { echo "required project is not running: $project" >&2; exit 1; }

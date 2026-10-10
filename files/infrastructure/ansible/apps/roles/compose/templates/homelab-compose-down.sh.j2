@@ -9,7 +9,7 @@ case "${1:-}" in
   all)
     # Stop dependants before shared infrastructure. This is deliberately the
     # reverse of homelab-compose-up's order.
-    projects="monitoring open-webui sillytavern stashpad-staging stashpad-prod samba dns edge"
+    projects="monitoring searxng open-webui sillytavern stashpad-staging stashpad-prod samba dns edge"
     ;;
   *)
     echo "usage: $0 all" >&2

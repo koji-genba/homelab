@@ -1,0 +1,75 @@
+services:
+  searxng:
+    # Tags are review-only; pin this literal to a full digest before cutover.
+    # Currently 2026.10.9-f4822b3fc.
+    image: searxng/searxng@sha256:85492ba800a861e3e8ff6014c430e81369fe6ca766a9990595f616d1ce95b272
+    # The image sets no USER and its entrypoint stays root. 977 is the image's
+    # own searxng account, which owns /var/cache/searxng.
+    user: "977:977"
+    env_file:
+      # SEARXNG_SECRET. The Ansible secrets role generates it on the Apps VM.
+      - path: "${SECRETS_DIR:?set SECRETS_DIR}/searxng.env"
+        format: raw
+    environment:
+      SEARXNG_BASE_URL: "https://searxng.kojigenba-srv.com/"
+    volumes:
+      - ./settings.yml:/etc/searxng/settings.yml:ro
+      - searxng-cache:/var/cache/searxng
+    networks:
+      - frontend
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    # The image defines no HEALTHCHECK. /healthz does not query any engine.
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  mcp-searxng:
+    # Tags are review-only; pin this literal to a full digest before cutover.
+    # Currently v2.5.1.
+    image: isokoliuk/mcp-searxng@sha256:47c2c520c06b396b89d34bda8a4cd5961e04e4d35c59b931f63d617be45245b5
+    environment:
+      SEARXNG_URL: "http://searxng:8080"
+      # Setting the port switches the server from stdio to Streamable HTTP.
+      # The default bind address is loopback.
+      MCP_HTTP_PORT: "3000"
+      MCP_HTTP_HOST: "0.0.0.0"
+      # Serve every request on its own. Stateful sessions live in memory, so
+      # each container recreation would invalidate them, and they never expire
+      # by default: at 1000 sessions the server answers 503 to new clients.
+      MCP_HTTP_STATELESS: "true"
+      # Never set MCP_HTTP_ALLOW_PRIVATE_URLS here: web_url_read must keep
+      # refusing private, loopback and tailnet addresses.
+    depends_on:
+      searxng:
+        condition: service_healthy
+    networks:
+      - frontend
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    # The image defines no HEALTHCHECK. /health does not contact SearXNG.
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, "http://127.0.0.1:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  searxng-cache:
+
+networks:
+  frontend:
+    name: homelab_frontend
+    external: true

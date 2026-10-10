@@ -39,6 +39,7 @@ Proxmox pve1 192.168.10.11
 │   ├── stashPad prod/staging       内部Docker network
 │   ├── SillyTavern                 内部Docker network
 │   ├── Open WebUI                  内部Docker network
+│   ├── SearXNG / mcp-searxng       内部Docker network
 │   └── Gatus                       内部Docker network
 ├── Tailscale gateway               維持、管理設定はTerraformで管理
 ├── ElastiFlow                      維持
@@ -59,6 +60,8 @@ VLAN移行後は`.10.101`へ集約する。実値はinventory/preflight確認後
 | `staging.stashpad.kojigenba-srv.com` | Caddy -> stashpad-staging | ネットワーク境界/現行アプリの挙動 |
 | `sillytavern.kojigenba-srv.com` | Caddy -> SillyTavern | 既存Basic Auth |
 | `openwebui.kojigenba-srv.com` | Caddy -> Open WebUI | Open WebUI内蔵ログイン |
+| `searxng.kojigenba-srv.com` | Caddy -> SearXNG | ネットワーク境界（Caddyの信頼network制限、loginなし） |
+| `mcp-searxng.kojigenba-srv.com` | Caddy -> mcp-searxng | ネットワーク境界（Caddyの信頼network制限、認証なし） |
 | `dns.kojigenba-srv.com` | Caddy -> AdGuard Home UI | AdGuard内蔵ログイン |
 | `status.kojigenba-srv.com` | Caddy -> Gatus | Caddy Basic Auth |
 | DNS | Apps VM port 53 | Trusted/Tailscaleからの接続制限 |

@@ -55,6 +55,20 @@ endpoints:
       - "[STATUS] == 200"
     alerts:
       - type: discord
+  - name: SearXNG
+    group: applications
+    url: http://searxng:8080/healthz
+    conditions:
+      - "[STATUS] == 200"
+    alerts:
+      - type: discord
+  - name: SearXNG MCP
+    group: applications
+    url: http://mcp-searxng:3000/health
+    conditions:
+      - "[STATUS] == 200"
+    alerts:
+      - type: discord
   - name: Samba
     group: storage
     url: tcp://samba:445

@@ -49,6 +49,7 @@ projectはGit reconcileだけでは起動しない。必要な順序は、pve1�
 PRをmerge、reconcileでApps VMのcheckoutを進める、`make ansible-apply`の順である。
 markerを作る前にAnsibleを適用するとmount guardが全projectを止め、checkoutを進める前に適用すると
 digest gateが`missing Compose project`で失敗する。具体例は[Open WebUI運用](open-webui.md)を参照。
+NFS dataを持たないprojectではpve1の手順を省く。例は[SearXNG / MCP運用](searxng.md)である。
 
 ## rollbackと再開
 
