@@ -46,6 +46,10 @@ services:
       # each container recreation would invalidate them, and they never expire
       # by default: at 1000 sessions the server answers 503 to new clients.
       MCP_HTTP_STATELESS: "true"
+      # Caddy is the one proxy hop in front. Without this the rate limiter
+      # keys every proxied client on Caddy's address and logs
+      # ERR_ERL_UNEXPECTED_X_FORWARDED_FOR.
+      MCP_HTTP_TRUST_PROXY: "1"
       # Never set MCP_HTTP_ALLOW_PRIVATE_URLS here: web_url_read must keep
       # refusing private, loopback and tailnet addresses.
     depends_on:
