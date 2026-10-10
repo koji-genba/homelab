@@ -1,6 +1,7 @@
 # SearXNG / MCP運用
 
-- 状態: ローカル検証済み（作業端末のDockerと実際のvLLM）。実機（Apps VM）は未反映
+- 状態: 2026-10-10にApps VMへ反映し、両FQDNとFQDN経由のMCP呼び出しまで確認済み。Open WebUIへの
+  tool登録と、`MCP_HTTP_TRUST_PROXY`追加後の確認は未実施
 - 関連: [アプリ更新・promotion・rollback](application-lifecycle.md)、[Open WebUI運用](open-webui.md)、
   [Apps VM復旧](apps-vm-recovery.md)、[ADR-0001](../adr/0001-single-apps-vm-compose.md)、
   [ADR-0007](../adr/0007-apps-vm-tailnet-dns.md)
@@ -70,6 +71,10 @@ browser (信頼network)
   無効になる。さらにsessionは既定で失効せず、1000件に達すると新しいclientへ503を返す。代償として
   `GET /mcp`と`DELETE /mcp`は405を返し、server起点のstreamは使えない。tool呼び出しだけの用途には
   影響しない
+- **`MCP_HTTP_TRUST_PROXY=1`にする。** Caddyは`X-Forwarded-For`を付けて転送する。この変数がないと
+  `mcp-searxng`のrate limiterがCaddy経由の全clientをCaddyのaddressで数え、logに
+  `ERR_ERL_UNEXPECTED_X_FORWARDED_FOR`を出す。初回の実機反映で見つけて追加した。`1`は信頼するproxyが
+  1段という意味である。Caddyを通さないDocker network内のclientには影響しない
 - **MCPに認証は付けない。** 到達元はnftables/IX2215とCaddyの信頼network制限で絞る。上流には
   hardened mode（`MCP_HTTP_HARDEN`、bearer token、allowed hosts/origins）があり、制限を強める
   必要が出たときに使える
@@ -114,17 +119,39 @@ ssh deploy@192.168.10.101 sudo env HOMELAB_FORCE_RECREATE=true /usr/local/sbin/h
 
 ## 検証
 
-実機のhealthとlogは`homelab-searxng`のprojectで見る。すべて**未実施**である。
+実機のhealthとlogは`homelab-searxng`のprojectで見る。
 
 | 項目 | 確認方法 | 結果 |
 | --- | --- | --- |
-| `docker compose ps`がhealthy | `ssh deploy@192.168.10.101 sudo docker compose --project-name homelab-searxng --env-file /etc/homelab/compose.env -f /opt/homelab/files/services/compose/searxng/compose.yaml ps` | 未実施 |
-| `searxng.env`の生成 | `ssh deploy@192.168.10.101 sudo ls -l /etc/homelab/secrets/searxng.env`（`root:root 0600`） | 未実施 |
-| SearXNGのFQDN | `curl -sI https://searxng.kojigenba-srv.com`（信頼networkから200、他から403） | 未実施 |
-| MCPのFQDN | `curl -s https://mcp-searxng.kojigenba-srv.com/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}'` | 未実施 |
-| Gatusの`SearXNG`と`SearXNG MCP`がgreen | `https://status.kojigenba-srv.com` | 未実施 |
-| AdGuard rewrite | `nslookup searxng.kojigenba-srv.com 192.168.10.101`と`mcp-searxng`も同様（`100.86.147.127`を返す） | 未実施 |
+| `docker compose ps`がhealthy | `ssh deploy@192.168.10.101 sudo docker compose --project-name homelab-searxng --env-file /etc/homelab/compose.env -f /opt/homelab/files/services/compose/searxng/compose.yaml ps` | 2026-10-10 確認済み（2 serviceともhealthy、SearXNGはuid 977） |
+| `searxng.env`の生成 | `ssh deploy@192.168.10.101 sudo ls -l /etc/homelab/secrets/searxng.env`（`root:root 0600`） | 2026-10-10 確認済み（`root:root 0600`、64文字の16進） |
+| SearXNGのFQDN | `curl -sI https://searxng.kojigenba-srv.com`（信頼networkから200、他から403） | 2026-10-10 確認済み（`/`と`/healthz`が200、Let's Encrypt証明書）。信頼network外からの403は未確認 |
+| MCPのFQDN | `curl -s https://mcp-searxng.kojigenba-srv.com/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}'` | 2026-10-10 確認済み（`initialize`が200、`searxng_web_search`の`tools/call`が結果を返す、`web_url_read`は`http://adguard:3000/`を拒否） |
+| Gatusの`SearXNG`と`SearXNG MCP`がgreen | `https://status.kojigenba-srv.com` | 2026-10-10 確認済み（全13 endpointがsuccess） |
+| AdGuard rewrite | `nslookup searxng.kojigenba-srv.com 192.168.10.101`と`mcp-searxng`も同様（`100.86.147.127`を返す） | 2026-10-10 確認済み（両方`100.86.147.127`） |
+| Caddy経由でrate limiterの警告が出ない | FQDN経由で呼んだ後、`docker compose ... logs mcp-searxng`に`ERR_ERL_UNEXPECTED_X_FORWARDED_FOR`がないこと | 未実施（`MCP_HTTP_TRUST_PROXY`を追加するPRの反映後に確認する） |
 | Open WebUIのtool登録とchat | External Toolsへ登録し、最新情報を要するchatで検索が呼ばれることを確認する | 未実施 |
+
+### 実機反映の記録（2026-10-10）
+
+PR #68（merge commit `d477e44`）を反映手順の順で反映した。imageは事前に`docker pull`しておいた
+（それぞれ約10秒）。
+
+| 項目 | 結果 |
+| --- | --- |
+| reconcile | 34秒で成功。再作成したのは`edge`と`monitoring`だけで、checkoutは`d477e44`へ進んだ |
+| `make ansible-apply` | 133秒、`ok=100 changed=10 failed=0`。`searxng.env`の生成、AdGuard設定とhelperの再描画、全projectのforce-recreateが行われた |
+| 反映後のcontainer | 全10 containerが稼働し、healthcheckを持つものはすべてhealthy |
+| FQDNの経路 | LAN address（`192.168.10.101`）とtailnet address（`100.86.147.127`）のどちらでも200 |
+| Docker network内の経路 | 別containerから`http://mcp-searxng:3000/health`が200 |
+| dead-man ping | `homelab-healthchecks-ping.service`が成功 |
+| memory | SearXNG 約134 MiB、`mcp-searxng` 約58 MiB |
+| rootfs | 28%（image追加前は26%） |
+
+反映後、`mcp-searxng`のlogに`ERR_ERL_UNEXPECTED_X_FORWARDED_FOR`（express-rate-limitの
+`ValidationError`）が出ていた。Caddy経由のrequestは成功しており、影響はrate limitの枠がclient間で
+共有されることである。作業端末で再現し、`MCP_HTTP_TRUST_PROXY=1`で消えること、Caddy経由と直接の
+どちらのrequestも成功することを確認して、`compose.yaml`へ追加した。
 
 ### ローカル検証（2026-10-10）
 
@@ -153,17 +180,16 @@ pull時間は含まない。SearXNGから外部engineへの検索は実際のイ
 | `GET /health` | 200、`{"status":"healthy",...,"transport":"http"}` |
 | `initialize`なしの`tools/list`、`tools/call` | 成功（statelessなので遅延接続のclientにも寛容） |
 | 公式MCP Python SDK（`mcp` 1.30.0と2.3.0） | initialize、list_tools、`searxng_web_search`の`call_tool`が成功。GETの405による警告は出ない |
-| Caddy経由（同じpinned imageのcaddy-cloudflare、plain HTTP） | initialize、`tools/list`、`tools/call`、SDK clientが成功。`mcp-searxng`のlogにX-Forwarded-For、trust proxy、rate limit、ValidationErrorの行は出ない。`MCP_HTTP_TRUST_PROXY`なしで成功する |
+| Caddy経由（同じpinned imageのcaddy-cloudflare、plain HTTP） | initialize、`tools/list`、`tools/call`、SDK clientが成功。当初は`mcp-searxng`のlogに警告が出ないと記録したが誤りで、実機反映後の再検証では`MCP_HTTP_TRUST_PROXY`なしだと`ValidationError`が出た。`MCP_HTTP_TRUST_PROXY=1`では出ず、Caddy経由と直接のどちらも200だった |
 | repoの`Caddyfile`の`caddy validate` | `Valid configuration`（検証用の環境変数で実行。`CF_API_TOKEN`はplugin側の形式検査があるため、40文字の英数字のダミー値が必要） |
 | 実際のDGXのmodelでの往復 | `glm-5.3-flash`が`searxng_web_search`と`web_url_read`を呼び、結果を受けて最新のstable kernel versionを答えた（3 round） |
 | idle時のmemory | SearXNG 約118 MiB、`mcp-searxng` 約51 MiB（検証後の計測） |
 | image size | SearXNG 384 MB、`mcp-searxng` 320 MB（`docker image ls`） |
 
 `mcp-searxng`はrequestにrate limitを付ける。応答headerで、`initialize`は20回/60秒、それ以外は
-300回/60秒と確認した（既定値。上流は`MCP_RATE_*`で変更できる）。Caddy経由ではclientの接続元が
-Caddyになるため、この枠はclient間で共有されると考えられるが、共有は未検証である。枠が足りなくなった
-場合、上流の設定書はreverse proxyが1段のときに`MCP_HTTP_TRUST_PROXY=1`を指定するよう案内している。
-この変数は今回設定しておらず、挙動も検証していない。
+300回/60秒と確認した（既定値。上流は`MCP_RATE_*`で変更できる）。枠はclientのaddressごとで、
+Caddy経由のclientは`MCP_HTTP_TRUST_PROXY=1`により`X-Forwarded-For`のaddressで数えられる。client別に
+枠が分かれることそのものは未検証である。
 
 ## 更新とrollback
 
