@@ -174,6 +174,19 @@ PR #68（merge commit `d477e44`）を反映手順の順で反映した。image�
 `searxng` projectだけを再作成した。他の8 containerは再作成されていない。反映後もGatusは全13 endpointが
 successだった。
 
+engine追加（PR #73、merge commit `673fa78`）も同じくreconcileだけで反映した。13秒で`searxng`
+projectだけが再作成され、他の8 containerは再作成されていない。反映後の確認は次のとおりである。
+
+| 項目 | 結果 |
+| --- | --- |
+| FQDN経由のMCP検索（3 query） | いずれも200で20件。engineの内訳は`google cse`、`duckduckgo web`、`yahoo`、`bing`のうち2〜4つ |
+| Open WebUIと同じrequest（Docker network内、4 query） | 32〜36件。`google cse`、`duckduckgo web`、`bing`が毎回結果を返した |
+| `yahoo` | この4 queryでは`unresponsive_engines`に出たが、直後の2 queryでは応答した。logに`engine timeout`が1回あり、一時停止から戻ったと見られる。他のengineが補うため検索には影響しない |
+| `brave`、`duckduckgo` | 引き続き応答しない（`Suspended: too many requests`、`CAPTCHA`） |
+| log | `mcp-searxng`にwarningなし。SearXNGのERRORは既知のもの（`torch`、`ahmia`、`X-Forwarded-For`）と`yahoo`の`engine timeout` |
+| Gatus | 全13 endpointがsuccess |
+| memory | SearXNG 約152 MiB、`mcp-searxng` 約61 MiB |
+
 ### ローカル検証（2026-10-10）
 
 実機反映の前に、同じ`compose.yaml`・`settings.yml`・digestを作業端末のDockerで起動した。host portは
