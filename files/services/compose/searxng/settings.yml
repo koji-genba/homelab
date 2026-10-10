@@ -13,3 +13,16 @@ server:
   # Only the trusted networks reach this instance (Caddy and nftables). The
   # limiter needs Valkey and would throttle the API clients above.
   limiter: false
+
+engines:
+  # The general web engines enabled by default are brave, duckduckgo and
+  # google cse. From this connection brave is rate limited and duckduckgo is
+  # answered with a CAPTCHA, so google cse was the only source. These three
+  # each return results most of the time but fail now and then, so they are
+  # useful together rather than one by one.
+  - name: bing
+    disabled: false
+  - name: yahoo
+    disabled: false
+  - name: duckduckgo web
+    disabled: false
