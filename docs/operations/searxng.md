@@ -41,10 +41,18 @@ browser (信頼network)
 
 ## 利用側の設定
 
-1. Open WebUI（同じDocker network）: 管理者設定のExternal Toolsで、typeを「MCP (Streamable HTTP)」、
-   URLを`http://mcp-searxng:3000/mcp`、認証を「なし」にする。**実機のOpen WebUIでは未検証**である。
-   Open WebUI内蔵のweb検索を使う場合は、検索engineにSearXNG（`http://searxng:8080/search`）を
-   指定できる。こちらも未検証である
+1. Open WebUI（同じDocker network）には入口が2つあり、渡すaddressが違う。どちらも管理者設定の画面での
+   操作は**未検証**である
+   - 内蔵のWeb検索: 管理者設定のWeb Searchでengineを`searxng`にし、Query URLへSearXNG自体のaddress
+     `http://searxng:8080/search`を指定する（`SEARXNG_QUERY_URL`。旧形式の
+     `http://searxng:8080/search?q=<query>`も受け付ける）。Open WebUIが回答の前に自分で検索する方式で、
+     modelのtool callingに依存しない。Open WebUI v0.11.4は必ず`format=json`を付けて呼び、失敗を例外に
+     するため、SearXNGがJSONを返せないと検索がerrorになる。`settings.yml`の`formats`に`json`があるのは
+     このためでもある。Open WebUIと同じparameterとheaderのrequestを実機のDocker network内から送り、
+     JSONで20件返ることを確認した（許可していない`format=csv`は403）
+   - MCPのtool: 管理者設定のExternal Toolsで、typeを「MCP (Streamable HTTP)」、URLを
+     `http://mcp-searxng:3000/mcp`、認証を「なし」にする。modelが必要と判断したときに検索やpage取得を
+     tool callとして呼ぶ方式である
 2. 信頼LAN/tailnetの他のclient: `https://mcp-searxng.kojigenba-srv.com/mcp`を指定する
 3. DGX自身で動くclient: 内部名はApps VMのtailnet addressへ解決される（ADR-0007）。DGXがtailnetや
    AdGuardのclientかは分かっていないため、必要なら`/etc/hosts`に両FQDNを`192.168.10.101`として
