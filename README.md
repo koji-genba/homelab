@@ -70,6 +70,10 @@ files/
 scripts/                         # preflight、rollback、state backup/restore
 ```
 
+カスタムイメージは [caddy-image.yml](.github/workflows/caddy-image.yml) と
+[sparkdash-image.yml](.github/workflows/sparkdash-image.yml) でGHCRへ公開します。
+sparkDashはイメージ作成のみで、Composeへの登録は後続フェーズです。公開後のdigestを別の変更で固定します。
+
 ## 操作方針
 
 日常操作はルートの `Makefile` を入口にします。管理端末に要求するのは原則としてGit、Docker、Make、SSHだけで、TerraformやAnsibleなどはバージョン固定のtoolboxから実行します。

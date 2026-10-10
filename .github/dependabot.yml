@@ -31,6 +31,9 @@ updates:
     directory: /files/services/images/caddy-cloudflare
     schedule: {interval: weekly}
   - package-ecosystem: docker
+    directory: /files/services/images/sparkdash
+    schedule: {interval: weekly}
+  - package-ecosystem: docker
     directory: /files/tools/homelab-toolbox
     schedule: {interval: weekly}
   - package-ecosystem: terraform
