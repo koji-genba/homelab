@@ -1,7 +1,7 @@
 # SearXNG / MCP運用
 
-- 状態: 2026-10-10にApps VMへ反映し、両FQDN、FQDN経由のMCP呼び出し、DGXのmodelからの往復まで
-  確認済み。Open WebUIへのtool登録は未実施
+- 状態: 2026-10-10にApps VMへ反映し、両FQDN、FQDN経由のMCP呼び出し、DGXのmodelからの往復、
+  Open WebUIの2つの入口（内蔵のWeb検索とMCP）まで確認済み
 - 関連: [アプリ更新・promotion・rollback](application-lifecycle.md)、[Open WebUI運用](open-webui.md)、
   [Apps VM復旧](apps-vm-recovery.md)、[ADR-0001](../adr/0001-single-apps-vm-compose.md)、
   [ADR-0007](../adr/0007-apps-vm-tailnet-dns.md)
@@ -41,8 +41,8 @@ browser (信頼network)
 
 ## 利用側の設定
 
-1. Open WebUI（同じDocker network）には入口が2つあり、渡すaddressが違う。どちらも管理者設定の画面での
-   操作は**未検証**である
+1. Open WebUI（同じDocker network）には入口が2つあり、渡すaddressが違う。どちらも2026-10-10に運用者が
+   管理者設定で登録し、動作することを確認した
    - 内蔵のWeb検索: 管理者設定のWeb Searchでengineを`searxng`にし、Query URLへSearXNG自体のaddress
      `http://searxng:8080/search`を指定する（`SEARXNG_QUERY_URL`。旧形式の
      `http://searxng:8080/search?q=<query>`も受け付ける）。Open WebUIが回答の前に自分で検索する方式で、
@@ -139,7 +139,8 @@ ssh deploy@192.168.10.101 sudo env HOMELAB_FORCE_RECREATE=true /usr/local/sbin/h
 | AdGuard rewrite | `nslookup searxng.kojigenba-srv.com 192.168.10.101`と`mcp-searxng`も同様（`100.86.147.127`を返す） | 2026-10-10 確認済み（両方`100.86.147.127`） |
 | Caddy経由でrate limiterの警告が出ない | FQDN経由で呼んだ後、`docker compose ... logs mcp-searxng`に`ERR_ERL_UNEXPECTED_X_FORWARDED_FOR`がないこと | 2026-10-10 確認済み（PR #69の反映後、FQDN経由の`initialize`・`tools/call`・`/health`の後もlogは起動時の4行だけ） |
 | DGXのmodelからの往復 | `glm-5.3-flash`へMCPの`tools/list`をtoolとして渡し、返ったtool callを`https://mcp-searxng.kojigenba-srv.com/mcp`へ実行して結果を返す | 2026-10-10 確認済み（`searxng_web_search`と`web_url_read`を呼び、2 roundで回答） |
-| Open WebUIのtool登録とchat | External Toolsへ登録し、最新情報を要するchatで検索が呼ばれることを確認する | 未実施 |
+| Open WebUIのMCP tool | External Toolsへ登録し、最新情報を要するchatで検索が呼ばれることを確認する | 2026-10-10 運用者が確認済み |
+| Open WebUIの内蔵Web検索 | Web Searchのengineを`searxng`、Query URLを`http://searxng:8080/search`にして、chatで検索させる | 2026-10-10 運用者が確認済み |
 
 ### 実機反映の記録（2026-10-10）
 
@@ -228,6 +229,10 @@ rollbackは`PROJECT=searxng make rollback-app`で行え、dataに関する注意
 - 上流のsearch engineはrate limitやCAPTCHAで応答しないことがある。ローカル検証では`brave`（too many
   requests）、`duckduckgo`（CAPTCHA）、`wikidata`（timeout）が`unresponsive_engines`に出た。他のengineが
   応答するため結果は返るが、Gatusでは検知できない
+- 実機で4つのquery（英語3、日本語1）を試したところ、返った20件はいずれも`google cse`という1つの
+  engineだけの結果で、`brave`（Suspended: too many requests）と`duckduckgo`（CAPTCHA）は4回とも
+  応答しなかった。つまり実質単一engineで、これが止まると検索結果が空になる。`/healthz`と`/health`は
+  engineを呼ばないため、Gatusはこの状態を検知しない。engineを足す場合は`settings.yml`で行う
 - SearXNGのlogには、Caddyを通さない直接のrequestに対して`X-Forwarded-For nor X-Real-IP header is
   set!`のERRORが出ることがある（ローカル検証では1回）。`limiter.toml`が無いというWARNINGも出る。
   どちらもrequestは成功しており、noiseとして扱う。ほかに起動時に`torch`と`ahmia`のengineが
