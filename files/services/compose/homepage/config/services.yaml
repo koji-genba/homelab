@@ -45,3 +45,54 @@
     - ElastiFlow/Kibana:
         href: http://192.168.10.103:5601
         description: ネットワークフロー分析
+- ストレージ (SMB/NFS):
+    - shared:
+        description: >-
+          \\samba.kojigenba-srv.com\shared
+          （統合共有・SMB認証・tailnet必須）
+    - shared-hdd:
+        description: >-
+          \\samba.kojigenba-srv.com\shared-hdd
+          （HDD直接共有・SMB認証・tailnet必須）
+    - archive:
+        description: >-
+          \\samba.kojigenba-srv.com\archive
+          （アーカイブ・SMB認証・tailnet必須）
+    - ai (models・datasets):
+        description: >-
+          \\samba.kojigenba-srv.com\ai（models・datasets、SMB認証・tailnet必須）
+          DGX 側 mount は未実施
+- SSH 先:
+    - Apps VM:
+        description: ssh deploy@192.168.10.101（公開鍵認証のみ）
+    - pve1:
+        description: ssh root@192.168.10.11（公開鍵認証）
+    - Tailscale gateway:
+        description: ssh ubuntu@192.168.10.102（公開鍵認証）
+    - ElastiFlow VM:
+        description: ssh ubuntu@192.168.10.103（公開鍵認証）
+    - stashpad-dev:
+        description: ssh ubuntu@192.168.10.41（公開鍵認証）
+    - DGX Spark head:
+        description: 192.168.10.51:22
+    - DGX Spark worker:
+        description: 192.168.10.52:22
+- 外部サイト:
+    - Tailscale 管理:
+        href: https://login.tailscale.com/admin/machines
+        description: tailnet端末・ルート管理（管理アカウント）
+    - Healthchecks.io:
+        href: https://healthchecks.io/
+        description: dead-man監視（管理アカウント）
+    - GitHub repo:
+        href: https://github.com/koji-genba/homelab
+        description: homelabのコード・Issue（管理操作はGitHub認証）
+    - GitHub Actions:
+        href: https://github.com/koji-genba/homelab/actions
+        description: CI・image buildの実行履歴（管理操作はGitHub認証）
+    - GHCR パッケージ:
+        href: https://github.com/koji-genba?tab=packages
+        description: koji-genbaの公開container image一覧
+    - Cloudflare:
+        href: https://dash.cloudflare.com/
+        description: DNS・zone管理（管理アカウント）

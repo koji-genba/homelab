@@ -2,8 +2,9 @@
 
 ## 用途と構成
 
-homelab各サービスへのリンク集を提供する。初版はWebアプリ、AI・MCP、基盤・管理の3グループだけとし、
-SMB/SSH/外部リンク、Gatus widget、docs索引は後続PRで追加する。
+homelab各サービスへのリンク集と接続先の索引を提供する。Webアプリ、AI・MCP、基盤・管理、
+ストレージ (SMB/NFS)、SSH 先、外部サイトの6グループで構成する。
+Gatus widget、docs索引は後続PRで追加する。
 
 - URL: `https://homepage.kojigenba-srv.com`
 - Compose project / service: `homepage` / `homepage`（内部port 3000）
@@ -23,6 +24,11 @@ Homepage内蔵認証の`HOMEPAGE_AUTH_ENABLED`は設定しない。
 リンクや説明はこの4ファイルを編集し、検証、review、mergeする。通常reconcileがHomepageを
 force-recreateして反映する。UIやcontainer内での編集は使わない。
 
+SMB/NFS/SSHの索引エントリは`href`なしのカードとし、アドレスや接続コマンドを`description`に書く。
+`smb://`・`ssh://`はブラウザ/OSでの動作が未検証のため使わない。説明は日本語で簡潔にし、
+認証・到達範囲や未実施の作業を必要に応じて添える。外部サイトはHTTPSの`href`を付ける。
+これらの索引には`siteMonitor`・`ping`を付けない。索引の更新もmerge後の通常reconcileで反映される。
+
 `/app/config`全体をread-only bindすると、公式imageのlogs書込みと不足するskeleton生成が衝突する。
 そこで親directoryをuid/gid 1000、mode 0755、上限64 MiBのtmpfsとし、その上に設定4ファイルを
 個別にread-only bindする。`/app/config/logs`と補助ファイルは書込み可能で、再作成時に破棄される。
@@ -35,7 +41,7 @@ capabilityを要するため設定せず、tmpfs側で所有権を指定する�
 所有権変更を省き、既に非rootの場合はそのuserのままNodeを実行する。capabilityの追加は不要である。
 ローカルでこのdigestを取得し、同じmountとhardeningによる一時containerを検証した。
 FQDNのHost header付き`GET /`と設定APIは200、healthcheckは成功し、logsとskeletonの生成に
-`EROFS`・`EACCES`・chown失敗はなかった。初回実機反映でも下記のログ・HTTP検証を行う。
+`EROFS`・`EACCES`・chown失敗はなかった。初回実機反映でのログ・HTTP検証結果は末尾の記録に記載する。
 
 restart policyは既存projectと同様に設定せず、`homelab-apps.service`を起動主体とする。
 healthcheckはNodeのHTTP GETで`/`の200応答を確認する。interval 10s、timeout 5s、retries 3、
@@ -50,11 +56,13 @@ start period 30sは既存SearXNGに合わせ、CPU/memoryの固定limitは既存
    DNS rewriteとdigest gate、起動・停止・rollback・dead-man・reconcileのproject一覧を更新する。
    checkout更新前にapplyすると`missing Compose project`で失敗する。新しいsecretは不要である。
    AdGuard設定の変更で既存projectもforce-recreateされ、DNS/SMBなどが短時間途切れることがある。
-3. Apps VMで`sudo /usr/local/sbin/homelab-compose-up homepage`を実行する。
-4. tailnet接続済みの端末からURLを開き、Gatusと同じBasic Authで画面と3グループのリンクを確認する。
+3. apply末尾の強制reconcile（task `Force-reconcile projects after rendered runtime changes`）でHomepageが起動する。
+   apply後にApps VMの`docker ps`でHomepageが起動・healthyか確認し、起動していなければ
+   `sudo /usr/local/sbin/homelab-compose-up homepage`を実行する。
+4. tailnet接続済みの端末からURLを開き、Gatusと同じBasic Authで画面と6グループのリンク・索引を確認する。
    GatusのHomepage endpoint、container health、起動ログを確認する。
 
-NFS directory、marker、nftables ruleの追加は不要である。ここに記載した実機操作は実装時には実行していない。
+NFS directory、marker、nftables ruleの追加は不要である。2026-10-12に初回反映を実施した。
 
 ## ログと復旧
 
@@ -84,11 +92,12 @@ Homepageを追加したcommit以降の既知の正常commitを指定する。
   DGX、Proxmox、ElastiFlowなどLAN機器には付けない。自己署名TLSの回避設定も追加しない。
 - probeは入口の応答確認であり、DGX推論、MCP呼出し、検索engine、認証APIの動作までは保証しない。
 - 内部DNS rewriteがtailnet IPを返すため、FQDNリンクはtailnet接続を前提とする。
-  LAN機器へのIPリンクにはLANまたはsubnet routeへの到達性が別途必要である。
+  LAN機器へのIPリンクとSSH先のエントリはLANのIP（`192.168.10.x`）を示す。
+  宅外やtailnet端末からはgatewayのsubnet route / exit node経由で到達できる必要がある。
 - Basic AuthはGatusと共用で、資格情報の変更は両サービスへ影響する。
 
 ## 手動反映の記録
 
-| 日付 | 作業 | 結果 |
-| --- | --- | --- |
-| 未実施 | 初回反映 | merge後に上記手順で実施し、SHA・image digest・検証結果を追記する |
+| 日付 | 操作者 | 反映内容 | commit / 確認結果 |
+| --- | --- | --- | --- |
+| 2026-10-12 (JST) | — | 初回反映。PR #82をmerge（`6b71c23`）→ 01:37 JSTのreconcileでcheckout更新・edgeとmonitoringを再作成 → `make ansible-apply`実行 → 強制reconcileでHomepageが起動（`homelab-compose-up homepage`は不要だった）。apply時はAdGuard設定が変わり既存projectも再作成され、DNS/SMBは短時間断 | image: `ghcr.io/gethomepage/homepage@sha256:57c4a0531937889c0b968b120fe9c2560bbe036b5c9e18c49a9e2479de9975d1`（v2.5.0）。ansible-applyはok=103 changed=9 failed=0 unreachable=0。Homepageコンテナはhealthy、Composeの12コンテナすべてup。Gatusの15エンドポイントすべてOK（Homepage含む）。資格情報なしでCaddy経由は401。Homepage内部からsiteMonitorの8宛先すべてに到達。ログにEROFS/EACCESなし。tailnet端末でBasic Authと3グループ・応答時間の表示をユーザーが確認 |
