@@ -36,3 +36,9 @@ ignore対象の平文`runtime.yaml`を削除する。このfileが一時的で�
 
 `runtime.sops.yaml`はapplication cutoverを有効化する前に必要になる。それまでのフェーズ1 bootstrapでは
 secretを復号せず、containerも起動しない。
+
+sparkDashの必須token（`sparkdash.token`）はroot:root `0600`の`sparkdash.env`へ配置する。
+任意SSH鍵（`sparkdash.ssh_private_key`）は専用directoryを常に作成し、値があるときだけ
+uid/gid `10001:10001`、mode `0400`で配置する。directoryは`0500`で、read-only mountする。
+任意keyを省略/空にしてapplyすると配置済み鍵を削除する。生成・SOPS編集・反映順序は
+[sparkDash運用](../../../docs/operations/sparkdash.md)を参照する。

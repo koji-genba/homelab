@@ -86,6 +86,7 @@ service_names = {
     "openwebui.kojigenba-srv.com",
     "searxng.kojigenba-srv.com",
     "mcp-searxng.kojigenba-srv.com",
+    "sparkdash.kojigenba-srv.com",
     "dns.kojigenba-srv.com",
     "status.kojigenba-srv.com",
 }
