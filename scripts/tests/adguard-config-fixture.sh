@@ -88,6 +88,7 @@ service_names = {
     "mcp-searxng.kojigenba-srv.com",
     "sparkdash.kojigenba-srv.com",
     "dns.kojigenba-srv.com",
+    "homepage.kojigenba-srv.com",
     "status.kojigenba-srv.com",
 }
 for migrated, gate, expected_web, expected_smb in (

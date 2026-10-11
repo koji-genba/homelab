@@ -1,0 +1,45 @@
+services:
+  homepage:
+    # Tags are review-only; pin this literal to a full digest before cutover.
+    # Currently v2.5.0 (OCI index).
+    image: ghcr.io/gethomepage/homepage@sha256:57c4a0531937889c0b968b120fe9c2560bbe036b5c9e18c49a9e2479de9975d1
+    # Run directly as non-root; PUID/PGID would require root ownership changes.
+    user: "1000:1000"
+    environment:
+      HOMEPAGE_ALLOWED_HOSTS: homepage.kojigenba-srv.com
+    volumes:
+      - ./config/settings.yaml:/app/config/settings.yaml:ro
+      - ./config/services.yaml:/app/config/services.yaml:ro
+      - ./config/bookmarks.yaml:/app/config/bookmarks.yaml:ro
+      - ./config/widgets.yaml:/app/config/widgets.yaml:ro
+    networks:
+      - frontend
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      # Keep logs and generated skeleton files writable, without changing Git config.
+      - /app/config:uid=1000,gid=1000,mode=0755,size=64m
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:3000/', {
+            headers: {Host: 'homepage.kojigenba-srv.com'},
+            signal: AbortSignal.timeout(4000)
+          }).then(r => { if (!r.ok) process.exit(1); })
+          .catch(() => process.exit(1));
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+networks:
+  frontend:
+    name: homelab_frontend
+    external: true

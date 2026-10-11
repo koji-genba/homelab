@@ -23,12 +23,13 @@ Proxmox VE 192.168.10.11
 │   ├── Open WebUI
 │   ├── sparkDash (DGX remote monitor)
 │   ├── SearXNG + MCP
+│   ├── Homepage (サービスリンク集)
 │   └── Gatus + Healthchecks.io dead-man
 ├── Tailscale gateway                 192.168.10.102
 └── ElastiFlow                        192.168.10.103
 ```
 
-Compose定義は10 projects / 11 servicesです。sparkDashの初回反映は[運用手順](docs/operations/sparkdash.md)に従います。
+Compose定義は11 projects / 12 servicesです。sparkDashの初回反映は[運用手順](docs/operations/sparkdash.md)に従います。
 
 VLAN 10はServer、20はTrusted、30はIoT、40はGuestです。VLAN 11と63は廃止済みです。
 
@@ -49,6 +50,7 @@ VLAN 10はServer、20はTrusted、30はIoT、40はGuestです。VLAN 11と63は�
 - [Open WebUI運用](docs/operations/open-webui.md)
 - [SearXNG / MCP運用](docs/operations/searxng.md)
 - [sparkDash運用](docs/operations/sparkdash.md)
+- [Homepage運用](docs/operations/homepage.md)
 
 設計を変更するときは、コードだけでなく該当ADRまたは運用手順も更新します。
 

@@ -57,9 +57,12 @@ NFS dataを持たないprojectではpve1の手順を省く。例は[SearXNG / MC
 sparkDashはcheckoutが進んだ後、SOPS bundleに必須の`sparkdash.token`と任意の
 `sparkdash.ssh_private_key`を追加してからAnsibleを適用する。正常終了後も
 `homelab-compose-up sparkdash`で起動を明示確認する。
+Homepageは新しいsecretやNFS directoryを必要としない。merge、reconcileによるcheckout更新、
+`make ansible-apply`、`homelab-compose-up homepage`の順で初回反映する。
+AnsibleはDNS rewriteとhelper一覧を更新する。詳細は[Homepage運用](homepage.md)を参照する。
 
-現在の定義は`edge dns samba stashpad-prod stashpad-staging sillytavern open-webui searxng sparkdash monitoring`の
-10 projects / 11 servicesで、停止順はその逆である。
+現在の定義は`edge dns samba stashpad-prod stashpad-staging sillytavern open-webui searxng sparkdash homepage monitoring`の
+11 projects / 12 servicesで、停止順はその逆である。
 
 ## rollbackと再開
 

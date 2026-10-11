@@ -1,8 +1,10 @@
 # Docker Compose projectの構成
 
 各directoryは独立してdeployできるprojectである。全projectが外部の`homelab_frontend` networkに参加する。
-定義は10 projects / 11 services（searxngだけ2 services）である。起動順は
-`edge dns samba stashpad-prod stashpad-staging sillytavern open-webui searxng sparkdash monitoring`、停止は逆順。
+定義は11 projects / 12 services（searxngだけ2 services）である。起動順は
+`edge dns samba stashpad-prod stashpad-staging sillytavern open-webui searxng sparkdash homepage monitoring`、停止は逆順。
+[Homepage](../../../docs/operations/homepage.md)は静的YAMLによるサービスリンク集である。
+設定4ファイルをread-only bindし、logsと生成ファイルはtmpfsに置く。Docker socketは渡さない。
 [sparkDash](../../../docs/operations/sparkdash.md)は専用named volumeでconfigを保持するremote monitorで、
 初回はimageからuid/gid 10001とmode 0700を引き継ぐ。自動backupは構築せず、VM外の暗号化backupも必須とせず、volume喪失時は再deployとUIでの2台の再登録で復旧する。
 
