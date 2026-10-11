@@ -7,10 +7,15 @@ services:
         format: raw
     volumes:
       - ./config.yaml:/config/config.yaml:ro
+      - gatus:/data
     networks:
       - frontend
     security_opt:
       - no-new-privileges:true
+
+volumes:
+  gatus:
+
 networks:
   frontend:
     name: homelab_frontend

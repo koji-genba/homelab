@@ -159,9 +159,9 @@ Apps VMを作り直す場合、data・session鍵・modelのcacheはNFS上にあ�
 ### Gatusの通知
 
 新しいprojectの初回追加では、Gatusが監視先を読み込んでから`ansible-apply`が起動するまでの間、
-「failed 3 time(s) in a row」の通知だけが届き、復旧通知は届かないことがある。このGatusは`storage:`を
-持たずalert状態をmemoryにしか保持しないため、`ansible-apply`によるGatusの再作成で「alertが出ていた」
-記録が消え、復旧通知を送らないからである。反映後にGatusのstatusがsuccessならば問題ない。
+「failed 3 time(s) in a row」の通知が届くことがある。alert状態と監視履歴は`gatus` named volume上の
+SQLite fileに保存するため、`ansible-apply`でGatusを再作成しても進行中の障害を忘れず、起動後に
+復旧通知を送る。volumeのbackup方針は[共通手順](application-lifecycle.md#通常のreconcile)を参照。
 
 ## rollback
 
