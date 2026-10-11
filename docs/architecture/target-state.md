@@ -98,8 +98,10 @@ VLAN移行後は`.10.101`へ集約する。実値はinventory/preflight確認後
 宣言を切り替える。`mv`は使わず、UID/GID、ACL、xattr、hardlinkを保持する。
 
 sparkDashのconfigはApps VMのnamed volume `homelab-sparkdash_sparkdash-config`へ保存する。
-初回所有権はimageの10001:10001を引き継ぐ。暗号鍵とciphertextを含むため、運用者がvolume全体を
-暗号化してVM外へbackupする。NFS/ZFS snapshotやTerraform state-backupには含まれない。
+初回所有権はimageの10001:10001を引き継ぐ。2026-10-11時点では自動backupを構築せず、VM外の暗号化backupも
+必須としない。volume喪失時は再deployとUIでの2台の再登録で復旧する。unit数・benchmark結果・保存secretが
+増えたら見直す。保存secretの暗号鍵はciphertextと同じvolumeに置かれる。
+NFS/ZFS snapshotやTerraform state-backupには含まれない。
 復旧方針は[sparkDash運用](../operations/sparkdash.md)を参照する。
 
 ### NFS exportメモ
@@ -143,4 +145,4 @@ VM側はNFSv4、`hard,_netdev`を使用する。systemd mount unit、`RequiresMo
 | age復旧鍵 | KeePassXC |
 | ProxmoxとTailscaleのcredential | KeePassXC、デプロイ時に注入 |
 | アプリケーションデータ | 外部で復旧したNFS/ZFS |
-| sparkDash config / 暗号鍵 | named volumeの暗号化backup（VM外、運用者が用意） |
+| sparkDash config | 自動backupなし。再deployとUIで2台を再登録（約5分）、token・SSH鍵はSOPSから再配置 |
