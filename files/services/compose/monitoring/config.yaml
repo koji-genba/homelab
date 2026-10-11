@@ -80,6 +80,16 @@ endpoints:
       - "[STATUS] == 200"
     alerts:
       - type: discord
+  - name: Homepage
+    group: applications
+    # Probe the backend directly, as with other apps behind Caddy authentication.
+    url: http://homepage:3000/
+    headers:
+      Host: homepage.kojigenba-srv.com
+    conditions:
+      - "[STATUS] == 200"
+    alerts:
+      - type: discord
   - name: Samba
     group: storage
     url: tcp://samba:445

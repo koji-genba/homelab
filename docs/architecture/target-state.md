@@ -41,6 +41,7 @@ Proxmox pve1 192.168.10.11
 │   ├── Open WebUI                  内部Docker network
 │   ├── SearXNG / mcp-searxng       内部Docker network
 │   ├── sparkDash                   内部Docker network -> DGX (SSH/HTTP)
+│   ├── Homepage                    内部Docker network
 │   └── Gatus                       内部Docker network
 ├── Tailscale gateway               維持、管理設定はTerraformで管理
 ├── ElastiFlow                      維持
@@ -50,8 +51,9 @@ Healthchecks.io                     外部dead-man監視
 GitHub/GHCR                         ソース、CI、公開イメージ
 ```
 
-Compose定義は10 projects / 11 services。sparkDashはremote-onlyで、初回反映は
+Compose定義は11 projects / 12 services。sparkDashはremote-onlyで、初回反映は
 [sparkDash運用](../operations/sparkdash.md)に従う。
+HomepageはGit管理の静的リンク集で、[Homepage運用](../operations/homepage.md)に従って初回反映する。
 
 Apps VMはフェーズ1で暫定管理IP `.10.42` とVLAN 11サービスIP `.11.100/.101/.103`を使い、
 VLAN移行後は`.10.101`へ集約する。実値はinventory/preflight確認後に変数へ確定する。
@@ -69,6 +71,7 @@ VLAN移行後は`.10.101`へ集約する。実値はinventory/preflight確認後
 | `sparkdash.kojigenba-srv.com` | Caddy -> sparkDash:5555 | 信頼network/tailnet制限 + アプリBearer token（Caddy Basic Authなし） |
 | `dns.kojigenba-srv.com` | Caddy -> AdGuard Home UI | AdGuard内蔵ログイン |
 | `status.kojigenba-srv.com` | Caddy -> Gatus | Caddy Basic Auth |
+| `homepage.kojigenba-srv.com` | Caddy -> Homepage:3000 | 信頼network/tailnet制限 + Caddy Basic Auth（Gatusと共用） |
 | DNS | Apps VM port 53 | Trusted/Tailscaleからの接続制限 |
 | SMB | Apps VM port 445 | 既存Sambaローカルユーザー |
 

@@ -36,6 +36,17 @@ status.kojigenba-srv.com {
 	respond "Forbidden" 403
 }
 
+homepage.kojigenba-srv.com {
+	@trusted remote_ip {$CADDY_TRUSTED_NETWORKS}
+	handle @trusted {
+		basic_auth {
+			{$GATUS_BASIC_AUTH_USER} {$GATUS_BASIC_AUTH_HASH}
+		}
+		reverse_proxy homepage:3000
+	}
+	respond "Forbidden" 403
+}
+
 prod.stashpad.kojigenba-srv.com {
 	reverse_proxy stashpad-prod:8080
 }

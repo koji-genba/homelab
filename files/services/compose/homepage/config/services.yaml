@@ -1,0 +1,47 @@
+- Web アプリ:
+    - stashPad prod:
+        href: https://prod.kojigenba-srv.com
+        description: メディアライブラリ（本番）
+        siteMonitor: http://stashpad-prod:8080/
+    - stashPad staging:
+        href: https://staging.kojigenba-srv.com
+        description: メディアライブラリ（検証）
+        siteMonitor: http://stashpad-staging:8080/
+    - SillyTavern:
+        href: https://sillytavern.kojigenba-srv.com
+        description: AIチャット
+    - Open WebUI:
+        href: https://openwebui.kojigenba-srv.com
+        description: ローカルLLMチャット
+        siteMonitor: http://open-webui:8080/health
+    - SearXNG:
+        href: https://searxng.kojigenba-srv.com
+        description: メタ検索
+        siteMonitor: http://searxng:8080/healthz
+    - sparkDash:
+        href: https://sparkdash.kojigenba-srv.com
+        description: DGX稼働状況
+        siteMonitor: http://sparkdash:5555/
+- AI・MCP:
+    - SearXNG MCP:
+        href: https://mcp-searxng.kojigenba-srv.com/mcp
+        description: 検索用MCPサーバー
+        siteMonitor: http://mcp-searxng:3000/health
+    - DGX 推論 API:
+        href: http://192.168.10.51:8000/v1
+        description: DGXの推論API
+- 基盤・管理:
+    - AdGuard Home:
+        href: https://dns.kojigenba-srv.com
+        description: 内部DNS・広告ブロック
+        siteMonitor: http://adguard:3000/
+    - Gatus:
+        href: https://status.kojigenba-srv.com
+        description: サービス監視
+        siteMonitor: http://gatus:8080/
+    - Proxmox pve1:
+        href: https://192.168.10.11:8006/
+        description: VM・ストレージ管理
+    - ElastiFlow/Kibana:
+        href: http://192.168.10.103:5601
+        description: ネットワークフロー分析

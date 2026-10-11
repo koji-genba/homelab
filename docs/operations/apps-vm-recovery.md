@@ -26,6 +26,11 @@ sparkDashのnamed volumeはNFS復旧に含まれない。2026-10-11時点では�
 backup方針を見直す。保存secretの暗号鍵はciphertextと同じvolumeに置かれる。
 [sparkDash運用](sparkdash.md)のbackup・復旧手順を参照する。
 
+現在のCompose定義は11 projects / 12 servicesで、Homepageも復旧対象に含む。
+Homepageの設定はGitから復元し、認証はGatusと共用の`edge.env`をAnsibleで再配置する。
+tmpfs上のlogs・生成ファイルは再作成され、NFSや追加secretの復元は不要である。
+[Homepage運用](homepage.md)に従って起動と画面表示を確認する。
+
 ## Terraform実行前のProxmox側準備
 
 Proxmoxのuser・role・API token・ACLはGitにもTerraformにも宣言されておらず、Proxmox側へ手動で
