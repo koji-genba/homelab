@@ -1,0 +1,61 @@
+services:
+  sparkdash:
+    # Pinned by digest; the published tag at pin time was 2.31.0. Tags are review-only.
+    image: ghcr.io/koji-genba/sparkdash@sha256:87f4398fef96d735372fa0c7ef8f62af3d4483a21485017a270da47e57077b88
+    user: "10001:10001"
+    env_file:
+      - path: "${SECRETS_DIR:?set SECRETS_DIR}/sparkdash.env"
+        format: raw
+    environment:
+      BIND_HOST: "0.0.0.0"
+      PORT: "5555"
+      # Upstream defaults to open remote access. A missing token must fail closed.
+      SPARKDASH_ALLOW_OPEN_REMOTE: "0"
+      SSH_IDENTITY_FILE: /run/sparkdash-ssh/id_ed25519
+    volumes:
+      # Fresh volumes inherit the image's 10001:10001 ownership and 0700 mode.
+      - sparkdash-config:/app/config
+      # Ansible always creates the directory; the identity itself is optional.
+      - type: bind
+        source: "${SECRETS_DIR:?set SECRETS_DIR}/sparkdash-ssh"
+        target: /run/sparkdash-ssh
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - frontend
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    # Read the token from the container environment without shell interpolation.
+    # Warnings (including an absent SSH identity) do not make ok=true unhealthy.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          const token = process.env.SPARKDASH_TOKEN;
+          if (!token) process.exit(1);
+          fetch('http://127.0.0.1:5555/api/health', {
+            headers: {Authorization: 'Bearer ' + token},
+            signal: AbortSignal.timeout(4000)
+          }).then(async r => {
+            if (!r.ok || (await r.json()).ok !== true) process.exit(1);
+          }).catch(() => process.exit(1));
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  sparkdash-config:
+
+networks:
+  frontend:
+    name: homelab_frontend
+    external: true

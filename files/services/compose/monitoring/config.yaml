@@ -69,6 +69,14 @@ endpoints:
       - "[STATUS] == 200"
     alerts:
       - type: discord
+  - name: sparkDash
+    group: applications
+    # The authenticated API is covered separately by the Compose healthcheck.
+    url: http://sparkdash:5555/
+    conditions:
+      - "[STATUS] == 200"
+    alerts:
+      - type: discord
   - name: Samba
     group: storage
     url: tcp://samba:445

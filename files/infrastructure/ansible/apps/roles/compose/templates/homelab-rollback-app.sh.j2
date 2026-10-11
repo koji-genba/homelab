@@ -10,7 +10,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
 case "$project" in
-  edge|dns|samba|stashpad-prod|stashpad-staging|sillytavern|open-webui|searxng|monitoring) ;;
+  edge|dns|samba|stashpad-prod|stashpad-staging|sillytavern|open-webui|searxng|sparkdash|monitoring) ;;
   *) echo "a valid Compose project is required" >&2; exit 2 ;;
 esac
 case "$rollback_sha" in

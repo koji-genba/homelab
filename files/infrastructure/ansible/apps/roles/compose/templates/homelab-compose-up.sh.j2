@@ -11,14 +11,14 @@ test "$cutover_confirmed" = true || {
 }
 
 case "${1:-}" in
-  edge|dns|samba|stashpad-prod|stashpad-staging|sillytavern|open-webui|searxng|monitoring)
+  edge|dns|samba|stashpad-prod|stashpad-staging|sillytavern|open-webui|searxng|sparkdash|monitoring)
     projects="$1"
     ;;
   all)
-    projects="edge dns samba stashpad-prod stashpad-staging sillytavern open-webui searxng monitoring"
+    projects="edge dns samba stashpad-prod stashpad-staging sillytavern open-webui searxng sparkdash monitoring"
     ;;
   *)
-    echo "usage: $0 {all|edge|dns|samba|stashpad-prod|stashpad-staging|sillytavern|open-webui|searxng|monitoring}" >&2
+    echo "usage: $0 {all|edge|dns|samba|stashpad-prod|stashpad-staging|sillytavern|open-webui|searxng|sparkdash|monitoring}" >&2
     exit 2
     ;;
 esac

@@ -40,6 +40,7 @@ Proxmox pve1 192.168.10.11
 │   ├── SillyTavern                 内部Docker network
 │   ├── Open WebUI                  内部Docker network
 │   ├── SearXNG / mcp-searxng       内部Docker network
+│   ├── sparkDash                   内部Docker network -> DGX (SSH/HTTP)
 │   └── Gatus                       内部Docker network
 ├── Tailscale gateway               維持、管理設定はTerraformで管理
 ├── ElastiFlow                      維持
@@ -48,6 +49,9 @@ Proxmox pve1 192.168.10.11
 Healthchecks.io                     外部dead-man監視
 GitHub/GHCR                         ソース、CI、公開イメージ
 ```
+
+Compose定義は10 projects / 11 services。sparkDashはremote-onlyで、初回反映は
+[sparkDash運用](../operations/sparkdash.md)に従う。
 
 Apps VMはフェーズ1で暫定管理IP `.10.42` とVLAN 11サービスIP `.11.100/.101/.103`を使い、
 VLAN移行後は`.10.101`へ集約する。実値はinventory/preflight確認後に変数へ確定する。
@@ -62,6 +66,7 @@ VLAN移行後は`.10.101`へ集約する。実値はinventory/preflight確認後
 | `openwebui.kojigenba-srv.com` | Caddy -> Open WebUI | Open WebUI内蔵ログイン |
 | `searxng.kojigenba-srv.com` | Caddy -> SearXNG | ネットワーク境界（Caddyの信頼network制限、loginなし） |
 | `mcp-searxng.kojigenba-srv.com` | Caddy -> mcp-searxng | ネットワーク境界（Caddyの信頼network制限、認証なし） |
+| `sparkdash.kojigenba-srv.com` | Caddy -> sparkDash:5555 | 信頼network/tailnet制限 + アプリBearer token（Caddy Basic Authなし） |
 | `dns.kojigenba-srv.com` | Caddy -> AdGuard Home UI | AdGuard内蔵ログイン |
 | `status.kojigenba-srv.com` | Caddy -> Gatus | Caddy Basic Auth |
 | DNS | Apps VM port 53 | Trusted/Tailscaleからの接続制限 |
@@ -91,6 +96,11 @@ VLAN移行後は`.10.101`へ集約する。実値はinventory/preflight確認後
 最初のcutoverではopaque PVC pathをそのままmountする。安定後、Kubernetes停止中に
 `/mnt/tank-gen2/data/apps/{sillytavern,stashpad-prod,stashpad-staging}/`へcopy/検証してから
 宣言を切り替える。`mv`は使わず、UID/GID、ACL、xattr、hardlinkを保持する。
+
+sparkDashのconfigはApps VMのnamed volume `homelab-sparkdash_sparkdash-config`へ保存する。
+初回所有権はimageの10001:10001を引き継ぐ。暗号鍵とciphertextを含むため、運用者がvolume全体を
+暗号化してVM外へbackupする。NFS/ZFS snapshotやTerraform state-backupには含まれない。
+復旧方針は[sparkDash運用](../operations/sparkdash.md)を参照する。
 
 ### NFS exportメモ
 
@@ -133,3 +143,4 @@ VM側はNFSv4、`hard,_netdev`を使用する。systemd mount unit、`RequiresMo
 | age復旧鍵 | KeePassXC |
 | ProxmoxとTailscaleのcredential | KeePassXC、デプロイ時に注入 |
 | アプリケーションデータ | 外部で復旧したNFS/ZFS |
+| sparkDash config / 暗号鍵 | named volumeの暗号化backup（VM外、運用者が用意） |
