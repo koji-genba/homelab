@@ -21,11 +21,14 @@ Proxmox VE 192.168.10.11
 │   ├── stashPad production/staging
 │   ├── SillyTavern
 │   ├── Open WebUI
+│   ├── sparkDash (DGX remote monitor)
 │   ├── SearXNG + MCP
 │   └── Gatus + Healthchecks.io dead-man
 ├── Tailscale gateway                 192.168.10.102
 └── ElastiFlow                        192.168.10.103
 ```
+
+Compose定義は10 projects / 11 servicesです。sparkDashの初回反映は[運用手順](docs/operations/sparkdash.md)に従います。
 
 VLAN 10はServer、20はTrusted、30はIoT、40はGuestです。VLAN 11と63は廃止済みです。
 
@@ -45,6 +48,7 @@ VLAN 10はServer、20はTrusted、30はIoT、40はGuestです。VLAN 11と63は�
 - [DGX Sparkストレージ運用](docs/operations/dgx-storage.md)
 - [Open WebUI運用](docs/operations/open-webui.md)
 - [SearXNG / MCP運用](docs/operations/searxng.md)
+- [sparkDash運用](docs/operations/sparkdash.md)
 
 設計を変更するときは、コードだけでなく該当ADRまたは運用手順も更新します。
 
@@ -72,7 +76,8 @@ scripts/                         # preflight、rollback、state backup/restore
 
 カスタムイメージは [caddy-image.yml](.github/workflows/caddy-image.yml) と
 [sparkdash-image.yml](.github/workflows/sparkdash-image.yml) でGHCRへ公開します。
-sparkDashはイメージ作成のみで、Composeへの登録は後続フェーズです。公開後のdigestを別の変更で固定します。
+sparkDashはDGXのremote monitorとしてComposeに登録し、公開imageのdigestを固定します。
+上流更新とComposeのdigest更新は別の変更で行います。
 
 ## 操作方針
 

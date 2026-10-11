@@ -10,6 +10,8 @@ mkdir -p "$tmp_dir/secrets" "$tmp_dir/data"
 : >"$tmp_dir/secrets/sillytavern.env"
 : >"$tmp_dir/secrets/healthchecks.env"
 : >"$tmp_dir/secrets/searxng.env"
+printf '%s\n' SPARKDASH_TOKEN=fixture-only >"$tmp_dir/secrets/sparkdash.env"
+mkdir -p "$tmp_dir/secrets/sparkdash-ssh"
 mkdir -p "$tmp_dir/secrets/samba"
 : >"$tmp_dir/secrets/samba/koji-genba-password"
 

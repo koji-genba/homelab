@@ -60,3 +60,8 @@ searxng.kojigenba-srv.com {
 mcp-searxng.kojigenba-srv.com {
 	import admin_networks mcp-searxng:3000
 }
+
+# Keep Authorization available for sparkDash's bearer token.
+sparkdash.kojigenba-srv.com {
+	import admin_networks sparkdash:5555
+}
