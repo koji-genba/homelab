@@ -5,7 +5,18 @@ repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 config="$repo_root/files/services/compose/monitoring/config.yaml"
 
 # Keep this check dependency-free: compose-config already validates the YAML
-# syntax, while this regression protects the Caddy-specific HTTP probe option.
+# syntax, while these regressions protect persistent storage and the
+# Caddy-specific HTTP probe option.
+storage_block=$(awk '
+  /^storage:$/ { in_block=1 }
+  in_block && /^[^ ]/ && !/^storage:$/ { exit }
+  in_block { print }
+' "$config")
+printf '%s\n' "$storage_block" | grep -Fx '  type: sqlite' >/dev/null
+printf '%s\n' "$storage_block" | grep -Fx '  path: /data/data.db' >/dev/null
+grep -Fx '      - gatus:/data' "$repo_root/files/services/compose/monitoring/compose.yaml" >/dev/null
+echo "Gatus persistent storage guard: ok"
+
 caddy_block=$(awk '
   /^  - name: Caddy$/ { in_block=1 }
   in_block && /^  - name:/ && !/^  - name: Caddy$/ { exit }

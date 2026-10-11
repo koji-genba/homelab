@@ -9,6 +9,10 @@ Apps VMの`homelab-app-reconcile.timer`は15分ごとに`origin/main`をfetchし
 受け入れる。dirty checkoutやnon-fast-forwardは拒否する。Compose projectとCaddy/Gatus設定の
 差分から対象projectだけを選び、設定検証、digest gate、起動待ちを通して更新する。
 
+Gatusはalert状態と監視履歴を`gatus` named volume上のSQLite file（`/data/data.db`）に保存する。
+再起動・再作成後も進行中の障害を保持し、復旧時には`send-on-resolved: true`によるDiscord復旧通知を送る。
+このvolumeはbackup対象外とし、消失時に監視履歴・alert状態だけが失われることを許容する。
+
 実行結果はApps VMの`/var/lib/homelab/deployments.log`にcommit SHA、project、image、成否と
 ともに追記される。確認には次を使う。
 
