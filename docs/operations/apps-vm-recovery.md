@@ -20,9 +20,10 @@ age private keyはApps VMへコピーしない。secretの復号は管理端末�
 
 `/etc/homelab/secrets/searxng.env`（SearXNGの`SEARXNG_SECRET`）はAnsibleが再生成するため、復元するものはない。
 
-sparkDashのnamed volumeはNFS復旧に含まれない。停止中にVM外の暗号化backupからconfig・暗号鍵・ciphertextを
-一式復元し、uid/gid 10001とdirectory mode 0700を維持する。tokenと任意SSH鍵はSOPSから再配置する。
-volumeがなければunit/settings/historyと暗号化secretの再登録が必要になる。
+sparkDashのnamed volumeはNFS復旧に含まれない。2026-10-11時点では自動backupを構築せず、VM外の暗号化backupも
+必須としない。volume喪失時は再deployでvolumeを再作成し、tokenとSSH鍵をSOPSから再配置して、UIで2台を
+再登録する（約5分）。unit/settings/historyは元に戻らない。unit数・benchmark結果・保存secretが増えたら
+backup方針を見直す。保存secretの暗号鍵はciphertextと同じvolumeに置かれる。
 [sparkDash運用](sparkdash.md)のbackup・復旧手順を参照する。
 
 ## Terraform実行前のProxmox側準備

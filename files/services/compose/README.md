@@ -4,7 +4,7 @@
 定義は10 projects / 11 services（searxngだけ2 services）である。起動順は
 `edge dns samba stashpad-prod stashpad-staging sillytavern open-webui searxng sparkdash monitoring`、停止は逆順。
 [sparkDash](../../../docs/operations/sparkdash.md)は専用named volumeでconfigを保持するremote monitorで、
-初回はimageからuid/gid 10001とmode 0700を引き継ぐ。volume全体の暗号化backupをVM外に用意する。
+初回はimageからuid/gid 10001とmode 0700を引き継ぐ。自動backupは構築せず、VM外の暗号化backupも必須とせず、volume喪失時は再deployとUIでの2台の再登録で復旧する。
 
 HTTP(S)のentry pointはedge projectだけで、DNSとSMBは必要なhost portだけを公開する。
 内部名はApps VMのtailnet IPへ解決される（[ADR-0007](../../../docs/adr/0007-apps-vm-tailnet-dns.md)）。
