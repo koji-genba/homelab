@@ -37,10 +37,14 @@ OPEN_WEBUI_DATA_PATH=$tmp_dir/data
 EOF
 mkdir -p "$tmp_dir/adguard"
 
-find "$repo_root/files/services/compose" -mindepth 2 -maxdepth 2 -name compose.yaml -print |
+find "$repo_root/files/services/compose" -mindepth 2 -maxdepth 2 -name compose.yaml -print >"$tmp_dir/compose-files"
+test -s "$tmp_dir/compose-files" || {
+  echo "no Compose definitions found; nothing to validate" >&2
+  exit 1
+}
 while IFS= read -r file; do
   project=$(basename "$(dirname "$file")")
   echo "checking $project"
   docker compose --project-name "lint-$project" --env-file "$tmp_dir/env" \
     --file "$file" config --quiet
-done
+done <"$tmp_dir/compose-files"
