@@ -1,3 +1,38 @@
 title: homelab
 theme: dark
 color: slate
+language: ja
+target: _blank
+headerStyle: boxedWidgets
+cardBlur: xs
+iconStyle: theme
+hideVersion: true
+disableUpdateCheck: true
+useEqualHeights: true
+quicklaunch:
+  searchDescriptions: true
+layout:
+  Web アプリ:
+    icon: mdi-apps
+    style: row
+    columns: 3
+  AI・MCP:
+    icon: mdi-brain
+    style: row
+    columns: 2
+  基盤・管理:
+    icon: mdi-server
+    style: row
+    columns: 4
+  ストレージ (SMB/NFS):
+    icon: mdi-folder-network
+    style: row
+    columns: 2
+  SSH 先:
+    icon: mdi-console
+    style: row
+    columns: 3
+  外部サイト:
+    icon: mdi-open-in-new
+    style: row
+    columns: 3

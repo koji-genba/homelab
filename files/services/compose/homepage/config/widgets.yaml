@@ -1,1 +1,20 @@
-[]
+- resources:
+    label: Apps VM
+    cpu: true
+    memory: true
+    disk: /
+    uptime: true
+    cputemp: false
+- datetime:
+    locale: ja
+    text_size: xl
+    format:
+      dateStyle: medium
+      timeStyle: short
+      hourCycle: h23
+      timeZone: Asia/Tokyo
+- search:
+    provider: custom
+    url: https://searxng.kojigenba-srv.com/search?q=
+    target: _blank
+    showSearchSuggestions: false

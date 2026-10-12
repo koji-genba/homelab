@@ -2,9 +2,19 @@
 
 ## 用途と構成
 
-homelab各サービスへのリンク集と接続先の索引を提供する。Webアプリ、AI・MCP、基盤・管理、
+homelab各サービスへの統合トップページと、接続先の索引・簡易状況表示を提供する。Webアプリ、AI・MCP、基盤・管理、
 ストレージ (SMB/NFS)、SSH 先、外部サイトの6グループで構成する。
-Gatus widget、docs索引は後続PRで追加する。
+各グループを横並びのカードで表示し、狭い画面では列数を減らす。全カードとグループ見出しに
+アイコンを付け、ダークテーマとCSSの控えめなグラデーションを使う。外部画像・fontは追加しない。
+アイコンはブラウザが既存のアイコンCDNから取得する。Webリンクは別タブで開く。
+
+トップバーにはApps VMラベルのresources、Asia/Tokyoの日本語日時（24時間）、SearXNG検索を置く。
+検索候補の取得は無効。ページ上で入力すると標準Quick Launchが名前・説明を検索する
+（例: `samba`、`ssh`）。基盤・管理のGatusカードにはup / down / uptimeの集計を表示し、
+既存のsiteMonitorも維持する。
+固定v2.5.0の標準Quick Launchは`href`なしのカードを除外するため、custom.jsで同じ検索画面に
+名前・説明に一致する接続先のコピー候補を補う。候補のクリック、またはTabで選択してEnter/Spaceでコピーする。
+custom.jsが無効なら、この追加候補は表示されない（カードの手動コピーは可能）。
 
 - URL: `https://homepage.kojigenba-srv.com`
 - Compose project / service: `homepage` / `homepage`（内部port 3000）
@@ -20,17 +30,44 @@ Homepage内蔵認証の`HOMEPAGE_AUTH_ENABLED`は設定しない。
 ## 設定の置き場所と更新
 
 `files/services/compose/homepage/config/`の`settings.yaml`、`services.yaml`、`bookmarks.yaml`、
-`widgets.yaml`をGitで管理し、それぞれ`/app/config/`配下へread-only bindする。
-リンクや説明はこの4ファイルを編集し、検証、review、mergeする。通常reconcileがHomepageを
+`widgets.yaml`と、表示用の`custom.css`・コピー操作用の`custom.js`をGitで管理し、
+それぞれ`/app/config/`配下へread-only bindする。
+リンクや説明、UIはこれらのファイルを編集し、検証、review、mergeする。通常reconcileがHomepageを
 force-recreateして反映する。UIやcontainer内での編集は使わない。
 
-SMB/NFS/SSHの索引エントリは`href`なしのカードとし、アドレスや接続コマンドを`description`に書く。
+SMB/NFS/SSHの索引エントリは`href`なしのカードとし、`description: |-`で必ず2行を書く。
+1行目はコピーしたい文字列そのもの、2行目は認証・到達範囲・未実施事項などの短い補足とする。
+SMBのUNCパスは先頭にバックスラッシュ2つ、共有名の前に1つを書く（YAMLのliteralではescape不要）。
+SSHは`ssh user@host`、admin userが未確認のDGXはホストIPだけを1行目に置き、`:22`は補足に書く。
+
+```yaml
+- shared:
+    id: copy-storage-shared
+    icon: samba-server
+    description: |-
+      \\samba.kojigenba-srv.com\shared
+      統合共有・SMB認証・tailnet必須
+```
+
+新しいエントリは「ストレージ (SMB/NFS)」または「SSH 先」に置き、重複しない`id`を
+それぞれ`copy-storage-` / `copy-ssh-`で始める。アイコンも付ける。
+固定v2.5.0の実コンテナで確認した`.service`・`.service-card`・`.service-description`と
+`.services-group`・`.service-group-name`をCSS/JSで使う。image更新時はDOMを再確認する。
+
+対象カードのクリック、またはフォーカスしてEnter/Spaceで**1行目だけ**をコピーする。
+成功すると色が変わり「コピーしました」を約2.4秒表示する。イベント委任とMutationObserverで
+再描画に対応し、Clipboard APIが使用不可・拒否された場合は`execCommand('copy')`にフォールバックする。
+両方失敗した場合は手動コピーを案内する。CSSは改行を表示し、文字の選択を許可するため、
+custom.jsが無効でもトリプルクリックやドラッグでコピーできる。長い補足は画面幅に合わせて折り返す。
+ただしJavaScript全体を無効にすると、固定v2.5.0のHomepage本体がカードを描画しない。
+手動コピーの代替はHomepage本体のJavaScriptを有効にした状態で利用する。
+
 `smb://`・`ssh://`はブラウザ/OSでの動作が未検証のため使わない。説明は日本語で簡潔にし、
 認証・到達範囲や未実施の作業を必要に応じて添える。外部サイトはHTTPSの`href`を付ける。
 これらの索引には`siteMonitor`・`ping`を付けない。索引の更新もmerge後の通常reconcileで反映される。
 
 `/app/config`全体をread-only bindすると、公式imageのlogs書込みと不足するskeleton生成が衝突する。
-そこで親directoryをuid/gid 1000、mode 0755、上限64 MiBのtmpfsとし、その上に設定4ファイルを
+そこで親directoryをuid/gid 1000、mode 0755、上限64 MiBのtmpfsとし、その上に設定6ファイルを
 個別にread-only bindする。`/app/config/logs`と補助ファイルは書込み可能で、再作成時に破棄される。
 repoに`docker.yaml`は追加しない。固定imageは起動後にコメントのみの`docker.yaml`と
 `kubernetes.yaml`をtmpfsへ生成するが、Docker socketへの接続設定は持たせない。
@@ -84,9 +121,17 @@ Caddyの認証・接続元制限も確認する。永続アプリデータはな
 設定・imageのrollbackは[アプリ更新・rollback](application-lifecycle.md)に従い、
 Homepageを追加したcommit以降の既知の正常commitを指定する。
 
-## 既知の制約
+## 既知の制約 / 今後
 
 - ADR-0001に従いDocker socketを使わず、container自動検出やDocker widgetは提供しない。
+- resourcesはコンテナから見えるCPU・memory・disk (`/`)・uptimeの値であり、ホストmountや
+  追加権限は使わない。実機でApps VMの値になるかはデプロイ後に確認する。ローカルではWSLホストの
+  値が出るため、実機一致は未検証。diskもコンテナの`/`であり、NFSやストレージ全体の使用率ではない。
+- Gatus widgetは同じDocker networkの`http://gatus:8080`から集計する。ローカルでGatusが
+  無い場合は値を取得できずAPIエラー表示になるが、他カードやコピー操作は利用できる。
+- 履歴グラフはPrometheus/Grafana導入時に`prometheusmetric` widget等で拡張する。
+  Proxmox/DGXの数値はAPIトークンやエージェントが要るため別途判断する。
+  この構成ではProxmox・Glances・Prometheus系widget、tokenが要るsparkDashのcustomapi連携は追加しない。
 - `siteMonitor`は同じDocker network上のHTTP backendだけに付ける。CaddyのFQDN経由ではprobeしない。
   SillyTavernはBasic Authで401になるためリンクのみとし、probeのために資格情報を渡さない。
   DGX、Proxmox、ElastiFlowなどLAN機器には付けない。自己署名TLSの回避設定も追加しない。

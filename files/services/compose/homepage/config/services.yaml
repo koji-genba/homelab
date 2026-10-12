@@ -1,98 +1,156 @@
 - Web アプリ:
     - stashPad prod:
+        icon: mdi-image-multiple
         href: https://prod.kojigenba-srv.com
         description: メディアライブラリ（本番）
         siteMonitor: http://stashpad-prod:8080/
     - stashPad staging:
+        icon: mdi-image-multiple
         href: https://staging.kojigenba-srv.com
         description: メディアライブラリ（検証）
         siteMonitor: http://stashpad-staging:8080/
     - SillyTavern:
+        icon: sillytavern
         href: https://sillytavern.kojigenba-srv.com
         description: AIチャット
     - Open WebUI:
+        icon: open-webui
         href: https://openwebui.kojigenba-srv.com
         description: ローカルLLMチャット
         siteMonitor: http://open-webui:8080/health
     - SearXNG:
+        icon: searxng
         href: https://searxng.kojigenba-srv.com
         description: メタ検索
         siteMonitor: http://searxng:8080/healthz
     - sparkDash:
+        icon: mdi-gauge
         href: https://sparkdash.kojigenba-srv.com
         description: DGX稼働状況
         siteMonitor: http://sparkdash:5555/
 - AI・MCP:
     - SearXNG MCP:
+        icon: mcp
         href: https://mcp-searxng.kojigenba-srv.com/mcp
         description: 検索用MCPサーバー
         siteMonitor: http://mcp-searxng:3000/health
     - DGX 推論 API:
+        icon: mdi-brain
         href: http://192.168.10.51:8000/v1
         description: DGXの推論API
 - 基盤・管理:
     - AdGuard Home:
+        icon: adguard-home
         href: https://dns.kojigenba-srv.com
         description: 内部DNS・広告ブロック
         siteMonitor: http://adguard:3000/
     - Gatus:
+        icon: gatus
         href: https://status.kojigenba-srv.com
         description: サービス監視
         siteMonitor: http://gatus:8080/
+        widget:
+          type: gatus
+          url: http://gatus:8080
+          fields: [up, down, uptime]
     - Proxmox pve1:
+        icon: proxmox
         href: https://192.168.10.11:8006/
         description: VM・ストレージ管理
     - ElastiFlow/Kibana:
+        icon: kibana
         href: http://192.168.10.103:5601
         description: ネットワークフロー分析
 - ストレージ (SMB/NFS):
     - shared:
-        description: >-
+        id: copy-storage-shared
+        icon: samba-server
+        description: |-
           \\samba.kojigenba-srv.com\shared
-          （統合共有・SMB認証・tailnet必須）
+          統合共有・SMB認証・tailnet必須
     - shared-hdd:
-        description: >-
+        id: copy-storage-shared-hdd
+        icon: mdi-harddisk
+        description: |-
           \\samba.kojigenba-srv.com\shared-hdd
-          （HDD直接共有・SMB認証・tailnet必須）
+          HDD直接共有・SMB認証・tailnet必須
     - archive:
-        description: >-
+        id: copy-storage-archive
+        icon: mdi-archive
+        description: |-
           \\samba.kojigenba-srv.com\archive
-          （アーカイブ・SMB認証・tailnet必須）
+          アーカイブ・SMB認証・tailnet必須
     - ai (models・datasets):
-        description: >-
-          \\samba.kojigenba-srv.com\ai（models・datasets、SMB認証・tailnet必須）
-          DGX 側 mount は未実施
+        id: copy-storage-ai
+        icon: mdi-folder-network
+        description: |-
+          \\samba.kojigenba-srv.com\ai
+          SMB認証・tailnet必須・DGX mount未実施
 - SSH 先:
     - Apps VM:
-        description: ssh deploy@192.168.10.101（公開鍵認証のみ）
+        id: copy-ssh-apps
+        icon: mdi-console
+        description: |-
+          ssh deploy@192.168.10.101
+          公開鍵認証のみ
     - pve1:
-        description: ssh root@192.168.10.11（公開鍵認証）
+        id: copy-ssh-pve1
+        icon: mdi-console
+        description: |-
+          ssh root@192.168.10.11
+          公開鍵認証
     - Tailscale gateway:
-        description: ssh ubuntu@192.168.10.102（公開鍵認証）
+        id: copy-ssh-gateway
+        icon: mdi-console
+        description: |-
+          ssh ubuntu@192.168.10.102
+          公開鍵認証
     - ElastiFlow VM:
-        description: ssh ubuntu@192.168.10.103（公開鍵認証）
+        id: copy-ssh-elastiflow
+        icon: mdi-console
+        description: |-
+          ssh ubuntu@192.168.10.103
+          公開鍵認証
     - stashpad-dev:
-        description: ssh ubuntu@192.168.10.41（公開鍵認証）
+        id: copy-ssh-stashpad-dev
+        icon: mdi-console
+        description: |-
+          ssh ubuntu@192.168.10.41
+          公開鍵認証
     - DGX Spark head:
-        description: 192.168.10.51:22
+        id: copy-ssh-dgx-head
+        icon: mdi-server
+        description: |-
+          192.168.10.51
+          SSH :22 / admin user未確認
     - DGX Spark worker:
-        description: 192.168.10.52:22
+        id: copy-ssh-dgx-worker
+        icon: mdi-server
+        description: |-
+          192.168.10.52
+          SSH :22 / admin user未確認
 - 外部サイト:
     - Tailscale 管理:
+        icon: tailscale
         href: https://login.tailscale.com/admin/machines
         description: tailnet端末・ルート管理（管理アカウント）
     - Healthchecks.io:
+        icon: healthchecks
         href: https://healthchecks.io/
         description: dead-man監視（管理アカウント）
     - GitHub repo:
+        icon: github
         href: https://github.com/koji-genba/homelab
         description: homelabのコード・Issue（管理操作はGitHub認証）
     - GitHub Actions:
+        icon: github
         href: https://github.com/koji-genba/homelab/actions
         description: CI・image buildの実行履歴（管理操作はGitHub認証）
     - GHCR パッケージ:
+        icon: docker
         href: https://github.com/koji-genba?tab=packages
         description: koji-genbaの公開container image一覧
     - Cloudflare:
+        icon: cloudflare
         href: https://dash.cloudflare.com/
         description: DNS・zone管理（管理アカウント）

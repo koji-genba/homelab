@@ -1,0 +1,103 @@
+/* Selectors verified against the pinned v2.5.0 container DOM. */
+#__next {
+  background: radial-gradient(ellipse at 12% 0%, #164e6340, transparent 48%),
+    radial-gradient(ellipse at 95% 35%, #312e8130, transparent 55%), #0f172a;
+  background-attachment: fixed;
+}
+
+#layout-groups {
+  max-width: 1600px;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 0 1.5rem;
+}
+
+.services-group { min-width: 0; margin-bottom: 0.8rem; }
+.service-group-name { gap: 0.5rem; letter-spacing: 0.025em; }
+.service-card { border: 1px solid #94a3b81a; }
+.service-card:hover { border-color: #67e8f94d; }
+.service-name, .service-title-text { min-width: 0; }
+.service-description { line-height: 1.65; }
+
+:is([id^="copy-storage-"], [id^="copy-ssh-"]) .service-card {
+  cursor: copy;
+  min-height: 92px;
+  padding-right: 1.2rem;
+  transition: border-color 160ms, background-color 160ms;
+}
+
+:is([id^="copy-storage-"], [id^="copy-ssh-"]) .service-card::after {
+  content: "⧉";
+  position: absolute;
+  right: 0.5rem;
+  top: 0.4rem;
+  color: #94a3b8;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+:is([id^="copy-storage-"], [id^="copy-ssh-"]) .service-title,
+:is([id^="copy-storage-"], [id^="copy-ssh-"]) .service-description {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+:is([id^="copy-storage-"], [id^="copy-ssh-"]) .service-description {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+:is([id^="copy-storage-"], [id^="copy-ssh-"]) .service-description::first-line {
+  font-family: ui-monospace, monospace;
+  color: #a5f3fc;
+}
+
+.service-card.copy-ready:focus-visible {
+  outline: 2px solid #67e8f9;
+  outline-offset: 2px;
+}
+
+.service-card.copy-success {
+  background-color: #065f4659;
+  border-color: #34d399;
+}
+
+.service-card.copy-error { border-color: #fbbf24; }
+.copy-feedback {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.35rem;
+  z-index: 20;
+  font-size: 0.7rem;
+  color: #d1fae5;
+  background: #0f172a;
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.35rem;
+  pointer-events: none;
+}
+.copy-feedback:empty { display: none; }
+.copy-error .copy-feedback { color: #fde68a; }
+
+.copy-search-results { border-top: 1px solid #94a3b833; padding: 0.75rem; }
+.copy-search-results > p { font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.5rem; }
+.copy-search-results ul { max-height: 35vh; overflow-y: auto; }
+.copy-search-button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.6rem;
+  border-radius: 0.3rem;
+  cursor: copy;
+}
+.copy-search-button:hover, .copy-search-button:focus-visible { background: #164e6359; }
+.copy-search-description { display: block; white-space: pre-line; overflow-wrap: anywhere; font-size: 0.75rem; }
+.copy-search-feedback { display: block; color: #a7f3d0; font-size: 0.75rem; }
+
+@media (max-width: 640px) {
+  #layout-groups { padding: 0 0.75rem; }
+  :is([id^="copy-storage-"], [id^="copy-ssh-"]) .service-card { padding-right: 0.65rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .service-card { transition: none !important; }
+}
