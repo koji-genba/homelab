@@ -18,7 +18,8 @@ DGX Spark 2台から使うモデルと学習データ（tar.gz）の置き場を
 
 ## 手順A: pve1（`192.168.10.11`、rootで実行）
 
-変更前の状態を保存してから、datasetとexportを作る。
+この手順は初回作成用であり、dataset作成やexports追記をそのまま再実行しない。
+通常の更新・復旧確認では既存dataset/exportとの差分を確認する。変更前の状態を保存してから作成する。
 
 ```sh
 cp -a /etc/exports /etc/exports.bak.$(date +%F)
@@ -89,8 +90,8 @@ ssh deploy@192.168.10.101 'findmnt /srv/homelab/nfs/ai; cat /srv/homelab/nfs/ai/
 ssh deploy@192.168.10.101 "awk '/^device 192.168.10.11/{d=\$2} /xprt:/{c[d]++} END{for(k in c) print c[k], k}' /proc/self/mountstats"
 ```
 
-mount guardは source / fstype=nfs4 / `rw` / marker内容 の4点を見る。ここで落ちるとComposeが
-起動しないので、Samba再起動の前に必ず通しておく。
+mount guardはsource、fstype=nfs4、宣言されたro/rw、marker名・内容を検証する。
+`ai`の現行期待modeはrwである。ここで落ちるとComposeが起動しないので、Samba再起動の前に必ず通しておく。
 
 SMB側の確認：
 
@@ -165,13 +166,38 @@ dd if=/mnt/ai/models/<任意のファイル> of=/dev/null bs=1M status=progress 
 
 ## 切り戻し
 
-exportを外すだけで元に戻る。datasetを消す場合は中身の確認を先に行う。
+以下は実装から導いた手順で、実機では未検証。
+client側の宣言を残したままserver exportを先に外すとmount guardが失敗し、他projectの起動にも影響する。
+writer停止、client側整理とunmount、最後にserver exportの順に進める。dataset/dataの削除は別の判断とする。
 
-```sh
-# pve1
-cp -a /etc/exports.bak.<date> /etc/exports
-exportfs -ra && exportfs -v
-```
+1. [project撤去の共通手順](application-lifecycle.md#projectの撤去共通手順)の手順1〜2と同じく、
+   reconcile timerを止め、実行中serviceの終了とpending/pausedを確認し、pauseで競合を防ぐ。
+   作業前からpauseがあれば、共通手順の分岐に従って理由を解決するまで切り戻しに入らない。
+   その後SambaとDGX 2台の`ai` writerを停止する。Compose側は`/opt/homelab`に旧定義がある間に停止する。
 
-Apps VM側は`nfs_mounts`から`ai`エントリを、Sambaから`[ai]`を外して`make ansible-apply`する。
-DGX側は`/etc/fstab`の行を消して`systemctl daemon-reload`、`umount /mnt/ai`する。
+   ```sh
+   sudo docker compose --project-name homelab-samba --env-file /etc/homelab/compose.env \
+     -f /opt/homelab/files/services/compose/samba/compose.yaml down --remove-orphans
+   ```
+
+   `sudo docker ps -a --filter label=com.docker.compose.project=homelab-samba`でSamba projectのcontainerが残っていないことを確認する。
+   Samba project自体は残すため、そのproject一覧やpendingのretryは削除しない。
+2. Git管理の`files/services/compose/samba/config/smb.conf`の`[ai]`、Samba `compose.yaml`の
+   `/mnt/ai` bind mount、`compose.env.j2`の`AI_MOUNT_PATH`、`group_vars/apps.yml`の
+   `ai_mount_path`と`nfs_mounts`の`ai`（mount/marker宣言）を揃えて整理する。
+   ただし旧checkoutのSambaは`AI_MOUNT_PATH`を必須とするため、最初のAnsibleでは
+   `ai_mount_path`とenv描画を移行用に残す。`ai`を外したmount guardを先に描画し、
+   新しいSamba定義へcheckoutを進めた後にpath変数/envを削除して再適用する。
+3. 変更をmainへmergeし、共通手順の順序でAnsibleの描画とVM checkoutのfast-forwardを行う。
+   Ansibleは既存checkoutを更新しない。`[ai]`等のGit管理設定はmainへのmergeとcheckout更新後、
+   `sudo env HOMELAB_FORCE_RECREATE=true /usr/local/sbin/homelab-compose-up samba`で反映する。
+   bind mountが消えたことを確認する。env変更によるAnsible適用では残る全projectも再作成される。
+4. Ansibleは宣言から消えたmountを自動撤去しない。Apps VMの`/etc/fstab`の`ai`行を整理して
+   `sudo umount /srv/homelab/nfs/ai`を行い、未mountであることを確認する。
+   DGX側もfstabの該当行を削除し、アクセスするwriterが無いことを確認した上で稼働中のautomount/mountを
+   停止・unmountする。`systemctl daemon-reload`だけでは稼働中mountは外れない。
+5. 全clientが外れた後、pve1の`/etc/exports`から`ai`のentryだけを外し、`exportfs -ra`と
+   `exportfs -v`で確認する。`/etc/exports`全体を過去backupへ戻す場合は、先にその後の変更との差分を確認する。
+   特に2026-09-19のbackupは、[2026-09-23の旧4 exportの/32化](nfs-export.md#フェーズごとのclient範囲)より古い。
+   後日の変更を巻き戻す全体コピーは行わない。
+6. 共通手順に従い、残るmount/projectを確認して、この作業で作成したpauseの解除とtimer再開を行う。

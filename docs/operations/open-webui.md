@@ -48,7 +48,7 @@ browser
   見込みだった。healthcheckの`start_period`（240s）は`compose_wait_timeout_seconds`より短く保つ。
   2回目以降の起動は取得を行わない
 
-## 手順A: pve1（`192.168.10.11`、rootで実行）
+## 初回追加時の手順A: pve1（`192.168.10.11`、rootで実行）
 
 repoはNFS serverを変更しないので、他の作業より先に手動で行う。
 
@@ -61,7 +61,7 @@ exportfs -v | grep k8s-volumes
 containerはrootで動き、exportは`no_root_squash`なので`root:root 0750`で足りる。Ansibleが新しい
 mountを描画した後にmarkerが無いと、mount guardが**全project**で失敗する。このため必ず最初に行う。
 
-## 手順B: 反映順序
+## 初回追加時の手順B: 反映順序
 
 順序を入れ替えない。
 
@@ -134,7 +134,7 @@ PR #63（merge commit `78e6194`）を手順A、Bの順で反映した。reconcil
 | 再作成後のsession | 再作成前に発行したtokenが有効（`.webui_secret_key`が同一） |
 | idle時のmemory | 約660 MiB |
 
-## 更新とrollback
+## 日常の更新
 
 更新は`open-webui/compose.yaml`のdigestを上げるPRで行い、reconcileが反映する。Open WebUIは起動時に
 DBをmigrationし、自動downgradeはない。version更新の前に、利用のない時間帯にpve1で`webui.db`を
@@ -165,24 +165,20 @@ SQLite fileに保存するため、`ansible-apply`でGatusを再作成しても�
 
 ## rollback
 
-rollbackは`PROJECT=open-webui`を指定した`make rollback-app`で行う（手順は
-[アプリ更新・promotion・rollback](application-lifecycle.md#rollbackと再開)）。migration後の
-DBは古いversionで読めないことがあり、その場合はcopyしておいた`webui.db`を戻す。
+data/schema互換性を確認し、Open WebUIのCompose定義を含む既知のcommitを指定する。
+
+```sh
+PROJECT=open-webui ROLLBACK_SHA=<known-good-commit> APPS_HOST=192.168.10.101 make rollback-app
+```
+
+pause解除とpendingの再反映は[共通手順](application-lifecycle.md#rollbackと再開)に従う。
+migration後のDBは古いversionで読めないことがあり、DB復元が必要な場合は保存した`webui.db`を使う。
+image/configのrollbackだけではNFS上のDBは戻らない。DB復元時はwriterを停止して整合性を確認する。
 
 ## 切り戻し（アプリの撤去）
 
-追加時とは逆に、helperのproject一覧を先に戻す。checkoutだけが先に戻ると、古いhelperとdead-man pingが
-`open-webui/compose.yaml`を見つけられずに失敗する。
-
-1. Apps VMでprojectを止める。
-
-   ```sh
-   ssh deploy@192.168.10.101 sudo docker compose --project-name homelab-open-webui \
-     --env-file /etc/homelab/compose.env \
-     -f /opt/homelab/files/services/compose/open-webui/compose.yaml down
-   ```
-
-2. revertのPRを`main`へmergeし、reconcileを待たずに`make ansible-apply`を実行する。
-3. reconcileでApps VMのcheckoutを進める。
-4. Ansibleは宣言から外したNFS mountをunmountしない。Apps VMの`/etc/fstab`の該当行を消し、
-   `umount /srv/homelab/nfs/open-webui`する。pve1のdirectoryはそのまま残す。
+`open-webui`を対象に[project撤去の共通手順](application-lifecycle.md#projectの撤去共通手順)を使う。
+固有の整理対象はOpen WebUIのCompose定義、Caddy/Gatus、AdGuard DNS rewrite、
+`open_webui_data_path` / `OPEN_WEBUI_DATA_PATH`と`nfs_mounts`の`open-webui-data`（marker宣言を含む）である。
+Ansibleは宣言から外したNFS mountをunmountしない。writer停止後にApps VMの`/etc/fstab`の該当行を整理し、
+`umount /srv/homelab/nfs/open-webui`する。pve1上のdirectory、DB、session鍵、markerはそのまま残す。

@@ -15,8 +15,13 @@ pve1上のtank-gen2に対してSSDライトキャッシュ層をmergerfsで構�
 読み込み  → /mnt/shared から透過的にアクセス（SSD・HDD問わず）
             tank-gen2のread cache → M8VC L2ARC (476GB)
 
-NFS export → /mnt/shared → K8s Samba pod → Windows SMB
+pve1 /mnt/shared (NFS export)
+  → Apps VM /srv/homelab/nfs/shared
+  → Compose Samba container /mnt/shared → Windows SMB
 ```
+
+SMB経路の宣言は`files/infrastructure/ansible/apps/group_vars/apps.yml`の`shared_mount_path`と
+`files/services/compose/samba/compose.yaml`のbind mountで確認する。
 
 ## コンポーネント
 
@@ -46,7 +51,9 @@ LSI SAS2008 HBA経由ではTRIMが通らない。SAS2008はRZAT/DRATビットを
 cache-pool 860GBに対して日次書き込みが満杯になることはないため、随時moveではなくnightly実行。SSDが埋まったとしてもmergerfsのフォールバックで機能継続する。
 
 **ZFS snapshotはmover完了後**
-mover前にsnapshotするとSSDに残っているファイルがsnapshotに写らない。moverスクリプトの末尾でsnapshotを取ることで「SSDが空になった完全な状態」を記録する。
+moverスクリプトの末尾で、settle条件を満たして移動できたHDD側の状態をsnapshotする。
+最近変更されたファイルや転送中の変更でSKIPされたファイルはSSDに残りうるため、SSD上の残存データは含まれない。
+転送失敗やowner mismatchのerrorsがあればsnapshotを見送る。
 
 **/mnt/tank-gen2/data/sharedのNFS exportも残す**
 mergerfsを通さない直接経路として維持。大事なデータのコピーやパフォーマンス比較用。
@@ -63,19 +70,17 @@ mergerfsを通さない直接経路として維持。大事なデータのコピ
 
 ### /etc/exports
 
-```
-/mnt/tank-gen2/data/k8s-volumes  192.168.10.0/24(rw,sync,no_subtree_check,no_root_squash)
-/mnt/tank-gen1/data/archive      192.168.10.0/24(rw,sync,no_subtree_check,no_root_squash)
-/mnt/tank-gen2/data/shared       192.168.10.0/24(rw,sync,no_subtree_check,no_root_squash,fsid=101)
-/mnt/shared                      192.168.10.0/24(rw,sync,no_subtree_check,no_root_squash,fsid=100)
-```
-
+client scope、option、fsidは[NFS export契約](nfs-export.md#実測された親export)を参照する。
 FUSEファイルシステムはカーネルがfsidを自動取得できないため`/mnt/shared`に`fsid=100`を明示。
 `/mnt/tank-gen2/data/shared`にも`fsid=101`を明示して、NFS再起動・mergerfs再マウント後のstale file handleを避ける。
+既存4 exportはApps VMの`/32`へ制限し、DGXも使う`ai`だけを`/24`にする契約である。
+pve1の実際の`/etc/exports`はrepoで管理されておらず、現在の実設定は未確認である。
 
 ## moverスクリプト
 
-`/usr/local/bin/mover.sh`
+repoの実体は[`files/infrastructure/storage/mover.sh`](../../files/infrastructure/storage/mover.sh)で、
+`/usr/local/bin/mover.sh`はpve1への手動配置先である。repoはこの配置・cronを自動適用しない。
+pve1のfstab、autotrim、pool構成もApps VM向けAnsibleの適用対象ではない。
 
 cron（毎朝5時）:
 ```
@@ -109,7 +114,10 @@ modeやmtimeは元のSSDディレクトリが削除されていると復元元�
 
 ## ZFS snapshotポリシー
 
-対象: `tank-gen2/data/shared`のみ（moverスクリプト内で自動取得）
+対象: `tank-gen2/data/shared`のみ（moverスクリプトの`DATASET`で指定し自動取得）。
+`cache-pool`上の残存ファイル、`ai`、`archive`、`k8s-volumes`、VM内named volumeは含まれない。
+snapshotは同じdataset上の世代保持であり、backupと同義ではない。SSDに残るファイルの復旧方針と、
+pool喪失に備える別媒体へのbackupは別に確認する。保持世代の正は同スクリプトのprune処理である。
 
 | 種別 | タイミング | 保持世代 |
 |---|---|---|

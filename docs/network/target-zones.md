@@ -2,12 +2,13 @@
 
 - 状態: Port 4のVLAN 10変更まで実機反映・疎通確認・保存済み
 - 初版: 2026-08-29
-- 最終更新: 2026-09-19
+- 最終更新: 2026-10-12
 - 設計判断: [ADR-0003](../adr/0003-four-network-zones.md)
 - 移行: [KubernetesからComposeへの移行、フェーズ4](../archive/k8s-to-compose.md#phase-4-network-migration)
 
 この文書はIX2215、switch、ECW5211の期待状態を定義する。credentialや機器MACは記録せず、
-port/VLAN対応と受入結果を管理する。
+port/VLAN対応と受入結果を管理する。以下のゾーン・Apps VM設定はrepoに実装された現行設計であり、
+日付つきの受入結果と、[IPv6の未実施記録](#ipv6)は区別する。
 
 ## ゾーンとアドレス計画
 
@@ -54,8 +55,11 @@ IX2215自身のSSH/HTTP管理はServerとTrustedからだけ許可する。IoT�
 含めて管理planeへ接続できないようにする。Server VLAN内は同一trust boundaryとして扱い、必要な追加制限は
 各hostのfirewallで行う。
 
-Apps VM自身でも多層防御（defense in depth）として、Trusted CIDRとTailscaleからだけSSH、DNS、HTTP(S)、SMBを
-受け付ける。Internetからのport forwardは作らない。
+Apps VM自身でも多層防御（defense in depth）として、Server（`192.168.10.0/24`）、
+Trusted（`192.168.20.0/24`）、TailscaleからSSH、DNS、HTTP(S)、SMBを受け付ける。
+`group_vars/apps.yml`の設定変数`trusted_networks`は許可元CIDRの一覧であり、ゾーン名Trustedだけを意味しない。
+`homelab.nft.j2`は移行完了時に旧`192.168.11.0/24`を除外し、tailnetの`100.64.0.0/10`を含む一覧を使う。
+Tailscale interfaceからの同portも許可する。Internetからのport forwardは作らない。
 
 ## DNSとTailscale
 
@@ -88,7 +92,8 @@ Apps VM自身でも多層防御（defense in depth）として、Trusted CIDRと
   2台を収容する。
 - 空きのGE2 port 5～7はGuest VLAN 40のaccess portとする。Server機器を増設するときは、使用するportを
   Guest用VLAN groupからport 3/4と同じServer用VLAN groupへ移す。
-- ECW5211の管理interfaceはServer VLAN 10へtaggedで置く。ECW5211はuntaggedを使用せず、uplinkでは
+- GE2 port 8はECW5211 AP専用trunkとする（[物理ポート一覧](../../files/infrastructure/network/README.md#物理ポート)）。
+  ECW5211の管理interfaceはServer VLAN 10へtaggedで置く。ECW5211はuntaggedを使用せず、uplinkでは
   tagged VLAN 10/20/30/40だけを受ける。
 - Trusted、IoT、GuestのSSIDをそれぞれVLAN 20、30、40へtag付けする。
 - Server用SSIDは作らない。
@@ -105,9 +110,12 @@ ECW5211に適切なprovider/APIがないため反映は手動とする。SSID名
 
 ## IPv6
 
-routerのRA、DHCPv6、IPv6 forwardingを無効化し、各zoneのclientがグローバルIPv6経由でIPv4 ACLを
-迂回しないことを確認する。Apps VMもIPv6 listenerを公開しない。将来IPv6を再導入する場合は、
-IPv4と同等のゾーンポリシーを設計した新しいADRを先に作成する。
+Apps VMはnetwork roleの`99-homelab-ipv6.conf`でIPv6とforwardingを無効化する実装であり、IPv6 listenerを公開しない。
+routerのRA、DHCPv6、IPv6 forwardingの明示的な無効化と、各zoneのIPv4 ACL迂回が無いことの確認は設計上の要求である。
+[2026-09-13のACL移行記録](../archive/ix-acl-stateful-runbook.md#7-対象外)では明示無効化は未実施とされており、
+その後の実施状況はrepoから確認できない。明示無効化は2026-10-12時点で未実施の課題として
+[#32](https://github.com/koji-genba/homelab/issues/32)（open）で追跡中であり、4ゾーン化の完了とは別に扱う。
+将来IPv6を再導入する場合は、IPv4と同等のゾーンポリシーを設計した新しいADRを先に作成する。
 
 ## 手動変更記録
 

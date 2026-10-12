@@ -70,7 +70,8 @@ browser (信頼network)
 - **`SEARXNG_SECRET`はSOPS bundleではなく、Apps VM上でAnsibleが生成する。** 外部systemの
   credentialではなく、値に依存するdataもなく、VMを作り直せば再生成されるだけだからである。
   `force: false`なので最初の値が以後の実行でも保たれる。rotationは`/etc/homelab/secrets/searxng.env`を
-  消して`make ansible-apply`を実行する。`runtime.yaml.example`には載せない。生成の挙動（初回
+  消して`make ansible-apply`を実行する。secret再生成はruntime変更と判定され、宣言済みの全projectが
+  force-recreateされるためDNS/SMBも短時間途切れる。`runtime.yaml.example`には載せない。生成の挙動（初回
   `changed`、2回目`ok`、64文字の16進、mode `0600`）は作業端末のtoolboxで確認した
 - **SearXNGは`user: "977:977"`で動かす。** imageはUSERを指定せず、entrypointがrootのまま動くためである。
   977はimage自身の`searxng` accountで、`/var/cache/searxng`の所有者である。`read_only: true`と
@@ -105,7 +106,7 @@ browser (信頼network)
   変更は`settings.yml`で行い、reconcileがprojectを再作成して反映する。回線やengine側の事情で応答は
   変わるため、定期的に見直す
 
-## 反映手順
+## 初回反映手順
 
 順序を入れ替えない。
 
@@ -226,12 +227,18 @@ pull時間は含まない。SearXNGから外部engineへの検索は実際のイ
 Caddy経由のclientは`MCP_HTTP_TRUST_PROXY=1`により`X-Forwarded-For`のaddressで数えられる。client別に
 枠が分かれることそのものは未検証である。
 
-## 更新とrollback
+## 日常の更新とrollback
 
 更新は`searxng/compose.yaml`のdigestを上げるPRで行い、reconcileが反映する。SearXNG imageは1日に
 複数のdated tagを公開するので、digestの更新は頻繁になるが、必須ではない。data migrationはないため、
-rollbackは`PROJECT=searxng make rollback-app`で行え、dataに関する注意はない（手順は
-[アプリ更新・promotion・rollback](application-lifecycle.md#rollbackと再開)）。
+rollback先にはSearXNGのCompose定義を含む既知のcommitを指定する。
+
+```sh
+PROJECT=searxng ROLLBACK_SHA=<known-good-commit> APPS_HOST=192.168.10.101 make rollback-app
+```
+
+永続dataのmigrationはない。pause解除とpendingの再反映は
+[共通手順](application-lifecycle.md#rollbackと再開)に従う。
 
 ## 再deploy
 
@@ -264,18 +271,8 @@ rollbackは`PROJECT=searxng make rollback-app`で行え、dataに関する注意
 
 ## 切り戻し（アプリの撤去）
 
-追加時とは逆に、helperのproject一覧を先に戻す。checkoutだけが先に戻ると、古いhelperとdead-man pingが
-`searxng/compose.yaml`を見つけられずに失敗する。
-
-1. Apps VMでprojectを止める。
-
-   ```sh
-   ssh deploy@192.168.10.101 sudo docker compose --project-name homelab-searxng \
-     --env-file /etc/homelab/compose.env \
-     -f /opt/homelab/files/services/compose/searxng/compose.yaml down
-   ```
-
-2. revertのPRを`main`へmergeし、reconcileを待たずに`make ansible-apply`を実行する。
-3. reconcileでApps VMのcheckoutを進める。
-4. Apps VMで`/etc/homelab/secrets/searxng.env`と、named volume `homelab-searxng_searxng-cache`を手で
-   消す（`docker volume rm homelab-searxng_searxng-cache`）。NFS側の作業はない。
+`searxng`を対象に[project撤去の共通手順](application-lifecycle.md#projectの撤去共通手順)を使う。
+SearXNG固有の整理対象は2 FQDNのCaddy/Gatus・AdGuard rewriteと、`searxng.env`の生成処理である。
+Apps VMの`/etc/homelab/secrets/searxng.env`とnamed volume `homelab-searxng_searxng-cache`は、
+helperとcheckoutの整理・project停止後に削除する（`docker volume rm homelab-searxng_searxng-cache`）。
+NFS側の作業はない。

@@ -47,6 +47,8 @@ force-recreateする。SOPS bundleへの鍵追加でもDNS/SMBを含む全projec
 
 ## DGX側の準備とunit登録
 
+DGX `.51` / `.52`の監視account・authorized_keysとUIのunit設定はGitから復元できず、復旧範囲はDGXの手動準備とApps VMのnamed volumeに分かれる。
+
 DGXごとに専用の非root account `sparkdash-monitor`を作り、SSHはpublic key認証だけを許可する。
 sudo、docker、adm groupには追加しない。監視に必要な情報が読めることを確認する。
 アプリは登録scriptの実行やhost shutdownをそのaccount経由で試みられ、単一Bearer tokenはそれらも含む
@@ -203,7 +205,8 @@ shred -u ~/sparkdash_monitor_id
    `SSH_AUTH_SOCK`が死んだsocketを指したままになり、Dockerがそのpathにroot所有directoryを作って
    toolboxのSSHが`Permission denied (publickey)`で失敗する。
 
-   secrets、AdGuard rewrite、helperが再描画され、全10 projectsがforce-recreateされる。
+   secrets、AdGuard rewrite、helperが再描画され、宣言済みの全projectがforce-recreateされる。
+   対象一覧の正は`homelab-compose-up.sh.j2`の`all`である。
    初回のimage pullを伴い、DNS/SMBも短時間途切れる。途中でdigest gateに失敗した場合、次回applyでは
    secretが変更なしとなる可能性があるため、正常終了後も起動を明示確認する
 5. Apps VMで明示startup checkを行い、以下の受入一覧を確認する

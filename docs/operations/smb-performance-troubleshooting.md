@@ -1,5 +1,12 @@
 # SMB転送速度トラブルシューティング
 
+## 現在の切り分けの入口
+
+名前`\\samba.kojigenba-srv.com\<share>`はtailnetの`100.86.147.127`へ接続する。
+LAN経路は`\\192.168.10.101\<share>`を指定して比較する。NFS transportの確認対象は
+`group_vars/apps.yml`の`nfs_mounts`にある現在9 mountで、[NFS export契約](nfs-export.md#apps-vmのnconnect)を参照する。
+以下の`.10.23` / `.10.30`、7 mount、NFS PVは調査当時の値である。
+
 WindowsクライアントからSambaへの転送が遅い件の調査記録。現時点で2件ある。
 
 | 時期 | 症状 | 原因 |
@@ -72,7 +79,8 @@ Windows(VLAN20)からVLAN10/11へのiperf3単一TCPフローが、**約940Mbps(�
 ## 副次的な知見
 
 - IX2215のQoSポリシーで `ipv4_udp_range` (UDP sport/dport 1024-65535) が voiceクラス → DSCP 48 にマークされるため、**WireGuard(UDP)のトラフィックはTCPより優遇される**。Tailscale経由のiperf3が直通TCPより速く見えることがあったのはこれが一因。
-- Tailscale経由か直通かは、サーバー側から見た接続元IPで即判別できる(gateway経由だと192.168.10.30にSNATされる)。
+- Tailscale経由か直通かは、サーバー側から見た接続元IPで即判別できる(gateway経由だと現在の宣言では192.168.10.102にSNATされる。
+  IPの正は`files/infrastructure/terraform/tailscale-gateway/variables.tf`の`ip_address`を参照)。
 
 # 2026-09: 速度が出たり0になったりを繰り返す
 
