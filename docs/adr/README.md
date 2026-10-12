@@ -11,5 +11,5 @@ ADR は採用時点の判断を固定するもので、前提が変わった場�
 | [0003](0003-four-network-zones.md) | 実装済み（2026-09-13）。Port 4変更も実機反映済み（2026-09-19） | VLAN を Server、Trusted、IoT、Guest の4ゾーンへ整理する。roaming clientのsubnet route手動切替は[0007](0007-apps-vm-tailnet-dns.md)で置き換え |
 | [0004](0004-dns-and-minimal-observability.md) | 承認済み | AdGuard Home と最小監視を採用する。global nameserverの接続先は[0007](0007-apps-vm-tailnet-dns.md)で具体化 |
 | [0005](0005-secrets-and-terraform-state.md) | 承認済み | SOPS/age と暗号化 state recovery copy を採用する |
-| [0006](0006-ai-dataset-single-export.md) | 承認済み。repo定義済み、pve1/Apps VMは運用記録上反映済み、DGX 2台は同記録で未実施 | DGX Spark のデータ置き場を単一 NFS export にする。運用記録によればpve1/Apps VMは2026-09-19に反映済み（[手順・記録](../operations/dgx-storage.md)） |
+| [0006](0006-ai-dataset-single-export.md) | 承認済み。repo定義済み、pve1/Apps VMは反映済み、DGX 2台の手順Cも2026-10-12に実施済みと確認 | DGX Spark のデータ置き場を単一 NFS export にする。pve1/Apps VMは2026-09-19に反映済み。DGXの実施日は不明、read速度は未測定（[確認方法・記録](../operations/dgx-storage.md#手動反映の記録)） |
 | [0007](0007-apps-vm-tailnet-dns.md) | 承認済み | Apps VMのtailnet addressへ内部DNSを切り替える（0003と0004の一部を更新） |

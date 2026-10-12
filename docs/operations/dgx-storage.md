@@ -1,6 +1,6 @@
 # DGX Sparkストレージ運用
 
-- 状態: 手順A（pve1）と手順B（Apps VM）は2026-09-19に反映・確認済み。手順C（DGX 2台）は未実施
+- 状態: 手順A（pve1）と手順B（Apps VM）は2026-09-19に反映・確認済み。手順C（DGX 2台）は2026-10-12に実施済みであることを確認（確認方法は下記の反映記録を参照）
 - 設計判断: [ADR-0006](../adr/0006-ai-dataset-single-export.md)
 - export契約: [NFS export契約](nfs-export.md#ai-dataset-exportadr-0006)
 - 対象: DGX Spark 2台（4TB機 `192.168.10.51`、GE2 port 3 / 1TB機 `192.168.10.52`、GE2 port 4）
@@ -159,10 +159,15 @@ dd if=/mnt/ai/models/<任意のファイル> of=/dev/null bs=1M status=progress 
 | Apps VM mount / marker確認 | 2026-09-19に`/srv/homelab/nfs/ai`が`nfs4,rw,nconnect=8`でmountされ、marker内容`ai`、`homelab-mount-guard.service`が`active`であることを確認 |
 | Apps VM Compose反映 | 2026-09-19に完了。PR [#43](https://github.com/koji-genba/homelab/pull/43)（merge commit `a5c2e3e`）のmerge後、`homelab-app-reconcile.service`でVM側cloneを`a5c2e3e`へ更新。Sambaが再作成され`healthy`、bind `/srv/homelab/nfs/ai -> /mnt/ai`、`smbclient -L`に`ai`が出ることを確認 |
 | SMB書き込み確認 | 2026-09-19。container内でsamba uid（`10002:10004`）として`/mnt/ai/models`へ作成・削除が通り、所有者が`koji-genba:samba-users`になることを確認 |
-| DGX 4TB機 mount確認 | 未実施（ユーザーが実施予定） |
-| DGX 1TB機 mount確認 | 未実施（ユーザーが実施予定） |
+| DGX 4TB機 mount確認 | 2026-10-12に手順Cが実施済みであることを確認。fstabに`ai`行があり、`mnt-ai.automount`が稼働し、`/mnt/ai`がmountされている |
+| DGX 1TB機 mount確認 | 2026-10-12に手順Cが実施済みであることを確認。fstabに`ai`行があり、`mnt-ai.automount`が稼働し、`/mnt/ai`がmountされている |
 | 実測read速度 | 未測定 |
-| 対応commit | `a5c2e3e`（PR #43）。手順Cの結果はこの表へ追記する |
+| 対応commit | `a5c2e3e`（PR #43）。手順Cの実施日は不明 |
+
+2026-10-12のDGX確認は、2台とも`/etc/fstab`の該当行、`systemctl list-units --type=automount`、
+`findmnt -t nfs4`で行った。fstab行は手順Cと同一で、automountは`loaded active running`、
+`/mnt/ai`は`192.168.10.11:/mnt/tank-gen2/data/ai`を`nfs4,rw,noatime,vers=4.1,nconnect=8`でmountしていた。
+read速度は今回も未測定である。
 
 ## 切り戻し
 

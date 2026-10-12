@@ -1,5 +1,7 @@
 # Apps VM復旧手順
 
+ホストごと作り直す場合は[Proxmoxホスト復旧手順](proxmox-host-recovery.md)から始める。
+
 - 開始条件: Proxmoxが導入済みで、NFS/ZFSデータが外部手順で復旧済み
 - 目標: Git管理の定義から全アプリケーション機能を復旧する
 - アーキテクチャ: [現行アーキテクチャと復旧目標](../architecture/target-state.md)
@@ -202,7 +204,8 @@ pveum acl modify /sdn/zones/localnetwork/vmbr0/11 --user terraform@pve --role Ho
 
 [2026-09-25の引き継ぎ記録](../archive/next-session.md#安全条件と既知の制約)では、`state-backup`を
 削除せず保持し、Phase 5直前snapshot `tank-gen2/data/k8s-volumes@pre-phase5-retire-20260923`も保持中で、
-削除は別途明示承認が必要とされていた。その後の実施・保持状況はrepoからは分からない。
+削除は別途明示承認が必要とされていた。2026-10-12にpve1で
+`zfs list -t snapshot | grep pre-phase5`を実行し、このsnapshotの現存を確認した。
 復旧作業でこれらを削除しない。snapshot削除は復旧とは別の承認境界とする。
 
 同記録で保護対象とされた`tank-gen2/data/k8s-volumes`とSillyTavern、stashPad prod/stagingの3 directoryに加え、
@@ -227,4 +230,20 @@ pveum acl modify /sdn/zones/localnetwork/vmbr0/11 --user terraform@pve --role Ho
 
 [2026-09-25の引き継ぎ記録](../archive/next-session.md#引き続き必要なこと)では、Trusted LAN・tailnetからの
 アプリ操作、SMB read/write、通知など対話を要する受入再確認は未実施だった。
-その後実施されたかはrepoから分からないため、復旧時に操作者が再確認し、日付と結果を記録する。
+2026-10-12に管理端末から`curl --resolve`でLAN IP `192.168.10.101`へ接続し、
+次の9 FQDNのHTTPS応答を確認した（いずれも`kojigenba-srv.com`配下）。
+
+| FQDN | HTTP status |
+| --- | --- |
+| `dns.kojigenba-srv.com` | 302 |
+| `status.kojigenba-srv.com` | 401 |
+| `homepage.kojigenba-srv.com` | 401 |
+| `sillytavern.kojigenba-srv.com` | 401 |
+| `openwebui.kojigenba-srv.com` | 200 |
+| `searxng.kojigenba-srv.com` | 200 |
+| `sparkdash.kojigenba-srv.com` | 200 |
+| `prod.stashpad.kojigenba-srv.com` | 200 |
+| `staging.stashpad.kojigenba-srv.com` | 200 |
+
+これはHTTPS到達確認だけである。同日の確認では、アプリの実操作、SMBのread/write、Discord通知・
+dead-man、tailnet経由の確認は未実施のままである。復旧時に操作者が再確認し、日付と結果を記録する。

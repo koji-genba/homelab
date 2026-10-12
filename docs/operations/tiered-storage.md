@@ -7,7 +7,7 @@ pve1上のtank-gen2に対してSSDライトキャッシュ層をmergerfsで構�
 ```
 書き込み  → /mnt/shared (mergerfs)
                 ↓ 新規ファイルはSSD優先 (category.create=ff)
-            /mnt/cache-sata  (cache-pool: KIOXIA EXCERIA ×2 mirror, 860GB)
+            /mnt/cache-sata  (cache-pool: KIOXIA EXCERIA ×2 mirror)
                 ↓ 毎朝5時 mover.sh (cmin+30でsettle判定)
             /mnt/tank-gen2/data/shared  (Toshiba N300 ×2 mirror, 20TB)
                 ↓ mover完了後にZFS snapshot
@@ -48,7 +48,7 @@ LSI SAS2008 HBA経由ではTRIMが通らない。SAS2008はRZAT/DRATビットを
 `zpool status -t cache-pool`に`trim unsupported`が出ていないことと、`autotrim=on`を維持すること。
 
 **nightly（毎朝5時）**
-cache-pool 860GBに対して日次書き込みが満杯になることはないため、随時moveではなくnightly実行。SSDが埋まったとしてもmergerfsのフォールバックで機能継続する。
+cache-poolの容量に対して日次書き込みが満杯になることはないため、随時moveではなくnightly実行。SSDが埋まったとしてもmergerfsのフォールバックで機能継続する。
 
 **ZFS snapshotはmover完了後**
 moverスクリプトの末尾で、settle条件を満たして移動できたHDD側の状態をsnapshotする。
@@ -74,7 +74,8 @@ client scope、option、fsidは[NFS export契約](nfs-export.md#実測された�
 FUSEファイルシステムはカーネルがfsidを自動取得できないため`/mnt/shared`に`fsid=100`を明示。
 `/mnt/tank-gen2/data/shared`にも`fsid=101`を明示して、NFS再起動・mergerfs再マウント後のstale file handleを避ける。
 既存4 exportはApps VMの`/32`へ制限し、DGXも使う`ai`だけを`/24`にする契約である。
-pve1の実際の`/etc/exports`はrepoで管理されておらず、現在の実設定は未確認である。
+2026-10-12にpve1の`exportfs -v`で、このclient範囲とfsidが契約どおりであることを確認した
+（[確認記録](nfs-export.md#実測された親export)）。`/etc/exports`はrepoで管理していないため、変更時は`exportfs -v`で確認する。
 
 ## moverスクリプト
 
@@ -131,4 +132,4 @@ zfs snapshot tank-gen2/data/shared@pre-migration-YYYYMMDD
 zfs destroy tank-gen2/data/shared@pre-migration-YYYYMMDD
 ```
 
-ログ: `/var/log/mover.log`（logrotate: `files/infrastructure/storage/mover.logrotate` を `/etc/logrotate.d/mover` に配置）
+ログ: `/var/log/mover.log`（logrotate: `files/infrastructure/storage/mover.logrotate` を `/etc/logrotate.d/mover.logrotate` に配置）

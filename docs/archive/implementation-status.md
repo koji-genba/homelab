@@ -17,7 +17,7 @@
 - 更新日: 2026-09-19
 - 手順書: [KubernetesからComposeへの移行](k8s-to-compose.md)
 - 関連文書: [Phase 2A事前調査結果](phase2a-inventory.md)（実測値、cutover/rollback手順）、
-  [目標アーキテクチャ](../architecture/target-state.md)（現行構成）、[文書索引](../README.md)（現役の運用手順）
+  [現行アーキテクチャと復旧目標](../architecture/target-state.md)（現行構成）、[文書索引](../README.md)（現役の運用手順）
 
 この文書は設計、ローカル実装、実機反映を区別する。2026-09-05のPhase 2B application cutoverにより、
 Apps VMが唯一のwriterとなり、Caddy/AdGuard Home/Samba/stashPad prod・staging/SillyTavern/Gatusの
