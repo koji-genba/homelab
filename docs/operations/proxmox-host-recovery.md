@@ -135,6 +135,7 @@ source /etc/network/interfaces.d/*
 2026-10-12に`/etc/network/interfaces`を`/etc/network/interfaces.bak-20261012-vmbr0.11`へコピーし、
 `ifdown vmbr0.11`の後、廃止済みVLAN 11の`auto vmbr0.11` stanza（4行）だけを削除した。
 `ifreload`は実行せず、`vmbr0.11`の不存在とVLAN 10・default routeの維持を確認し、削除後の内容は上の復旧設定と一致した。
+このバックアップは、`vmbr0.11`削除後の動作確認ができたため、同日（2026-10-12）に削除した。
 
 `ifreload -a`またはrebootで反映し、`ip -br address`、`ip route`、`bridge vlan show`で確認する。
 管理端末から`https://192.168.10.11:8006/`へ接続できることを確認する。

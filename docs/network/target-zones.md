@@ -135,7 +135,7 @@ routerのRA、DHCPv6、IPv6 forwardingの明示的な無効化と、各zoneのIP
 | ロールバック結果/判断 | 不要。受入合格後に`write memory`し、`configuration status is already saved`、再起動不要を確認 |
 
 2026-10-12にはVMでElastiFlowの取り込みを確認した。上表の取り込み障害は2026-09-13時点の記録である。
-[#34](https://github.com/koji-genba/homelab/issues/34)はopenのままで、復旧の時期・変更内容は未確認である。
+[#34](https://github.com/koji-genba/homelab/issues/34)は取り込み確認後の2026-10-12にcloseした。復旧の時期・変更内容は未確認である。
 詳細は[ElastiFlowの実機確認記録](../../files/infrastructure/terraform/elastiflow/README.md#実機確認2026-10-12)を参照する。
 
 ## IX2215変更時の作業継続性

@@ -91,6 +91,8 @@ import済みdeviceのrouteを有効化するだけである。
 運用者が実測して`adguard_ready`で指定する。
 Split DNSは意図的に管理しない。フェーズ1ではreadyでないaddressへTailscale DNSを変更しない。
 
+Makefile側の修正は[#90](https://github.com/koji-genba/homelab/issues/90)で追跡している。
+
 ### Exit node使用時のDNSと既存stateの移行
 
 Tailscaleは通常、exit node使用時に全DNS queryをexit nodeへ送る。gateway VMのresolverには内部recordがないため、
