@@ -91,7 +91,7 @@ HTTPはDigest認証を使用する。
 以前の記録ではIX側のsample出力を確認済みとし、ElastiFlowが停止している可能性からcollector側の受信確認を
 保留していた（記録日は未記載）。2026-09-13の[allow/deny試験記録](../../../docs/network/target-zones.md#手動変更記録)ではcollectorへの着信を確認している。
 2026-10-12にはVMでElastiFlowの取り込みを確認した。取り込み停止の
-[#34](https://github.com/koji-genba/homelab/issues/34)はopenのままで、復旧の時期・変更内容は未確認である。
+[#34](https://github.com/koji-genba/homelab/issues/34)は取り込み確認後の2026-10-12にcloseした。復旧の時期・変更内容は未確認である。
 詳細は[ElastiFlowの実機確認記録](../terraform/elastiflow/README.md#実機確認2026-10-12)を参照する。
 
 ## UFS cache timeout

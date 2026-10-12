@@ -55,8 +55,9 @@ VM全体の評価と方針は[現行アーキテクチャ](../../../../docs/arch
 運用者がVMで確認した記録では、`elasticsearch`・`kibana`・`flowcoll`は3つともactiveでした。
 フローのindexは日次でrolloverし、2026-10-08〜10-11に作成されたindexにフローが入っていました。
 Kibanaのdashboardは36個、root diskの使用量は123G中17Gでした。
-[#34](https://github.com/koji-genba/homelab/issues/34)（取り込み停止）はopenのままですが、
-この時点では取り込みを確認しています。いつ・何をして復旧したかは確認していません。
+[#34](https://github.com/koji-genba/homelab/issues/34)（取り込み停止）は、3サービスがactiveであること、
+write aliasが最新のrollover indexを指していること、`elastiflow-flow-*`の件数が増えていることをVMで確認し、
+2026-10-12にcloseしました。いつ・何をして復旧したかは確認していません。
 
 ## 前提条件
 
