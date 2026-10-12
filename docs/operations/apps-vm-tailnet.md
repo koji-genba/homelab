@@ -1,8 +1,44 @@
 # Apps VMのtailnet参加（issue #30）
 
-Apps VMを`tag:apps`付きnodeとしてtailnetへ参加させ、Caddy（80/443）、AdGuard DNS（53/tcp、53/udp）、Samba（445）をVM自身の100.x addressでも公開する。Stage 1ではclientの接続先を変更せず、Stage 2でAdGuardのrewriteとtailnet nameserverを`100.86.147.127`へ切り替える。
+Apps VMは`tag:apps`付きnodeとして、Caddy（80/443）、AdGuard DNS（53/tcp、53/udp）、Samba（445）を
+LAN addressとVM自身のtailnet addressで公開する。現行のaddress宣言は
+`files/infrastructure/ansible/apps/group_vars/apps.yml`の`apps_tailnet_ip`である。
 
-## 前提とACL
+## 現在の手順（Apps VMを再構築・再登録するとき）
+
+以下は実装から導いた手順で、実機では未検証。
+管理端末の`AGE_IDENTITY_FILE`、SSH agent、known_hostsの前提は
+[Apps VM復旧](apps-vm-recovery.md#管理端末の入力と接続前提)、Ansibleで生成する設定の入口は
+[共通手順](application-lifecycle.md#ansibleで生成する設定)を参照する。
+
+1. 再構築・再登録する旧deviceをadmin consoleから削除し、固定IPv4を解放する。
+2. mainの定義で`AGE_IDENTITY_FILE=/secure/path/age-identity.txt make ansible-apply`を一度実行する。
+   tailscale roleはpackage/daemonを準備した後、未登録のbackendが`Running`でないため停止する。
+3. [前提とACL](#前提とacl)を確認し、[手動登録](#手動登録)の方法で新deviceを登録する。
+4. admin consoleで同じIPv4 `100.86.147.127`へ再固定し、VMの`tailscale ip -4`、
+   `apps_tailnet_ip`との一致、`tag:apps`、key expiry無効（`null`）を確認する。
+5. 同じmainの定義からAnsibleを再実行する。roleは`Running`と固定IPv4を検査し、
+   routing/DNS/SNAT preferenceを整える。既存VM cloneはAnsibleでは更新されない
+   （[復旧フロー](apps-vm-recovery.md#復旧フロー)）。
+6. LAN/tailnetのDNS、HTTPS、SMBを確認する。DNSはどちらのlistenerへ問い合わせても
+   `100.86.147.127`を返す。SMBは`\\samba.kojigenba-srv.com\shared`のread/writeを確認する。
+
+   ```sh
+   nslookup dns.kojigenba-srv.com 192.168.10.101
+   nslookup dns.kojigenba-srv.com 100.86.147.127
+   tailscale ping 100.86.147.127
+   curl -sS -o /dev/null -w '%{http_code}\n' --resolve dns.kojigenba-srv.com:443:100.86.147.127 https://dns.kojigenba-srv.com/
+   ```
+
+   pingではdirect経路、HTTPSでは200または302を確認する。403ならsource NATと
+   `tailscale debug prefs`の`NoSNAT`を調べる。VMの`ss -lntup`でLAN/tailnet両listenerを、
+   `ip route get 192.168.10.11`でNFSが`dev eth0`を通ることを確認する。
+   tailnet DNSをTerraformで再確認するときは[Tailscale Terraform手順](../../files/infrastructure/terraform/tailscale/README.md)を
+   使い、整合済みなら差分なしを期待する。
+
+`tailscale` roleは`network`の後、`firewall`と`compose`の前に実行する。`accept-routes=false`によりNFSの`192.168.10.11`を含む`192.168.10.0/24`はgateway subnet routerへ迂回しない。`accept-dns=false`によりnetwork roleのsystemd-resolved構成を維持する。`snat-subnet-routes=false`はDocker DNAT後もclientの100.x sourceを保ち、Caddyの`remote_ip` trusted-network判定を通す。
+
+### 前提とACL
 
 TailscaleのACL `tagOwners`に`tag:apps`を含める。既存のACLを置き換えず、既存のownerを保って次のentryを追加する。
 
@@ -12,7 +48,7 @@ TailscaleのACL `tagOwners`に`tag:apps`を含める。既存のACLを置き換�
 
 管理端末のignore対象`files/infrastructure/terraform/tailscale/acl-policy.live.json`にreview済みlive exportを保存して編集し、[Tailscale Terraform手順](../../files/infrastructure/terraform/tailscale/README.md)の`make tailscale-plan MANAGE_TAILNET=true ENABLE_ADGUARD_DNS=true ADGUARD_READY=true ACL_POLICY_FILE=files/infrastructure/terraform/tailscale/acl-policy.live.json`でplanを確認し（DNS設定がstateにあるため、ACLだけの変更でもDNS gateを付ける）、同手順の`make tailscale-apply`で反映する。ACLの他の定義を維持する。
 
-## 手動登録
+### 手動登録
 
 admin consoleで`tag:apps`を付けたauth keyを生成する。Pre-approvedを有効、Reusableを無効、expiryは短時間とする。keyをrepository、shell history、VM上の永続fileへ保存しない。key値をcommand引数へ入れない。tagはauth keyから付与されるため`--advertise-tags`は指定しない。tag付きnodeのkey expiryはdefaultで無効になる。
 
@@ -35,15 +71,25 @@ trap - EXIT
 admin consoleの **Edit ACL tags** で`tag:apps`を付け、それでもexpiryが残る場合は **Disable key expiry** を実行する。
 expiryが残ると、失効日にtailnetからApps VMが外れる。
 
+再構築・再登録ではadmin consoleの **Machines > Apps VMのdevice > Edit IPv4** で
+`100.86.147.127`へ再固定し、`tailscale ip -4`とGit管理の`apps_tailnet_ip`が一致することを確認する。
+Ansibleは未設定または不一致なら停止する。
+
+## 2026-09-26初回切替の記録
+
+Stage 1 / Stage 2は2026-09-26の初回切替で使った手順と当時の期待値である。現行の宣言は切替後の状態になっている。
+以下のbranch適用順序、DNS期待値、plan差分は当時のものとして残す。
+現在の再構築・再登録には[現在の手順](#現在の手順apps-vmを再構築再登録するとき)を使う。
+
+Apps VMを`tag:apps`付きnodeとしてtailnetへ参加させ、Caddy（80/443）、AdGuard DNS（53/tcp、53/udp）、Samba（445）をVM自身の100.x addressでも公開する。Stage 1ではclientの接続先を変更せず、Stage 2でAdGuardのrewriteとtailnet nameserverを`100.86.147.127`へ切り替える。
+
 割り当てられた100.x addressはそのまま使ってよい。変える場合はadmin consoleの **Machines > Apps VMのdevice > Edit IPv4** で変更する。`tailscale ip -4`で実値を確認し、Git管理の`files/infrastructure/ansible/apps/group_vars/apps.yml`に`apps_tailnet_ip`として設定してcommitする。exampleの`100.64.0.101`を実値として使わない。Ansibleは未設定または不一致なら検出値を表示して停止する。
 
-## 適用順序
+### Stage 1の適用順序
 
 Apps VMのcheckoutは`main`を追い、`homelab-app-reconcile.timer`が15分ごとにfetch、fast-forward、Compose設定検証を行う。一方、`APPS_TAILNET_IP`はAnsibleが`/etc/homelab/compose.env`へ描画する。したがって**PRをmainへmergeする前**に、このbranchからAnsibleを一度実行し、上記登録とIP固定を済ませ、同じbranchのAnsible変更を管理端末から再適用して`APPS_TAILNET_IP`を先に配置する。Ansible実行時のVM checkoutはまだmainでよい。sysctlの`ip_nonlocal_bind`により、tailscale0がdownでもDockerは100.x addressへbindでき、LAN側のCompose起動はtailscaledの状態に依存しない。適用後にenvの値と既存LANサービスを確認してからmergeする。merge後、reconcilerが新しいCompose bindingを適用する。
 
-`tailscale` roleは`network`の後、`firewall`と`compose`の前に実行する。`accept-routes=false`によりNFSの`192.168.10.11`を含む`192.168.10.0/24`はgateway subnet routerへ迂回しない。`accept-dns=false`によりnetwork roleのsystemd-resolved構成を維持する。`snat-subnet-routes=false`はDocker DNAT後もclientの100.x sourceを保ち、Caddyの`remote_ip` trusted-network判定を通す。
-
-## 検証
+### Stage 1の検証
 
 `accept-routes`を使っていないtailnet clientから実行する。DNS rewriteが返すLAN IPはStage 1の意図した結果である。
 
@@ -56,11 +102,15 @@ curl -sS -o /dev/null -w '%{http_code}\n' --resolve dns.kojigenba-srv.com:443:<a
 curlが403ならsource NATと`tailscale debug prefs`の`NoSNAT`を確認する。必要ならSMBの`\\<apps_tailnet_ip>\shared`も確認する。VMでは`ss -lntup`でdocker-proxyがLAN addressと100.x addressの両方をlistenしていることを確認する。
 あわせて`ip route get 192.168.10.11`が`dev eth0`を返し、NFSがtailscale0へ迂回していないことを確認する。
 
-## Stage 1の戻し方
+### Stage 1の戻し方
 
 このPRのCompose bindingと`APPS_TAILNET_IP` env追加をrevertし、Ansibleを再適用する。VMで`tailscale down`または`tailscale logout`を実行し、admin consoleからdeviceを削除する。`ip_nonlocal_bind` sysctlは残しても無害である。
 
-## Stage 2: DNS cutover
+現行Ansibleはtailscale roleで`Running`を必須とし、dead-manもTailscaleの稼働と固定IPv4を要求するため、
+このStage 1 rollbackはそのまま使えない。現行構成からTailscaleを撤去するにはrole、binding、DNS、監視の
+宣言を揃える別作業が必要である。
+
+### Stage 2: DNS cutover
 
 Stage 1の`tag:apps`、固定IP、両addressでの80/443/53/445、direct経路を確認済みとする。
 常時宅内desktopのSMB shareは名前のままでよい（切替後はApps VMとのdirect WireGuard経路になる。
@@ -93,7 +143,7 @@ roaming clientのTailscaleはv1.88.1以上へ更新する。方針は[ADR-0007](
 
 手順1と2を実環境へ適用し、確認してからPRをmergeする。
 
-### Stage 2のrollback
+#### Stage 2のrollback
 
 `files/infrastructure/ansible/apps/group_vars/apps.yml`の`internal_records_use_tailnet_ip: false`へ戻して
 `make ansible-apply`を実行する。Terraformは次のplan/applyでnameserverをLAN IPへ戻す。
@@ -107,3 +157,5 @@ make tailscale-apply
 
 admin consoleで先にnameserverを戻した場合は後でTerraformと整合させる。
 宅外roaming clientは旧LAN IPへ到達するため、`accept-routes`を再び有効にする。
+
+`ADGUARD_NAMESERVER_IP=192.168.10.101`は現行Makefileでも有効な引数である。

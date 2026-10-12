@@ -1,6 +1,7 @@
 # ADR-0007: Apps VMのtailnet addressへ内部DNSを切り替える
 
 - 状態: 承認済み
+- 2026-10-12 補足: SMBは名前（`\\samba.kojigenba-srv.com\<share>`）での接続を正式とし、tailnet addressへ解決されるためtailnet経由になる。本文のdesktopへのLAN IP指定の推奨をこの補足で置き換える。転送速度を優先するなどtailnetを経由させたくない場合はLAN IP（`192.168.10.101`）を指定する。Server subnet routeはApps VM以外のLAN機器へ宅外から届く経路として維持する（[現行ネットワーク](../network/target-zones.md#dnsとtailscale)、`files/infrastructure/terraform/tailscale/variables.tf`の`advertised_routes`）。
 - 日付: 2026-09-26
 
 ## 背景
@@ -8,7 +9,7 @@
 AdGuardの内部recordとTailscaleのglobal nameserverはApps VMのLAN address
 `192.168.10.101`を指す。宅外clientはgatewayの`192.168.10.0/24` subnet routeに依存し、
 roaming clientで`accept-routes`を手動切替していた。2026-07には宅内desktopのSMBが
-gateway経由でヘアピンし、速度が落ちた（[調査記録](../smb-performance-troubleshooting.md)）。
+gateway経由でヘアピンし、速度が落ちた（[調査記録](../operations/smb-performance-troubleshooting.md)）。
 exit node利用時の内部DNSはPR #56で`Use with exit node`を有効にして解決した。
 
 ## 決定

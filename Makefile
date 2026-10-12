@@ -23,7 +23,7 @@ TAILSCALE_VAR_ARGS := $(if $(MANAGE_TAILNET),-var="manage_tailnet=$(MANAGE_TAILN
 # 同じ規律をtoolboxにも適用する。
 # imageを更新するときは、workflowのpublish後に`docker buildx imagetools inspect`で
 # 新しいdigestを確認し、TOOLBOX_IMAGE_DIGESTを差し替える。
-# ローカルでビルドしたimageを試すときは`make TOOLBOX_IMAGE=$(TOOLBOX_BUILD_IMAGE) <target>`のように上書きする。
+# ローカルでビルドしたimageを試すときは`make TOOLBOX_IMAGE=ghcr.io/koji-genba/homelab-toolbox:1.0.1 ansible-check`のように明示する（実際のTOOLBOX_IMAGE_REPO / TOOLBOX_IMAGE_TAGに合わせる）。
 TOOLBOX_IMAGE_REPO ?= ghcr.io/koji-genba/homelab-toolbox
 TOOLBOX_IMAGE_TAG ?= 1.0.1
 TOOLBOX_IMAGE_DIGEST ?= sha256:9da8408a19624df8b4da2fbcde93d64eddd5c6414e77e59c0e0e6f51b7ec8037

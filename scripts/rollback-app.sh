@@ -3,7 +3,7 @@ set -eu
 
 project=${PROJECT:-}
 rollback_sha=${ROLLBACK_SHA:-}
-host=${APPS_HOST:-192.168.10.42}
+host=${APPS_HOST:-192.168.10.101}
 user=${APPS_USER:-deploy}
 
 case "$project" in

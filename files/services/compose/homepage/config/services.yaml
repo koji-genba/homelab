@@ -85,7 +85,7 @@
         icon: mdi-folder-network
         description: |-
           \\samba.kojigenba-srv.com\ai
-          SMB認証・tailnet必須・DGX mount未実施
+          SMB認証・tailnet必須
 - SSH 先:
     - Apps VM:
         id: copy-ssh-apps

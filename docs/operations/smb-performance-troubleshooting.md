@@ -1,5 +1,12 @@
 # SMB転送速度トラブルシューティング
 
+## 現在の切り分けの入口
+
+名前`\\samba.kojigenba-srv.com\<share>`はtailnetの`100.86.147.127`へ接続する。
+LAN経路は`\\192.168.10.101\<share>`を指定して比較する。NFS transportの確認対象は
+`group_vars/apps.yml`の`nfs_mounts`にある現在9 mountで、[NFS export契約](nfs-export.md#apps-vmのnconnect)を参照する。
+以下の`.10.23` / `.10.30`、7 mount、NFS PVは調査当時の値である。
+
 WindowsクライアントからSambaへの転送が遅い件の調査記録。現時点で2件ある。
 
 | 時期 | 症状 | 原因 |
@@ -39,7 +46,7 @@ tailscale set --accept-routes=false
 
 ADR-0007適用後はroaming machineでも`accept-routes=false`のまま、Apps VMのserviceへ
 100.xで宅外から接続できる。上表の「不可になる」はApps VM以外のLAN hostに限り、
-それらへはgateway exit node経由で接続する（[ADR-0007](adr/0007-apps-vm-tailnet-dns.md)）。
+それらへはgateway exit node経由で接続する（[ADR-0007](../adr/0007-apps-vm-tailnet-dns.md)）。
 2026-09-26時点で、desktopから名前でSMBへ接続するとApps VMとのdirect WireGuard経路（gatewayを経由しない）
 となり、1GbE相当の速度で実用上の劣化はなかった。2026-07の低速はWireGuardそのものではなく、
 当時1vCPU/768MBのgateway VMでの暗号化・転送がボトルネックだった。
@@ -72,7 +79,8 @@ Windows(VLAN20)からVLAN10/11へのiperf3単一TCPフローが、**約940Mbps(�
 ## 副次的な知見
 
 - IX2215のQoSポリシーで `ipv4_udp_range` (UDP sport/dport 1024-65535) が voiceクラス → DSCP 48 にマークされるため、**WireGuard(UDP)のトラフィックはTCPより優遇される**。Tailscale経由のiperf3が直通TCPより速く見えることがあったのはこれが一因。
-- Tailscale経由か直通かは、サーバー側から見た接続元IPで即判別できる(gateway経由だと192.168.10.30にSNATされる)。
+- Tailscale経由か直通かは、サーバー側から見た接続元IPで即判別できる(gateway経由だと現在の宣言では192.168.10.102にSNATされる。
+  IPの正は`files/infrastructure/terraform/tailscale-gateway/variables.tf`の`ip_address`を参照)。
 
 # 2026-09: 速度が出たり0になったりを繰り返す
 
@@ -128,7 +136,7 @@ nfsd:     fuse_file_write_iter → vfs_iocb_iter_write → nfsd_vfs_write → nf
 最初にmountされたentryが接続数を決める。`shared`/`shared-hdd`/`archive`にだけ指定していたが、
 起動時にsystemdが並列mountするため`nconnect`を持たないentryが先行し、実機では全mountが
 1 transportになっていた。`192.168.10.11`への7 mount全てに同じ値を指定する。反映にはApps VMの
-rebootが必要 ([NFS export契約](operations/nfs-export.md#apps-vmのnconnect))。
+rebootが必要 ([NFS export契約](nfs-export.md#apps-vmのnconnect))。
 
 **2. Apps VMの`vm.dirty_background_bytes=67108864`** (PR #39)
 

@@ -11,7 +11,7 @@
 
 `config.txt`は、実機の保存済み`startup-config`を基準にコメントを加えた管理用コピーである。
 2026-09-18のPort 4変更は2026-09-19に実機へ反映し、疎通確認後に`write memory`で保存済みである。
-認証情報の行は既存値を保持しているため、公開場所へ転載しないこと。
+管理用コピーの認証情報はマスク済みで、実値は入っていない（2026-10-12確認）。
 
 ## WAN
 
@@ -88,8 +88,11 @@ HTTPはDigest認証を使用する。
 - Data source: `GigaEthernet2`
 - Sampling: in/outとも1/512、counter interval 30秒
 
-IX側ではsample出力を確認済み。現在はElastiFlowが停止している可能性があるため、collector側の受信確認は
-別件として保留し、このネットワーク変更では触らない。
+以前の記録ではIX側のsample出力を確認済みとし、ElastiFlowが停止している可能性からcollector側の受信確認を
+保留していた（記録日は未記載）。2026-09-13の[allow/deny試験記録](../../../docs/network/target-zones.md#手動変更記録)ではcollectorへの着信を確認している。
+2026-10-12にはVMでElastiFlowの取り込みを確認した。取り込み停止の
+[#34](https://github.com/koji-genba/homelab/issues/34)はopenのままで、復旧の時期・変更内容は未確認である。
+詳細は[ElastiFlowの実機確認記録](../terraform/elastiflow/README.md#実機確認2026-10-12)を参照する。
 
 ## UFS cache timeout
 
@@ -110,7 +113,7 @@ QoSでは対象UDP trafficをDSCP 48へ設定する`output-policy`をBVI10/20/40
 ## 関連文書
 
 - [最終ゾーン設計](../../../docs/network/target-zones.md)
-- [IX ACL stateful化runbook](../../../docs/network/ix-acl-stateful-runbook.md)
+- [IX ACL移行の実施記録](../../../docs/archive/ix-acl-stateful-runbook.md)
 - [4ゾーン化ADR](../../../docs/adr/0003-four-network-zones.md)
-- [次セッションへの作業指示](../../../docs/migration/next-session.md)
-- [移行記録アーカイブ](../../../docs/migration/archive/README.md)
+- [文書索引](../../../docs/README.md)
+- [移行記録アーカイブ](../../../docs/archive/README.md)

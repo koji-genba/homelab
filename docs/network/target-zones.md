@@ -2,12 +2,13 @@
 
 - 状態: Port 4のVLAN 10変更まで実機反映・疎通確認・保存済み
 - 初版: 2026-08-29
-- 最終更新: 2026-09-19
+- 最終更新: 2026-10-12
 - 設計判断: [ADR-0003](../adr/0003-four-network-zones.md)
-- 移行: [KubernetesからComposeへの移行、フェーズ4](../migration/k8s-to-compose.md#phase-4-network-migration)
+- 移行: [KubernetesからComposeへの移行、フェーズ4](../archive/k8s-to-compose.md#phase-4-network-migration)
 
 この文書はIX2215、switch、ECW5211の期待状態を定義する。credentialや機器MACは記録せず、
-port/VLAN対応と受入結果を管理する。
+port/VLAN対応と受入結果を管理する。以下のゾーン・Apps VM設定はrepoに実装された現行設計であり、
+日付つきの受入結果と、[IPv6の未実施記録](#ipv6)は区別する。
 
 ## ゾーンとアドレス計画
 
@@ -54,8 +55,11 @@ IX2215自身のSSH/HTTP管理はServerとTrustedからだけ許可する。IoT�
 含めて管理planeへ接続できないようにする。Server VLAN内は同一trust boundaryとして扱い、必要な追加制限は
 各hostのfirewallで行う。
 
-Apps VM自身でも多層防御（defense in depth）として、Trusted CIDRとTailscaleからだけSSH、DNS、HTTP(S)、SMBを
-受け付ける。Internetからのport forwardは作らない。
+Apps VM自身でも多層防御（defense in depth）として、Server（`192.168.10.0/24`）、
+Trusted（`192.168.20.0/24`）、TailscaleからSSH、DNS、HTTP(S)、SMBを受け付ける。
+`group_vars/apps.yml`の設定変数`trusted_networks`は許可元CIDRの一覧であり、ゾーン名Trustedだけを意味しない。
+`homelab.nft.j2`は移行完了時に旧`192.168.11.0/24`を除外し、tailnetの`100.64.0.0/10`を含む一覧を使う。
+Tailscale interfaceからの同portも許可する。Internetからのport forwardは作らない。
 
 ## DNSとTailscale
 
@@ -70,10 +74,11 @@ Apps VM自身でも多層防御（defense in depth）として、Trusted CIDRと
   exit node経由でPVE、IX2215、ElastiFlowへ届かなくなることを確認した）。したがってこの広告は、宅外から
   exit node経由でApps VM以外のLAN管理UIへ入るために必要である。
 - Apps VMのserviceは名前（`100.86.147.127`）で使う。Apps VM宛てtrafficは`192.168.10.0/24`を通らないため、
-  clientの`accept-routes`設定はApps VMとの通信に影響しない。常時宅内desktopのSMBも名前のままでよく、
+  clientの`accept-routes`設定はApps VMとの通信に影響しない。SMBの正式な接続先は名前
+  `\\samba.kojigenba-srv.com\<share>`であり、常時宅内desktopもtailnet経由になる。
   Apps VMとのdirect WireGuard経路で1GbE相当の速度が出ることを2026-09-26に確認した。
-  IX2215の単一flowが低速側に落ちる既知事象（[SMB調査記録](../smb-performance-troubleshooting.md)）に
-  当たる場合だけ`\\192.168.10.101\<share>`へ切り替える。
+  転送速度を優先するなどtailnetを経由させたくない場合は`\\192.168.10.101\<share>`を指定する。
+  経路と速度の切り分けは[SMB調査記録](../operations/smb-performance-troubleshooting.md)を参照する。
 - roaming clientを含む全tailnet clientで`accept-routes=false`を推奨とする。trueでも影響はApps VM以外の
   `192.168.10.x`宛てtrafficがgateway経由になることに限られる。Apps VM以外のLAN管理UIは宅外で
   gateway exit nodeから利用する。判断は[ADR-0007](../adr/0007-apps-vm-tailnet-dns.md)を参照する。
@@ -88,7 +93,8 @@ Apps VM自身でも多層防御（defense in depth）として、Trusted CIDRと
   2台を収容する。
 - 空きのGE2 port 5～7はGuest VLAN 40のaccess portとする。Server機器を増設するときは、使用するportを
   Guest用VLAN groupからport 3/4と同じServer用VLAN groupへ移す。
-- ECW5211の管理interfaceはServer VLAN 10へtaggedで置く。ECW5211はuntaggedを使用せず、uplinkでは
+- GE2 port 8はECW5211 AP専用trunkとする（[物理ポート一覧](../../files/infrastructure/network/README.md#物理ポート)）。
+  ECW5211の管理interfaceはServer VLAN 10へtaggedで置く。ECW5211はuntaggedを使用せず、uplinkでは
   tagged VLAN 10/20/30/40だけを受ける。
 - Trusted、IoT、GuestのSSIDをそれぞれVLAN 20、30、40へtag付けする。
 - Server用SSIDは作らない。
@@ -105,9 +111,12 @@ ECW5211に適切なprovider/APIがないため反映は手動とする。SSID名
 
 ## IPv6
 
-routerのRA、DHCPv6、IPv6 forwardingを無効化し、各zoneのclientがグローバルIPv6経由でIPv4 ACLを
-迂回しないことを確認する。Apps VMもIPv6 listenerを公開しない。将来IPv6を再導入する場合は、
-IPv4と同等のゾーンポリシーを設計した新しいADRを先に作成する。
+Apps VMはnetwork roleの`99-homelab-ipv6.conf`でIPv6とforwardingを無効化する実装であり、IPv6 listenerを公開しない。
+routerのRA、DHCPv6、IPv6 forwardingの明示的な無効化と、各zoneのIPv4 ACL迂回が無いことの確認は設計上の要求である。
+[2026-09-13のACL移行記録](../archive/ix-acl-stateful-runbook.md#7-対象外)では明示無効化は未実施とされており、
+その後の実施状況はrepoから確認できない。明示無効化は2026-10-12時点で未実施の課題として
+[#32](https://github.com/koji-genba/homelab/issues/32)（open）で追跡中であり、4ゾーン化の完了とは別に扱う。
+将来IPv6を再導入する場合は、IPv4と同等のゾーンポリシーを設計した新しいADRを先に作成する。
 
 ## 手動変更記録
 
@@ -124,6 +133,10 @@ IPv4と同等のゾーンポリシーを設計した新しいADRを先に作成�
 | Port 4のVLAN 10変更 | 2026-09-18、`config.txt`と設計文書を更新。2026-09-19に実機反映と疎通確認を完了し、`write memory`でstartup-configへ保存済み |
 | allow/deny試験結果 | 2026-09-13、全zoneのInternet、Trusted→Server/IoT、各deny方向、管理plane、DHCP、tailnet route/exit node、Guest isolationを確認。sFlowはcollector（`.10.103:6343`）への着信をtcpdumpで確認。ElastiFlowのElasticsearch取り込みは2026-07-07から壊れている既存障害で、Phase 4とは無関係（[#34](https://github.com/koji-genba/homelab/issues/34)） |
 | ロールバック結果/判断 | 不要。受入合格後に`write memory`し、`configuration status is already saved`、再起動不要を確認 |
+
+2026-10-12にはVMでElastiFlowの取り込みを確認した。上表の取り込み障害は2026-09-13時点の記録である。
+[#34](https://github.com/koji-genba/homelab/issues/34)はopenのままで、復旧の時期・変更内容は未確認である。
+詳細は[ElastiFlowの実機確認記録](../../files/infrastructure/terraform/elastiflow/README.md#実機確認2026-10-12)を参照する。
 
 ## IX2215変更時の作業継続性
 

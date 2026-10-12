@@ -1,10 +1,14 @@
 # IX2215 ACL stateful化 実施手順書
 
+> 2026-09-13に完了したIX2215 ACL移行の実施記録である。投入前の構成と当時のrollbackを含むため、
+> 現在のIXへそのまま再投入しない。現行の設定は[config.txt](../../files/infrastructure/network/config.txt)と
+> [目標ネットワークゾーン](../network/target-zones.md)を参照する。
+
 - 状態: 実機投入・受入・startup-config保存済み（2026-09-13）
 - 日付: 2026-09-13
 - 対象: IX2215-HOME（IX Series IX2215 magellan-sec, Version 10.11.6）
-- 目標ポリシー: [目標ネットワークゾーン](target-zones.md)
-- 実施記録: [archive/実装状況](../migration/archive/implementation-status.md)
+- 目標ポリシー: [目標ネットワークゾーン](../network/target-zones.md)
+- 実施記録: [archive/実装状況](implementation-status.md)
 
 **この文書はInternetが切れても参照できるようローカルで完結させる。** IX2215の変更中は管理端末の
 Internet接続とAIセッションの双方を失う可能性を前提とし、console接続した操作者がこの文書だけで
@@ -407,7 +411,7 @@ exit
 - sFlowはACL投入後もcollector（`.10.103:6343`）へ着信している（tcpdumpで確認）。ElastiFlowは停止しておらず、
   2026-07-07からElasticsearchへの取り込みがindex/alias名の衝突で失敗し続けている既存障害である（[#34](https://github.com/koji-genba/homelab/issues/34)）。
 - ポート設計の実機試験で判明したECW uplinkのtagged/untagged VLAN 40重複を解消し、GuestのARP、
-  Internet、zone隔離を再確認した。確定したport対応は[目標ネットワークゾーン](target-zones.md)に記録した。
+  Internet、zone隔離を再確認した。確定したport対応は[目標ネットワークゾーン](../network/target-zones.md)に記録した。
 - 最後に`write memory`を実行し、`configuration status is already saved`および再起動不要を確認した。
 
 denyが効いていることは、カウンタでも確認する。
@@ -560,8 +564,8 @@ denyのヒットカウント増加まで確認する。**
 ## 7. 対象外
 
 - **IPv6。** 2026-09-06の採取でIPv6 routeもneighborも0件、BVI/WANにIPv6アドレス無しを確認済み
-  （[archive/実装状況](../migration/archive/implementation-status.md)）。したがってIPv4 ACLを迂回する経路は現時点で無い。
-  ただし[目標ゾーン設計](target-zones.md)が求めるRA・DHCPv6・forwardingの**明示的な無効化は未実施**で
+  （[archive/実装状況](implementation-status.md)）。したがってIPv4 ACLを迂回する経路は現時点で無い。
+  ただし[目標ゾーン設計](../network/target-zones.md)が求めるRA・DHCPv6・forwardingの**明示的な無効化は未実施**で
   あり、この手順書の範囲外とする。別issueで追跡する。
 - **`ip dynamic-filter group`によるキャッシュ共有。** NECが「主にSIPダイナミックフィルタを使用する
   一部の環境での利用を想定」と明記しているため採用しない。

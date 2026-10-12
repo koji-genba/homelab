@@ -1,5 +1,11 @@
 # Proxmox ホスト再構築手順書
 
+> 2026年6月の旧Kubernetes構成を前提とする再構築手順である。VM作成・VLAN 11復元・k8s関連の手順は
+> 現在の環境へ適用しない。VMID 101/102/103は現在Apps VM・Tailscale gateway・ElastiFlowが使用している。
+> ZFS・mergerfsなどホスト側の節は現行構成に対して再検証していない。
+> 現行版は[Proxmoxホスト復旧手順](../operations/proxmox-host-recovery.md)を参照する。
+> Apps VMの復旧は[Apps VM復旧手順](../operations/apps-vm-recovery.md)を参照する。
+
 ## 概要
 
 このドキュメントは Proxmox ホスト (`pve.default.kojigenba-srv.com`, `192.168.10.11`) の

@@ -1,6 +1,8 @@
 # ADR-0004: AdGuard Homeと最小監視を採用する
 
 - 状態: 承認済み
+- 2026-10-12 補足: Tailscaleのglobal nameserverの接続先をApps VMのtailnet addressへ具体化した判断は[ADR-0007](0007-apps-vm-tailnet-dns.md)を参照する。
+- 2026-10-12 補足: 実装はDocker `local` driverではなく`json-file`でrotationしている。設定値の正は[`files/infrastructure/ansible/apps/roles/docker/templates/daemon.json.j2`](../../files/infrastructure/ansible/apps/roles/docker/templates/daemon.json.j2)で、2026-10-12に運用者は`json-file`のままとすると判断した。
 - 日付: 2026-08-29
 
 ## 背景

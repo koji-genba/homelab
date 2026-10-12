@@ -37,7 +37,26 @@ qm config 103
 pvesm path <qm config 103 の scsi0 に表示された volume-id>
 ```
 
-`vmpool` がZFS storageの場合は、`vm-103-disk-0` のようなZFS zvolとして管理されます。ディスクを削除するとElasticsearchの保存データも消えるため、長期保存したい場合は `disk_size_gb` の増量、Proxmox側のバックアップ、またはElasticsearchデータ用の専用ディスク追加を検討してください。
+`vmpool` がZFS storageの場合は、`vm-103-disk-0` のようなZFS zvolとして管理されます。
+過去のフローデータはVMのdiskにしか無く、diskを失うとrepoからは戻せません。Kibanaのdashboardへの変更も失われます。
+
+## 再構築性とbackup
+
+サービスはTerraformによるVM作成、`install.sh`の実行、dashboardの取り込みで作り直せますが、
+scriptの実行とdashboardの取り込みには手作業が残り、dashboardの取得元も固定されていません。
+template 9000の作成の固定と合わせて、再構築の穴は[#87](https://github.com/koji-genba/homelab/issues/87)で追跡しています。
+2026-10-12に、運用者は過去のフローデータは不要と判断し、VM backupを取らないと決めました。
+VMを失ったら作り直し、フローは空のindexから取り込み直します。
+repoからの再構築性が完全だからではなく、失ってよいという判断によるものです。
+VM全体の評価と方針は[現行アーキテクチャ](../../../../docs/architecture/target-state.md#再構築性とbackupの方針)を参照してください。
+
+## 実機確認（2026-10-12）
+
+運用者がVMで確認した記録では、`elasticsearch`・`kibana`・`flowcoll`は3つともactiveでした。
+フローのindexは日次でrolloverし、2026-10-08〜10-11に作成されたindexにフローが入っていました。
+Kibanaのdashboardは36個、root diskの使用量は123G中17Gでした。
+[#34](https://github.com/koji-genba/homelab/issues/34)（取り込み停止）はopenのままですが、
+この時点では取り込みを確認しています。いつ・何をして復旧したかは確認していません。
 
 ## 前提条件
 
@@ -46,7 +65,7 @@ pvesm path <qm config 103 の scsi0 に表示された volume-id>
 - Proxmox APIアクセス権限
 - Cloud-init対応のVMテンプレート（初期値: VMID 9000）
 
-`template_vm_id` は、k8s-cluster / tailscale-gateway と同じ既存VMテンプレートを使う想定です。別のテンプレートIDを使う場合は `terraform.tfvars` または `variables.tf` で変更してください。
+`template_vm_id`（初期値 9000）からfull cloneします。テンプレートの現存は別途確認してください。別のテンプレートIDを使う場合は `terraform.tfvars` または `variables.tf` で変更してください。
 
 ## 構築手順
 
@@ -60,6 +79,10 @@ vim terraform.tfvars
 
 `terraform.tfvars` の `proxmox_password` は、Terraform が Proxmox API に接続するための認証情報です。サンプル値のままだと `terraform apply` 時に `HTTP 401 authentication failure` になります。実際に Proxmox Web UI へログインできる `root@pam` のパスワードに変更してください。
 
+このルートの[provider](providers.tf)は`proxmox_username` / `proxmox_password`方式で、ProxmoxへのSSHも
+passwordを使います。Apps VMルートのAPI token / SSH agent方式とは異なります。接続情報を入れた
+`terraform.tfvars`はGit ignore対象です。
+
 `ssh_public_key` は、作成されるVMの `ubuntu` ユーザーへ登録される公開鍵です。VMへSSH接続するときは、この公開鍵に対応する秘密鍵を使います。
 
 ### 2. Terraform実行
@@ -69,6 +92,10 @@ terraform init
 terraform plan
 terraform apply
 ```
+
+[main.tf](main.tf)の`ignore_changes`は`initialization[0].user_data_file_id`、`clone[0].vm_id`、`tags`を
+対象にします。snippet内容・template ID・tagsを変更しても、それだけでは既存VMのこれらの設定を更新しません。
+guestへの追加設定は別途必要です。
 
 ### 3. アプリケーションのセットアップ
 
@@ -96,7 +123,9 @@ ssh -i ~/.ssh/k8s_ed25519 ubuntu@192.168.10.103 sudo bash /tmp/install.sh
 
 ### 4. ルーター側（IX2215）でsFlowエクスポートを設定
 
-[../../network/README.md](../../network/README.md) の「フローエクスポート（sFlow）設定案」を参照し、IX2215からこのVM（192.168.10.103:6343）へsFlowを送信するよう設定します。
+[Network READMEのsFlow節](../../network/README.md#sflow)を参照してください。repoの
+[config.txt](../../network/config.txt)にはagent `192.168.10.1`、collector `192.168.10.103`が定義済みです。
+実機への反映状態とcollector側の受信は別途確認してください。
 
 ### 5. Kibanaダッシュボードのインポート
 
@@ -116,7 +145,15 @@ IX2215側の設定反映後、`elastiflow-*` インデックスにデータが�
 
 ## セキュリティ上の注意
 
-- `install.sh` はホームラボの規模・用途に合わせ、Elasticsearchの `xpack.security.enabled` を無効化しています（認証なし）。管理VLAN(10)からはServer Application VLAN(11)・Main VLAN(20)への到達がACLで許可されているため、これらのVLAN上の端末からもKibana/Elasticsearchに認証なしでアクセスできる点に留意してください。気になる場合はElastic Stack付属のセキュリティ機能を有効化するか、IX2215側のACLでVLAN10宛のTCP 5601/9200を制限してください。
+- `install.sh` はホームラボの規模・用途に合わせ、Elasticsearchの `xpack.security.enabled` を無効化しています（認証なし）。repoの`config.txt`では、Server VLAN(10)内に加え、Trusted VLAN(20)からServer VLAN(10)への通信が`main-out`と`trusted-dyn`で許可されます。ServerからTrustedへの未要求通信は`trusted-in`で拒否されます。この許可経路からKibana/Elasticsearchに認証なしで到達する構成です。気になる場合はElastic Stack付属のセキュリティ機能を有効化するか、IX2215側のACLでVLAN10宛のTCP 5601/9200を制限してください。
+
+## Terraform state
+
+active stateはこのルートのlocal `terraform.tfstate`で、Git ignore対象です。
+このルートはraw `terraform apply`で実行し、state backupを呼ばないため、成功後にrepository rootで
+このルートのstateも収集する`make state-backup`を実行します。
+backup / restoreの仕組みと前提は[ADR-0005](../../../../docs/adr/0005-secrets-and-terraform-state.md)と
+[state-backup.sh](../../../../scripts/state-backup.sh) / [state-restore.sh](../../../../scripts/state-restore.sh)を参照してください。
 
 ## 関連ドキュメント
 

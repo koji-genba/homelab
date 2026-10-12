@@ -1,9 +1,13 @@
 # 引き継ぎ（2026-09-25）
 
+> 2026-09-25時点の引き継ぎ記録であり、現在の作業指示ではない。Compose件数、NFS mount数、
+> DNS経路はその後変更されている。残る確認事項は[Apps VM復旧手順](../operations/apps-vm-recovery.md)と
+> [DGX Sparkストレージ運用](../operations/dgx-storage.md)で追跡する。現行構成・運用は[文書索引](../README.md)を参照する。
+
 旧Kubernetes VM 101/102/103は保持期間満了後の2026-09-23にProxmoxから削除した。Apps VM
 （VMID 101、`192.168.10.101`）が本番サービスの唯一のwriterである。移行の実施記録は
-[移行手順書](k8s-to-compose.md)にある。Phase 0〜4の経緯は[archive/](archive/)に残す。
-Phase 5着手前の詳細な安全条件は[旧引き継ぎ](archive/next-session-pre-phase5.md)に保存した。
+[移行手順書](k8s-to-compose.md)にある。Phase 0〜4の経緯は[archive/](README.md)に残す。
+Phase 5着手前の詳細な安全条件は[旧引き継ぎ](next-session-pre-phase5.md)に保存した。
 
 ## 実施済み
 

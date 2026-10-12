@@ -31,19 +31,21 @@ Proxmox VE 192.168.10.11
 
 Compose定義は11 projects / 12 servicesです。sparkDashの初回反映は[運用手順](docs/operations/sparkdash.md)に従います。
 
+Caddy、DNS、SMBはLAN IPに加え、Apps VMのtailnet IP `100.86.147.127`でも公開します。
+内部FQDNはこのtailnet IPを返します。登録・DNS切替の詳細は[Apps VMのtailnet参加](docs/operations/apps-vm-tailnet.md)を参照してください。
+
 VLAN 10はServer、20はTrusted、30はIoT、40はGuestです。VLAN 11と63は廃止済みです。
 
 ## まず読むもの
 
-- [目標アーキテクチャ](docs/architecture/target-state.md)
-- [現状監査](docs/architecture/current-state-audit.md)
-- [実機インベントリ（2026-08-30）](docs/architecture/live-inventory-2026-08-30.md)
+- [文書索引](docs/README.md)
+- [現行アーキテクチャと復旧目標](docs/architecture/target-state.md)
+- [コードの配置と責務](docs/CODEBASE_MAP.md)
 - [設計判断（ADR）](docs/adr/README.md)
 - [ネットワークゾーン仕様](docs/network/target-zones.md)
-- [KubernetesからComposeへの移行手順](docs/migration/k8s-to-compose.md)
-- [Phase 5の引き継ぎ](docs/migration/next-session.md)
-- [移行記録アーカイブ（Phase 0〜4の完了記録）](docs/migration/archive/README.md)
+- [Proxmoxホスト復旧手順](docs/operations/proxmox-host-recovery.md)
 - [Apps VM復旧手順](docs/operations/apps-vm-recovery.md)
+- [Apps VMのtailnet参加](docs/operations/apps-vm-tailnet.md)
 - [アプリ更新・promotion・rollback](docs/operations/application-lifecycle.md)
 - [NFS export契約と手動反映メモ](docs/operations/nfs-export.md)
 - [DGX Sparkストレージ運用](docs/operations/dgx-storage.md)
@@ -51,18 +53,21 @@ VLAN 10はServer、20はTrusted、30はIoT、40はGuestです。VLAN 11と63は�
 - [SearXNG / MCP運用](docs/operations/searxng.md)
 - [sparkDash運用](docs/operations/sparkdash.md)
 - [Homepage運用](docs/operations/homepage.md)
+- [過去の監査・移行・実施記録](docs/archive/README.md)
 
-設計を変更するときは、コードだけでなく該当ADRまたは運用手順も更新します。
+設計変更は新しいADRまたは日付付き補足で記録し、索引・現行設計・運用手順を更新します。
+採用時点の判断は固定し、前提が変わった場合は[ADRの規則](docs/adr/README.md)に従い新しいADRで置き換えます。
 
 ## リポジトリ構成
 
 ```text
 docs/
+├── README.md                    # 文書索引
 ├── adr/                         # 採用理由とトレードオフ
-├── architecture/                # 現状監査と目標構成
-├── migration/                   # 段階移行、切戻し、廃止条件（archive/は完了記録）
+├── architecture/                # 現行設計と復旧目標
+├── archive/                     # 凍結した過去の監査・移行・実施記録
 ├── network/                     # VLANゾーンと手動反映の期待状態
-└── operations/                  # 復旧手順
+└── operations/                  # 日常操作、復旧、サービス・ストレージ運用
 files/
 ├── infrastructure/
 │   ├── terraform/apps-vm/       # Apps VM
@@ -85,11 +90,13 @@ sparkDashはDGXのremote monitorとしてComposeに登録し、公開imageのdig
 
 日常操作はルートの `Makefile` を入口にします。管理端末に要求するのは原則としてGit、Docker、Make、SSHだけで、TerraformやAnsibleなどはバージョン固定のtoolboxから実行します。
 
+ローカル検証も行う場合のPython/PyYAMLなどの追加依存は[toolbox README](files/tools/homelab-toolbox/README.md)を参照してください。
+
 実環境の変更は次の境界を守ります。
 
 - Terraformの `apply`、Ansibleの適用、Tailscale変更は手動実行
 - stagingのアプリケーション更新は自動反映、productionは明示的な昇格
-- legacy IPの取得は旧所有者を停止し、ARP重複がないことを確認した後だけ許可
+- 現行構成ではlegacy IPを使用しない
 - Apps VMでage秘密鍵を保持しない。復号は管理端末で行い、runtime secretだけをroot専用領域へ転送する
 - Terraform stateはローカル管理し、同じリポジトリの `state-backup` branchへage暗号化した復旧コピーを保存する
 - NFS mountとmarkerの検証に失敗した場合はアプリケーションを起動しない

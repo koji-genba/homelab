@@ -58,11 +58,68 @@ sparkDashはcheckoutが進んだ後、SOPS bundleに必須の`sparkdash.token`�
 `sparkdash.ssh_private_key`を追加してからAnsibleを適用する。正常終了後も
 `homelab-compose-up sparkdash`で起動を明示確認する。
 Homepageは新しいsecretやNFS directoryを必要としない。merge、reconcileによるcheckout更新、
-`make ansible-apply`、`homelab-compose-up homepage`の順で初回反映する。
-AnsibleはDNS rewriteとhelper一覧を更新する。詳細は[Homepage運用](homepage.md)を参照する。
+`make ansible-apply`の順で初回反映し、起動を確認する。
+AnsibleはDNS rewriteとhelper一覧を更新し、runtime変更があれば全projectをforce-recreateして
+新projectも起動する。変更が無ければhelperの更新だけでは起動しないため、apply後に起動していなければ
+`sudo /usr/local/sbin/homelab-compose-up homepage`を実行する。詳細は[Homepage運用](homepage.md)を参照する。
 
 現在の定義は`edge dns samba stashpad-prod stashpad-staging sillytavern open-webui searxng sparkdash homepage monitoring`の
 11 projects / 12 servicesで、停止順はその逆である。
+
+## projectの撤去（共通手順）
+
+以下は実装から導いた手順で、実機では未検証。
+撤去PRではCompose定義、Caddy/Gatus、DNS rewrite、secret/env/NFS宣言に加え、compose roleの
+検証一覧、up/down・reconcile・rollback・dead-manのproject一覧を揃えて対象projectを外す。
+管理端末はその変更を含む定義を使う。VM側は対象のCompose定義が残っている状態から始める。
+
+1. mainへmergeする前にApps VMで`sudo systemctl stop homelab-app-reconcile.timer`を実行する。
+   `sudo systemctl status homelab-app-reconcile.service`とjournalで実行中の処理が終了したことを確認する。
+   timerを止めても実行中のserviceは止まらない。終了前にcheckoutやpendingを変更しない。
+2. `/var/lib/homelab/reconcile.paused`の有無を確認する。作業前から存在する場合は撤去作業に入らず、
+   先にpauseの理由（rollback/障害）を解決し、該当projectをmainの定義へ戻してよいことを確認して
+   pauseを解除した後、この手順を最初からやり直す。解決できなければ中断する。
+   後段のAnsible適用と`homelab-compose-up all`はpauseを見ずに全projectを再作成し、rollback中の
+   projectもVM checkoutの定義へ戻してしまうためである。
+   pauseが無い場合は`sudo touch /var/lib/homelab/reconcile.paused`で作成する。Ansibleはtimerを再起動するため、
+   checkout更新までこのpauseでも競合を防ぐ。`/var/lib/homelab/reconcile.pending`があれば内容を確認し、
+   `SHA project`形式の第2欄が撤去対象の行だけを取り除く。他projectのretryは残す。
+3. VMの既存Compose定義を使い、対象projectを停止する（`<project>`は撤去対象へ置き換える）。
+
+   ```sh
+   sudo docker compose --project-name homelab-<project> --env-file /etc/homelab/compose.env \
+     -f /opt/homelab/files/services/compose/<project>/compose.yaml down --remove-orphans
+   ```
+
+   `sudo docker ps -a --filter 'label=com.docker.compose.project=homelab-<project>'`で対象projectのcontainerが残っていないことを確認する。
+   named volumeとNFS dataはこの停止で削除しない。
+4. 撤去PRをmainへmergeし、管理端末の同じ定義から
+   `AGE_IDENTITY_FILE=/secure/path/age-identity.txt make ansible-apply`を実行する。
+   対象を外したhelper、reconciler、dead-man等を先に描画する。
+   checkoutだけが先に進むと、古いhelperとdead-man pingが撤去対象の`compose.yaml`を見つけられずに失敗する。
+   `compose.env`/secretが変われば残る全projectがforce-recreateされる。
+   Ansibleのgit taskは既存checkoutを更新しないため、この段階で残るprojectの旧Compose定義にも
+   必要なenv/secretが揃っていることを確認する。移行用に残した入力はcheckout更新後に整理する。
+5. pauseを維持したまま、VMのcheckoutがcleanであることを確認し、mainをfast-forwardする。
+   pause中はreconcileがcheckout更新も行わないため、この段階は直接更新する。
+
+   ```sh
+   sudo git -C /opt/homelab status --porcelain --untracked-files=all
+   sudo git -C /opt/homelab fetch --prune origin main
+   sudo git -C /opt/homelab merge --ff-only origin/main
+   ```
+
+   dirty checkout、non-fast-forward、描画済み定義との不一致があれば停止して原因を調べる。
+   Ansibleは一覧から消えたNFS mountを撤去しない。必要ならwriter停止を確認してclient側のfstabとmountを
+   整理する。data/markerの削除は別の判断とする。
+   移行用env/secretの整理をAnsibleで適用した後、
+   `sudo env HOMELAB_FORCE_RECREATE=true /usr/local/sbin/homelab-compose-up all`で残る全projectを再作成する。
+   checkoutを直接進めた差分は次のreconcileでは検出されないため、Caddy/Gatus等のGit管理bind設定も
+   ここで反映する。DNS/SMBを含む短い中断を見込む。
+6. pendingに撤去対象が無いことを再確認し、残るprojectとmount guard、DNS、監視を確認する。
+   この作業で作成したpauseを`sudo rm /var/lib/homelab/reconcile.paused`で解除し、
+   `sudo systemctl start homelab-app-reconcile.timer`、
+   `sudo systemctl start homelab-app-reconcile.service`の順で再開する。
 
 ## rollbackと再開
 
@@ -88,8 +145,34 @@ ssh deploy@192.168.10.101 sudo rm /var/lib/homelab/reconcile.paused
 ssh deploy@192.168.10.101 sudo systemctl start homelab-app-reconcile.service
 ```
 
+### rollbackが失敗したとき
+
+`homelab-rollback-app.sh.j2`は起動試行前に`/var/lib/homelab/reconcile.paused`を作る。
+pendingへの追加は起動成功時だけなので、失敗してもpauseが残り、今回のretryがpendingに無い場合がある。
+pauseと`/var/lib/homelab/reconcile.pending`を別々に確認し、既存retryと
+`deployments.log`・起動失敗の原因を調べてから再開を判断する。
+
 アプリを停止してread-onlyへ戻す場合は、先に`homelab-apps.service`を停止する。
 Ansibleのpre-taskも同じ順序を強制し、ExecStopが失敗した状態でNFSをremountしない。
 
 変更後はGatus、Discord通知、Healthchecks.ioのdead-man、対象applicationのread/writeを確認し、
 `deployments.log`のSHA/digestとGit宣言を照合する。
+
+## dead-man pingが止まる条件
+
+`healthchecks-ping.sh.j2`は次のいずれかに失敗するとHealthchecks.ioへのpingを送らない。
+
+- `/etc/homelab/secrets/healthchecks.env`が読めない。
+- 毎回実行する`homelab-mount-guard`の検証が失敗する、または
+  `homelab-mount-guard.service` / `homelab-apps.service`がactiveでない。
+- `tailscaled.service`がactiveでない、status/IPv4を取得できない、backendが`Running`でない、
+  またはIPv4が`apps_tailnet_ip`と一致しない。
+- root filesystem使用率を数値として取得できない、`healthchecks_rootfs_max_percent`が1〜100の範囲外、
+  または使用率が閾値以上（現行値は`group_vars/apps.yml`を参照）。
+- `/opt/homelab/.git`が無い、Git statusがcleanでない、working treeまたはindexにHEADとの差分がある。
+- `shared_mount_path`で一時probe fileの作成・書込み・削除に失敗する。
+- helperに宣言されたprojectのいずれかでrunning serviceを取得できない。
+  各projectに1つ以上のrunning serviceを要求し、全serviceのhealthyまでは判定しない。
+  全serviceの稼働・health判定の強化は[#86](https://github.com/koji-genba/homelab/issues/86)で追跡する。
+- LAN側の`http://status.kojigenba-srv.com/` probeが2xx、3xx、401、403以外を返す（接続失敗も含む）。
+- `healthchecks.env`の読み込みに失敗する、`HEALTHCHECKS_PING_URL`が空、またはping送信自体が失敗する。

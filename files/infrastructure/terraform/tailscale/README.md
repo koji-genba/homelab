@@ -4,6 +4,9 @@
 新しいtailnet deviceやgateway VMは作成せず、MagicDNSとAdGuardのglobal nameserverを含むtailnet DNS設定、
 grant/tag、subnet routeを記述する。
 
+`tailnet`のdefaultは`example.com`であり、実際のtailnet ID/nameをignore対象の`terraform.tfvars`などで
+指定する必要がある。gateway VMの管理は[別ルート](../tailscale-gateway/README.md)にある。
+
 変更を伴うresourceはすべてdefaultで無効にする。policy resourceはtailnet全体を所有するため、apply前に
 明示的なimportが必要である。review済みのlive exportをignore対象の
 `files/infrastructure/terraform/tailscale/acl-policy.live.json`へ保存する。これはrepository内の通常fileで
@@ -39,8 +42,9 @@ make tailscale-plan MANAGE_TAILNET=true ENABLE_ADGUARD_DNS=true ADGUARD_READY=tr
 
 ## 既存resourceのimport順序
 
-各importの後にplanをreviewし、次の順序で既存resourceを取り込む。provider v0.29.2のimport IDはMake targetで
-固定している。
+provider v0.29.2のimport IDはMake targetで固定している。以下は初回向けの各helperの呼出例である。
+既存の掲載順を残しているが、そのまま連続実行するとDNS import後のrouter helperの内部planが失敗するため、
+下のgate制約を先に確認する。
 
 ```sh
 make tailscale-import-core MANAGE_TAILNET=true \
@@ -59,14 +63,32 @@ make tailscale-import-router MANAGE_TAILNET=true MANAGE_SUBNET_ROUTER=true \
 router targetは確認済みのdevice/node IDを`device_tags[0]`と`device_subnet_routes[0]`の両方に使う。
 importは自動実行せず、live valueをconfigurationへコピーもしない。exportとdiffのreviewは必須である。
 
+### import helperのgate制約
+
+[Makefile](../../../../Makefile)の`tailscale-import-core`は`tailscale-import-acl`を呼ぶ。
+`tailscale-import-acl`と`tailscale-import-router`が内部で呼ぶ`tailscale-plan`はDNS gateを明示指定していない。
+上の呼出例には`ENABLE_ADGUARD_DNS` / `ADGUARD_READY`もないため、default falseではDNS resourceのcountが0になる。
+DNSがstateにあると`prevent_destroy`によりplanが失敗する。import後のplanなので、失敗までにstateへresourceが
+取り込まれている場合がある。再実行前にstateを確認する。
+
+GNU Makeは親makeのcommand-line変数を再帰makeへ継承するため、外側に両gateを指定すると内部planにも
+渡る。運用者がreadinessを確認した場合だけ指定する。
+また、routerを先にimportする順序へ単純に入れ替えると、`tailscale-import-dns`が内部で呼ぶ
+`tailscale-plan`はrouter gateを明示指定しないため、`MANAGE_SUBNET_ROUTER=true`を継承させなければrouter resourceの削除を計画し得る。
+各planでは、既にstateにあるDNS・router両方のgateを保持してreviewする必要がある。
+このgate制約に基づく手順は実装から導いた手順で、実機では未検証である。
+
 `manage_tailnet=true`は、import済みpolicyと現在のadmin console exportをreviewした後だけ使う。
-`manage_subnet_router=true`は、既存の`tailscale-gateway` deviceが意図したrouterであり、advertise済みrouteが
+`manage_subnet_router=true`は、tailnet hostname `home-gateway`のdeviceが意図したrouterであり、advertise済みrouteが
 このrootと一致することを確認した後だけ使う。routeはdeviceが既にadvertiseしている必要があり、Terraformは
 import済みdeviceのrouteを有効化するだけである。
+`subnet_router_hostname`はtailnet hostnameを指定する変数で、PVE VM名 / guest hostnameの`tailscale-gateway`とは区別する。
 
 `enable_adguard_dns`は別のdefault false gateである。`manage_tailnet=true`かつ`adguard_ready=true`でなければ
 有効にできない。有効にするとMagicDNSとtailnet global DNS serverを管理し、後者をApps VMのtailnet IP
-`100.86.147.127`へ向ける。`final_apps_ip`はreadinessの基準とrollback用LAN addressとして残す。
+`100.86.147.127`へ向ける。`final_apps_ip`はLAN側の固定値`192.168.10.101`を検証し、rollback時に
+`adguard_nameserver_ip`で許容するLAN addressとして残す。到達性を自動確認するものではなく、readinessは
+運用者が実測して`adguard_ready`で指定する。
 Split DNSは意図的に管理しない。フェーズ1ではreadyでないaddressへTailscale DNSを変更しない。
 
 ### Exit node使用時のDNSと既存stateの移行
@@ -124,5 +146,6 @@ Makeが`-var="adguard_nameserver_ip=192.168.10.101"`を渡すので、addressだ
 
 OAuth/API credentialはproviderが環境変数から読み取るため、KeePassXCから管理端末へ一時的に注入する。
 Tailscale Terraform toolbox runnerにだけ渡し、runtime SOPS bundle、Terraform variable、file、Apps VMには保存しない。
-`make tailscale-init`と`make tailscale-plan`は読み取り専用helperである。`make tailscale-apply`は明示的な手動操作で、
+`make tailscale-init`と`make tailscale-plan`はremote設定を適用しないが、localの初期化file・保存planを作成する。
+`make tailscale-apply`は明示的な手動操作で、
 apply成功後は通常のstate-backup targetで暗号化stateを記録する。CI jobからは実行しない。
