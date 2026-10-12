@@ -104,10 +104,10 @@ resource "proxmox_virtual_environment_vm" "tailscale_gateway" {
     floating  = 0    # k8s実績設定
   }
 
-  # ディスク設定（k8s実績ベース、テンプレートサイズ維持）
+  # gatewayのboot diskを20GBと宣言
   disk {
     datastore_id = "vmpool" # k8s実績設定
-    size         = 20       # テンプレートサイズ（リサイズ制限回避）
+    size         = 20       # boot diskの容量（GB）
     interface    = "scsi0"
     iothread     = true # k8s実績設定
     ssd          = true # k8s実績設定

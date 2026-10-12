@@ -1,6 +1,7 @@
 ---
-# Copy to group_vars/apps.yml and adjust paths after inspecting the restored
-# NFS export. This file contains no credentials.
+# Initial values for a new or recovered Apps VM on the current, post-migration
+# network. Copy to group_vars/apps.yml and adjust paths after inspecting the
+# restored NFS export. This file contains no credentials.
 apps_management_ip: 192.168.10.101
 apps_final_management_ip: 192.168.10.101
 # Required: Apps VM's Tailscale IPv4, fixed in the admin console. Example only.
@@ -17,8 +18,10 @@ apps_upstream_dns_servers:
   - 8.8.8.8
 apps_dns_probe_name: dnsTestRecord.kojigenba-srv.com
 apps_dns_probe_address: 192.168.63.254
-network_migration_complete: false
-# Keep LAN answers until the Apps VM tailnet DNS cutover is ready.
+network_migration_complete: true
+# Keep LAN answers until the Apps VM is registered, its fixed tailnet IPv4 is
+# verified against apps_tailnet_ip, and tags/expiry are checked. Then set true
+# before the post-registration Ansible apply in the recovery runbook.
 internal_records_use_tailnet_ip: false
 legacy_service_addresses_enabled: false
 legacy_service_cutover_confirmed: false
@@ -142,4 +145,7 @@ trusted_networks:
 healthchecks_ping_period: 60
 healthchecks_rootfs_max_percent: 90
 compose_wait_timeout_seconds: 300
+# Keep NFS read-only and apps/reconcile/dead-man stopped during initial checks.
+# Set true only after verifying restored exports and fencing other writers;
+# the next Ansible apply deploys secrets and starts the application units.
 application_cutover_confirmed: false
