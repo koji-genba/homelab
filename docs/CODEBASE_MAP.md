@@ -290,9 +290,9 @@ Almost all app state is NFS from pve1 (exceptions: local named volumes such as `
 18. **Gatus alert state is persisted since PR #78** (SQLite on named volume `gatus`; previously memory-only, so every recreate dropped the "resolved" notice). Reproduced/verified in Docker only; production confirmation after the next real restart is pending. `gatus-config-fixture.sh` guards the exact `      - gatus:/data` line, so re-indenting the compose file fails CI.
 
 **Stale / inconsistent items (verify before relying on them)**
-- ADRs say 7 Compose projects; reality is **10** (open-webui, searxng added 2026-10-10 and sparkDash 2026-10-11, all without an ADR *(inferred: no ADR for sparkDash found)*). README, `target-state.md`, `application-lifecycle.md`, `apps-vm-recovery.md` and `files/services/compose/README.md` already say 10 projects / 11 services. `docs/migration/next-session.md` (dated 2026-09-25) and the status line of `k8s-to-compose.md` are stale; ADR-0006's header says "not applied" but steps A/B were applied 2026-09-19 (DGX-side step C still pending).
+- ADRs say 7 Compose projects; reality is **10** (open-webui, searxng added 2026-10-10 and sparkDash 2026-10-11, all without an ADR *(inferred: no ADR for sparkDash found)*). README, `target-state.md`, `application-lifecycle.md`, `apps-vm-recovery.md` and `files/services/compose/README.md` already say 10 projects / 11 services. `docs/archive/next-session.md` (dated 2026-09-25) and the status line of `k8s-to-compose.md` are stale; ADR-0006's header says "not applied" but steps A/B were applied 2026-09-19 (DGX-side step C still pending).
 - `scripts/rollback-app.sh` defaults `APPS_HOST` to `192.168.10.42` (pre-Phase-4 IP); the real host is `192.168.10.101` — pass `APPS_HOST` explicitly. `hosts.yml.example` / `apps.yml.example` also still show `.42`.
-- `docs/proxmox-rebuild.md` is K8s-era (PVE 8.4, VLAN 11); `docs/tiered-storage.md` exports block predates the `/32` narrowing and `ai`; `docs/architecture/{current-state-audit,live-inventory-2026-08-30}.md` are pre-migration baselines; `k8s-rollback-state.md` is historical and has a dangling link.
+- `docs/archive/proxmox-rebuild.md` is K8s-era (PVE 8.4, VLAN 11); `docs/operations/tiered-storage.md` exports block predates the `/32` narrowing and `ai`; `docs/archive/{current-state-audit,live-inventory-2026-08-30}.md` are pre-migration baselines; `k8s-rollback-state.md` is historical and has a dangling link.
 - Dead k8s/VLAN-11 leftovers: `.gitignore` rules, `192.168.11.0/24` in `compose-config.sh` synthetic env and in real `trusted_networks` (the nft template drops it post-migration), `legacy_ldaps_ip` in the AdGuard fixture, legacy-address Ansible plumbing, Samba `netbios name k8s-samba`.
 - `terraform/k8s-cluster/terraform.tfstate` is orphaned yet encrypted into `state-backup`; VMIDs 101-103 now belong to different VMs.
 - `compose-config.sh` and `adguard-config-check.sh` can pass vacuously outside the toolbox/CI; systemd/Jinja templates other than AdGuard have no render check; `mover-test` is not in CI.
@@ -318,7 +318,7 @@ Almost all app state is NFS from pve1 (exceptions: local named volumes such as `
 | Change router/switch/AP expectations | `docs/network/target-zones.md` first, device via console, then `files/infrastructure/network/config.txt` + README |
 | Record a decision | new ADR in `docs/adr/` + index in `docs/adr/README.md` |
 | Rebuild/recover the Apps VM | `docs/operations/apps-vm-recovery.md` (16 steps) |
-| Understand current state/next steps | `README.md`, `docs/migration/next-session.md` (stale on counts), `docs/operations/*.md` |
+| Understand current state/next steps | `README.md`, `docs/archive/next-session.md` (stale on counts), `docs/operations/*.md` |
 | Run all local checks | the CI list in `validate.yml`; plus `make mover-test` (not in CI) |
 
 ## 8. Open items (from docs)

@@ -2,15 +2,17 @@
 
 > 履歴資料。Kubernetes VM 101/102/103は2026-09-23に削除済みであり、この手順は現在適用できない。
 > 現行Apps VMの復旧は[Apps VM復旧手順](../operations/apps-vm-recovery.md)に従う。
+> VMID 101〜103は現在Apps VM・Tailscale gateway・ElastiFlowに再利用されている。
+> 本文のVMIDを旧Kubernetes VMとして操作しない。
 
 - 取得日: 2026-09-05
 - 取得時点: **Kubernetes VM（VMID 101/102/103）を`qm shutdown`で停止する直前**
 - 目的: 停止後は`kubectl`が使えなくなるため、rollbackに必要な変更前後の値をここへ恒久保存する。
-  [次セッションへの作業指示](next-session.md)が「変更前の完全なService定義JSONはscratchpadにのみ存在し、
+  当時の作業指示が「変更前の完全なService定義JSONはscratchpadにのみ存在し、
   恒久保存されていない」と課題としていた点を解消するものである。
 
 この文書は**記録専用**である。ここに書かれた値をrollback以外の目的で適用しない。
-rollbackの実施順序は[次セッションへの作業指示のrollback手順](next-session.md)に従う。
+当時のrollbackの実施順序は[Phase 5着手前の引き継ぎのrollback手順](next-session-pre-phase5.md#rollback手順)に保存してある。
 
 ## 取得時のクラスタ状態
 

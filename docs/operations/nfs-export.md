@@ -4,7 +4,7 @@
 - サーバー: Proxmox/NFS host `192.168.10.11`
 - データ復旧: このリポジトリの対象外
 - 関連設計: [目標ストレージ契約](../architecture/target-state.md#storage-contract)
-- 実測記録: [実機インベントリ（2026-08-30）](../architecture/live-inventory-2026-08-30.md)
+- 実測記録: [実機インベントリ（2026-08-30）](../archive/live-inventory-2026-08-30.md)
 
 このリポジトリはNFS serverの設定を自動変更しない。以下はApps VMが必要とするexportを、復旧時と
 移行時に再現するための契約である。実機のfilesystem、既存export、NFSv4 pseudo-rootを確認してから

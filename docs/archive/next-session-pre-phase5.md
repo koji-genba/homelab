@@ -1,6 +1,9 @@
 # 次セッションへの作業指示
 
-> 2026-09-19時点の履歴資料。Phase 5の現行状態は[引き継ぎ](../next-session.md)を参照。
+> 2026-09-19時点の履歴資料。廃止後の記録は[引き継ぎ](next-session.md)、現行構成・運用は
+> [文書索引](../README.md)を参照する。旧Kubernetesへのrollbackは現在適用できない。
+> VMID 101〜103は現在Apps VM・Tailscale gateway・ElastiFlowに再利用されており、
+> 本文のVMIDを旧Kubernetes VMとして操作しない。
 
 - 更新日: 2026-09-19
 - 対象リポジトリ: `/home/s-sato/homelab`
@@ -12,7 +15,7 @@
 
 この文書は、会話履歴がない次セッションが安全に作業を再開するための指示書である。
 進捗の羅列ではなく、ここに記載した順序、ゲート、停止条件に従うこと。
-**Phase 0〜4の完了記録は[archive/](archive/)にある。読む必要があるのは経緯を辿るときだけで、
+**Phase 0〜4の完了記録は[archive/](README.md)にある。読む必要があるのは経緯を辿るときだけで、
 作業の前提はこの文書に書き出してある。**
 
 ## 現在地
@@ -263,7 +266,7 @@ pve1のroot crontabにある`/usr/local/bin/mover.sh`（05:00）は`tank-gen2/da
 - `config.txt`は**実機の保存済み`startup-config`を基準にした管理用コピー**である。実機を変えずに
   ここだけ書き換えない。実機へ投入し`write memory`まで済ませてから、この記録を合わせる。
 - 実機と照合するときは**行の並びではなく行の集合**で比較する。並び順は3箇所で異なるが、
-  これはドリフトではない（[IX2215 ACL runbook §1.7.2](../network/ix-acl-stateful-runbook.md)）。
+  これはドリフトではない（[IX2215 ACL runbook §1.7.2](ix-acl-stateful-runbook.md)）。
 - 認証情報の行は既存値を保持しているため、公開場所へ転載しない。
 - commit前に`git diff --cached --name-only`で対象を確認する。
 
@@ -316,11 +319,11 @@ make ansible-lint ansible-check ansible-bootstrap-paths-test \
 | --- | --- |
 | [移行手順書](k8s-to-compose.md) | 全フェーズの手順とゲート。残るのはフェーズ5 |
 | [rollback用 状態スナップショット](k8s-rollback-state.md) | Kubernetes復旧に要る停止直前の値 |
-| [archive/](archive/) | Phase 0〜4の完了記録。更新しない |
+| [archive/](README.md) | Phase 0〜4の完了記録。更新しない |
 | [Apps VM復旧手順](../operations/apps-vm-recovery.md) | Proxmox側の前提、403の診断、再構築フロー |
 | [アプリケーションのライフサイクル](../operations/application-lifecycle.md) | 日常のdeploy、reconcile、rollback |
 | [NFS export契約](../operations/nfs-export.md) | export path、client範囲、marker |
 | [DGX Sparkストレージ運用](../operations/dgx-storage.md) | `ai` exportの手順と検証 |
 | [目標ゾーン設計](../network/target-zones.md) | VLAN 10/20/30/40の設計と手動変更記録 |
-| [IX2215 ACL stateful化 実施手順書](../network/ix-acl-stateful-runbook.md) | IXのACL設計、投入手順、rollback |
+| [IX2215 ACL stateful化 実施手順書](ix-acl-stateful-runbook.md) | IXのACL設計、投入手順、rollback |
 | [ADR](../adr/README.md) | 0001〜0006の設計判断 |

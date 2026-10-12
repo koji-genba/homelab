@@ -8,7 +8,7 @@
 AdGuardの内部recordとTailscaleのglobal nameserverはApps VMのLAN address
 `192.168.10.101`を指す。宅外clientはgatewayの`192.168.10.0/24` subnet routeに依存し、
 roaming clientで`accept-routes`を手動切替していた。2026-07には宅内desktopのSMBが
-gateway経由でヘアピンし、速度が落ちた（[調査記録](../smb-performance-troubleshooting.md)）。
+gateway経由でヘアピンし、速度が落ちた（[調査記録](../operations/smb-performance-troubleshooting.md)）。
 exit node利用時の内部DNSはPR #56で`Use with exit node`を有効にして解決した。
 
 ## 決定

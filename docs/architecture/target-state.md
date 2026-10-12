@@ -2,9 +2,9 @@
 
 - 状態: 承認済みの設計
 - 承認日: 2026-08-29
-- 根拠: [現状監査](current-state-audit.md)
-- 実機基準点: [実機インベントリ（2026-08-30）](live-inventory-2026-08-30.md)
-- 移行手順: [KubernetesからComposeへの移行](../migration/k8s-to-compose.md)
+- 根拠: [現状監査](../archive/current-state-audit.md)
+- 実機基準点: [実機インベントリ（2026-08-30）](../archive/live-inventory-2026-08-30.md)
+- 移行手順: [KubernetesからComposeへの移行](../archive/k8s-to-compose.md)
 - 復旧手順: [Apps VM復旧](../operations/apps-vm-recovery.md)
 - 設計判断: [ADR一覧](../adr/README.md)
 - ネットワーク仕様: [目標ネットワークゾーン](../network/target-zones.md)

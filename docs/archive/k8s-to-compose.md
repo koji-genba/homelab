@@ -1,10 +1,15 @@
-# KubernetesからComposeへの移行手順書
+# KubernetesからComposeへの移行手順と実施記録
 
-- 状態: **フェーズ0〜4完了。フェーズ5はVM・旧データ・DNS廃止を実施し、credential・受入確認が残る。**
+> KubernetesからComposeへの移行手順と実施記録である。旧Kubernetes VM・定義は2026-09-23に
+> 撤去済みで、旧runtimeへの切替・切戻し手順は現在実行できない。現行の復旧は[Apps VM復旧手順](../operations/apps-vm-recovery.md)、
+> 更新・rollbackは[アプリケーションのライフサイクル](../operations/application-lifecycle.md)を参照する。
+> Phase 5後の対話を要する受入再確認は最終記録時点では未確認である。
+
+- 状態: **フェーズ0〜4完了。フェーズ5の廃止作業・credential失効は2026-09-24までに完了。受入再確認は最終記録時点では未確認。**
 - 更新日: 2026-09-23
 - 目標設計: [目標アーキテクチャ](../architecture/target-state.md)
-- 実施記録: [archive/実装状況](archive/implementation-status.md)
-- 現在の作業指示: [次セッションへの作業指示](next-session.md)
+- 実施記録: [archive/実装状況](implementation-status.md)
+- 現行構成・運用: [文書索引](../README.md)
 
 この手順書は停止時間を許容する。一度にapplication runtimeとVLAN設計を変更せず、rollbackの
 境界を単純にする。各check欄には実施日時、操作者、結果、関連commitを記録する。
@@ -16,7 +21,7 @@
 | 2 現在のVLANでのアプリケーション切替 | 完了（2026-09-05） |
 | 3 再構築性の証明 | 完了（2026-09-06、合格） |
 | 4 ネットワーク移行 | 完了（2026-09-13。Port 4のVLAN 10 access化は2026-09-19） |
-| **5 廃止** | **2026-09-23実施中。VM・旧データ・NFS exportは完了** |
+| **5 廃止** | **2026-09-23〜09-24に廃止作業完了。受入再確認は最終記録時点では未確認** |
 
 ## フェーズ 0: インベントリと安全確認
 
@@ -32,7 +37,7 @@
 
 ゲート: inventoryに不明なwriter、IP競合、未記録の必須機能がある場合はフェーズ1へ進まない。
 
-**完了（2026-09-05）。** 調査結果は[archive/Phase 2A事前調査結果](archive/phase2a-inventory.md)にある。
+**完了（2026-09-05）。** 調査結果は[archive/Phase 2A事前調査結果](phase2a-inventory.md)にある。
 移行文書が管理する7 pathの外に、NFS上へPVデータを持つ未記録のworkloadが2系統
 （`openldap`、`external-dns-blocklist`）あることがここで判明した。
 
@@ -102,7 +107,7 @@
 実機適用で初めて顕在化した実装バグ4件（AdGuardHome.yaml.j2のYAML生成不正、systemd unit templateの
 改行消失、Samba HEALTHCHECKの誤検知、Gatus Caddy probeのredirect誤検知）と、bind-mounted fileだけの
 変更をcontainerへ反映できないreconcileの不具合はPR #19〜#21で修正済みである。
-詳細は[archive/実装状況](archive/implementation-status.md)にある。
+詳細は[archive/実装状況](implementation-status.md)にある。
 
 ## フェーズ 3: 再構築性の証明
 
@@ -124,7 +129,8 @@ snapshot restoreで代替してはならない。この試験はGitとIaCから�
 手動作成の資産であり、しかも`/vms/<vmid>`のACLがVMのdestroyで道連れに消えることを明らかにした。
 **「GitとIaCだけから復旧できる」という前提は現状では成立していない。**
 前提条件と403の診断手順は[Apps VM復旧手順](../operations/apps-vm-recovery.md)にある。
-恒久対策は未実施で、残作業として[次セッションへの作業指示](next-session.md)が追跡する。
+恒久対策は最終記録時点では未実施である。現行の緩和策は[Apps VM復旧手順](../operations/apps-vm-recovery.md)を
+参照する。恒久対策の要否と追跡先は確認事項である。
 
 <a id="phase-4-network-migration"></a>
 
@@ -132,8 +138,8 @@ snapshot restoreで代替してはならない。この試験はGitとIaCから�
 
 application cutoverの安定後、別のメンテナンス時間帯に実施する。
 一括の事前確認は作らず、各対象を変更する直前に必要な値だけを確認する。実施手順と実測値は
-[archive/実装状況](archive/implementation-status.md)、ACLの設計と投入手順は
-[IX2215 ACL stateful化 実施手順書](../network/ix-acl-stateful-runbook.md)にある。
+[archive/実装状況](implementation-status.md)、ACLの設計と投入手順は
+[IX2215 ACL stateful化 実施手順書](ix-acl-stateful-runbook.md)にある。
 
 1. IX2215のstartup/running config、DHCP/ARP、IPv6、port inventoryを確認する。
 2. ECW5211のbackupはECW変更直前、Tailscale live exportはTerraform import直前に取得する。
@@ -166,7 +172,7 @@ IX/VLAN/ECW部分とApps VM host resolverは2026-09-13に完了した。ElastiFl
 **2026-09-23に着手。未完了の項目は下のチェック欄に残す。**
 再構築試験から14日経過し、rollbackが発生していないことを条件とする。
 合格日は2026-09-06、**保持期間の満了は2026-09-20**である。それ以前に着手しない。
-判断が要る点は[次セッションへの作業指示](next-session.md)にまとめてある。
+当時の判断が要る点は[Phase 5着手前の引き継ぎ](next-session-pre-phase5.md)に保存してある。
 
 - [x] Kubernetes VM 103 → 102 → 101をProxmoxから削除。disk残存なし（2026-09-23）。
 - [x] k8s Terraform、Kubespray、Flux、manifestをactive treeから削除（このブランチ）。

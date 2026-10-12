@@ -4,7 +4,7 @@
 - 初版: 2026-08-29
 - 最終更新: 2026-09-19
 - 設計判断: [ADR-0003](../adr/0003-four-network-zones.md)
-- 移行: [KubernetesからComposeへの移行、フェーズ4](../migration/k8s-to-compose.md#phase-4-network-migration)
+- 移行: [KubernetesからComposeへの移行、フェーズ4](../archive/k8s-to-compose.md#phase-4-network-migration)
 
 この文書はIX2215、switch、ECW5211の期待状態を定義する。credentialや機器MACは記録せず、
 port/VLAN対応と受入結果を管理する。
@@ -72,7 +72,7 @@ Apps VM自身でも多層防御（defense in depth）として、Trusted CIDRと
 - Apps VMのserviceは名前（`100.86.147.127`）で使う。Apps VM宛てtrafficは`192.168.10.0/24`を通らないため、
   clientの`accept-routes`設定はApps VMとの通信に影響しない。常時宅内desktopのSMBも名前のままでよく、
   Apps VMとのdirect WireGuard経路で1GbE相当の速度が出ることを2026-09-26に確認した。
-  IX2215の単一flowが低速側に落ちる既知事象（[SMB調査記録](../smb-performance-troubleshooting.md)）に
+  IX2215の単一flowが低速側に落ちる既知事象（[SMB調査記録](../operations/smb-performance-troubleshooting.md)）に
   当たる場合だけ`\\192.168.10.101\<share>`へ切り替える。
 - roaming clientを含む全tailnet clientで`accept-routes=false`を推奨とする。trueでも影響はApps VM以外の
   `192.168.10.x`宛てtrafficがgateway経由になることに限られる。Apps VM以外のLAN管理UIは宅外で

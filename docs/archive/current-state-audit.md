@@ -1,5 +1,9 @@
 # 移行を支える現状監査
 
+> 2026-08-13〜2026-08-30の移行前監査記録である。Kubernetes、VMID、IP、export、未解決事項は
+> 観測当時の値であり、現在の構成・作業指示ではない。現行構成は[目標アーキテクチャ](../architecture/target-state.md)、
+> 運用は[文書索引](../README.md)を参照する。
+
 - 観測期間: 2026-08-13〜2026-08-30
 - 目的: 目標状態の判断に用いた根拠を保存する
 - 最新実測: [実機インベントリ（2026-08-30）](live-inventory-2026-08-30.md)
@@ -95,7 +99,7 @@ stashPad mediaは`du`が25秒でtimeoutしたため、使用量を確定して�
 
 したがって移行では、復旧済みNFS/ZFSを外部の前提条件として扱い、最初の切替では現在のopaque PVC pathを
 再利用し、すべてのstateful Composeプロジェクトでマウント検証を必須依存関係とする。正確なパスと最終的な
-`/32` export契約は[目標アーキテクチャ](target-state.md#storage-contract)に記録する。
+`/32` export契約は[目標アーキテクチャ](../architecture/target-state.md#storage-contract)に記録する。
 
 ## DNS、証明書、運用上の観測結果
 
