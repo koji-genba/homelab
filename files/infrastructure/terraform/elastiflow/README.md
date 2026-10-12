@@ -45,7 +45,9 @@ pvesm path <qm config 103 の scsi0 に表示された volume-id>
 サービスはTerraformによるVM作成、`install.sh`の実行、dashboardの取り込みで作り直せますが、
 scriptの実行とdashboardの取り込みには手作業が残り、dashboardの取得元も固定されていません。
 template 9000の作成の固定と合わせて、再構築の穴は[#87](https://github.com/koji-genba/homelab/issues/87)で追跡しています。
-過去のフローを残す必要があるかは運用者に確認中で、VM backupを取るかどうかは未決です。
+2026-10-12に、運用者は過去のフローデータは不要と判断し、VM backupを取らないと決めました。
+VMを失ったら作り直し、フローは空のindexから取り込み直します。
+repoからの再構築性が完全だからではなく、失ってよいという判断によるものです。
 VM全体の評価と方針は[現行アーキテクチャ](../../../../docs/architecture/target-state.md#再構築性とbackupの方針)を参照してください。
 
 ## 実機確認（2026-10-12）

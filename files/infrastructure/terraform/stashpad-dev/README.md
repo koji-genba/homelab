@@ -22,7 +22,9 @@ TerraformでProxmox VE上にstashPad開発用VMを構築します。
 VMを作り直すと、VMの中にしか無い作業（pushしていないcommit、未commitの変更）は失われます。
 作り直す前に、残す変更をcommitし、未pushのcommitとともにpushしてください。
 2026-10-12時点で、VMの中にしか無い作業がありました。
-VM backupを取るかどうかは未決で、運用者に確認中です。
+この作業は運用者が別途pushする扱いです。
+2026-10-12に、運用者は重要ではないUbuntuの開発用VMとして、VM backupを取らないと決めました。
+repoから再構築できるからではなく、失ってよいという判断によるものです。
 VM全体の評価と方針は[現行アーキテクチャ](../../../../docs/architecture/target-state.md#再構築性とbackupの方針)を参照してください。
 
 ## Apply

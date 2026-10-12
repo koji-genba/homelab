@@ -32,14 +32,16 @@ ZFSスナップショット、レプリケーション、NFSサーバー自体�
 2026-10-12の運用者の判断として、他のVMも含め、repoから機能を再構築できるVMはbackupを取らず、
 できないVMは取得する方針とする。repoから再構築できる状態を目標とし、残る穴は
 [#87](https://github.com/koji-genba/homelab/issues/87)で追跡する。
+ただし、同日の運用者判断でElastiFlowとstashPadDevは失ってよいVMとし、backupを取らない。
+これはrepoから再構築できるという評価によるものではない。結果として、全VMのVM backupを取らない。
 再構築には上記の復旧済みNFS/ZFSデータと、[復旧用アーティファクト](#復旧用アーティファクト)が必要である。
 
 | 対象 | repoから再構築できるか | diskとともに失うもの | backup |
 | --- | --- | --- | --- |
 | Apps VM（101） | できる。Terraform → Ansible → Compose。tailnet登録とProxmox権限は文書化された手作業。ただし現行11 projectsでの通し再構築は未実証 | AdGuardの統計・query log、Sambaのログ、Gatusの履歴、sparkDashのunit登録（[再登録手順](../operations/sparkdash.md#永続化backup復旧)あり） | 取らない |
 | Tailscale gateway（102） | できる。template 9000からcloneし、手動で`tailscale up`とroute承認を行う。templateの作成が固定されていない点は穴 | nodeのidentity（再登録が必要） | 取らない |
-| ElastiFlow（103） | サービスは作り直せるが、`install.sh`の実行・dashboardの取り込みに手作業が残り、dashboardの取得元も固定されていない（[詳細](../../files/infrastructure/terraform/elastiflow/README.md#再構築性とbackup)） | 過去のフローデータ、Kibanaのdashboardへの変更 | 未決（過去のフローを残す必要があるか運用者に確認中） |
-| stashPadDev（111） | できない。開発環境がrepoに宣言されていない（[詳細](../../files/infrastructure/terraform/stashpad-dev/README.md#再構築性とbackup)） | VMの中にしか無い作業、手作業で入れた開発環境 | 未決（運用者に確認中） |
+| ElastiFlow（103） | サービスは作り直せるが、`install.sh`の実行・dashboardの取り込みに手作業が残り、dashboardの取得元も固定されていない（[詳細](../../files/infrastructure/terraform/elastiflow/README.md#再構築性とbackup)） | 過去のフローデータ、Kibanaのdashboardへの変更 | 取らない（過去のフローは不要。VMを作り直し、空のindexから取り込み直す） |
+| stashPadDev（111） | できない。開発環境がrepoに宣言されていない（[詳細](../../files/infrastructure/terraform/stashpad-dev/README.md#再構築性とbackup)） | VMの中にしか無い作業、手作業で入れた開発環境 | 取らない（重要ではないUbuntuの開発用VM。VM内だけの作業は運用者が別途pushする） |
 | template 9000 | 作成例はあるが固定されていない（[ホスト復旧](../operations/proxmox-host-recovery.md#template-vm-9000)） | — | 取らない（作成の固定は#87で追跡） |
 
 Apps VMのproject定義は`files/services/compose/*/compose.yaml`を正とする。
