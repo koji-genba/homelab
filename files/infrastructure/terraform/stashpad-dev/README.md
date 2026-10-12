@@ -12,6 +12,19 @@ TerraformでProxmox VE上にstashPad開発用VMを構築します。
 - Template: `template_vm_id` (default: 9000)
 - Network: VLAN10 / `vmbr0`
 
+## 再構築性とbackup
+
+[main.tf](main.tf)はVMと基本ツールを構築しますが、開発環境はrepoに宣言されていません。
+2026-10-12の運用者によるVM確認では、docker、node / npm、go、python3、VS Code server、
+`~/stashPad`（[stashPad](https://github.com/koji-genba/stashPad.git)のcheckout）と
+`~/stashpad-worktrees/`が手作業で入っていました。開発環境の宣言は[#87](https://github.com/koji-genba/homelab/issues/87)で追跡しています。
+
+VMを作り直すと、VMの中にしか無い作業（pushしていないcommit、未commitの変更）は失われます。
+作り直す前に、残す変更をcommitし、未pushのcommitとともにpushしてください。
+2026-10-12時点で、VMの中にしか無い作業がありました。
+VM backupを取るかどうかは未決で、運用者に確認中です。
+VM全体の評価と方針は[現行アーキテクチャ](../../../../docs/architecture/target-state.md#再構築性とbackupの方針)を参照してください。
+
 ## Apply
 
 ```bash

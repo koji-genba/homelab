@@ -41,18 +41,21 @@ named volumeはNFSデータやTerraform stateからは復元されない。正�
 | project | named volume / container内path | 復旧時の扱い |
 | --- | --- | --- |
 | edge | `caddy-data` / `/data`、`caddy-config` / `/config` | Caddyのローカルstate。`/data`のACME証明書・accountを失えば、`Caddyfile`のCloudflare DNS-01設定とAnsibleで再配置するtokenを使って再取得する |
-| dns | `adguard-work` / `/opt/adguardhome/work` | AdGuardのwork領域は戻らない。設定はsecrets roleが別のbind mount `/etc/homelab/adguard/AdGuardHome.yaml`へ再生成する |
-| samba | `samba-state` / `/var/lib/samba`、`samba-logs` / `/var/log/samba` | ローカルstate/logは戻らない。共有設定・ユーザー/SID宣言はGitの`config/smb.conf`・`config/users.json`、passwordはsecrets roleから再配置する。空stateからのユーザー・identity再生成はimageの起動処理に依存し、repoでは未確認 |
+| dns | `adguard-work` / `/opt/adguardhome/work` | 統計・query logは戻らない。設定はsecrets roleが別のbind mount `/etc/homelab/adguard/AdGuardHome.yaml`へ再生成する。UIでの変更もAnsible適用で上書きされる設計であり、永続させる変更はtemplate / allowlist / blocklistに入れる（[設定の正と反映方法](../../files/services/compose/dns/filters/README.md)） |
+| samba | `samba-state` / `/var/lib/samba`、`samba-logs` / `/var/log/samba` | ログは戻らない。identityの再生成は2026-10-12に[compose.yaml](../../files/services/compose/samba/compose.yaml)が固定するimageの`/usr/local/bin/docker-entrypoint.sh`を読んで確認済み。起動のたびに`/var/lib/samba`の`passdb.tdb`・`secrets.tdb`・`group_mapping.tdb`・`*.tdb`を削除し、Gitの`config/users.json`の`localSid`を`net setlocalsid`で設定する。group / userのuid・gid・ridと`/run/samba-secrets`のpasswordから同じidentityを再生成する。共有設定はGitの`config/smb.conf`、passwordはsecrets roleから再配置する |
 | searxng | `searxng-cache` / `/var/cache/searxng` | 喪失を許容するcache（[SearXNG運用](searxng.md#構成)） |
 | sparkdash | `sparkdash-config` / `/app/config` | unit/settings/history等。[backup・復旧方針](sparkdash.md#永続化backup復旧)に従う |
 | monitoring | `gatus` / `/data` | 監視履歴・alert状態。backup対象外（[共通手順](application-lifecycle.md#通常のreconcile)） |
 
+Samba imageを更新した場合は、上表の再生成動作を再確認する必要がある。
 Homepageにはnamed volumeがない。2026-10-12にpve1で確認したところ、Proxmoxのbackup jobも既存の
 VM backupも無かった。`/etc/pve/jobs.cfg`は存在せず、`/etc/pve/vzdump.cron`にjobの行は無く、
 `pvesm list <storage> --content backup`は`local` / `local-lvm` / `vmpool`とも0件、
 `/var/lib/vz/dump`は空だった。`storage.cfg`にPBS / NFS / CIFSのbackup先も無い。
-Apps VMのdiskを失うと、上表のnamed volumeはどれも戻らない。backupは構築しておらず、
-edge/dns/sambaを保護するbackup方針は未決である。上表の再生成・再配置はvolumeの復元とは区別する。
+Apps VMはrepoから機能を再構築できるため、VM backupを取らない。
+diskとともに失うのはAdGuardの統計・query log、Sambaのログ、Gatusの履歴、sparkDashのunit登録などである。
+[再構築性とbackupの方針](../architecture/target-state.md#再構築性とbackupの方針)に従い、
+上表の再生成・再配置はvolumeの復元とは区別する。
 
 ## 管理端末の入力と接続前提
 
@@ -76,13 +79,15 @@ Proxmoxのuser・role・API token・ACLはGitにもTerraformにも宣言され�
 `error creating VM: received an HTTP 403 response - Reason: Permission check failed`で失敗する。
 
 2026-10-12に`pveum user list`、`pveum role list`、`pveum user token list terraform@pve`、
-`pveum acl list`で、user、roleの20権限、tokenの期限・`privsep`、ACLの7 path・`propagate`を実機と照合した。
+`pveum acl list`で、user、roleの20権限、tokenの期限・`privsep`、ACL・`propagate`を実機と照合した。
+同日に廃止済みVLAN 11用ACLを削除し、ACLは下記の6 pathになった。
+userのcommentも`Terraform Apps VM (VMID 101)`へ変更した。
 
 ### 用意が必要なもの
 
 - user `terraform@pve`
 - role `HomelabTerraform`（権限は後述）
-- API token `terraform@pve!apps-vm`（2026-10-12の確認時の有効期限は2026-12-04 23:59:59 JST。期限切れでも同様に403で失敗する）。
+- API token `terraform@pve!apps-vm`（2026-10-12の確認時の有効期限は2026-12-04 23:59:59 JST）。
   現行tokenは`privsep=0`で作成されており、user `terraform@pve`のACLをそのまま継承する。`privsep=1`で
   作り直すとtoken自身へのACL付与が別途必要になるため、下記のACLだけでは足りなくなる。
 - 既定構成では次のACL path。`/vms/101`と`/nodes/pve1`はVM操作、`/storage/local`と`/storage/vmpool`はimage/disk
@@ -95,10 +100,17 @@ Proxmoxのuser・role・API token・ACLはGitにもTerraformにも宣言され�
   - `/sdn/zones/localnetwork`
   - `/sdn/zones/localnetwork/vmbr0/10`
 
-実機には廃止済みVLAN 11用の`/sdn/zones/localnetwork/vmbr0/11`も残っている（2026-10-12）。
+廃止済みVLAN 11用の`/sdn/zones/localnetwork/vmbr0/11`は、全VMのNICがVLAN 10の1枚だけであることを
+`qm config`で確認したうえで、2026-10-12に削除した。
 このACLが必要なのはlegacy NICを有効にする場合だけで、現行の既定構成では不要である。
 `files/infrastructure/terraform/apps-vm/variables.tf`の`legacy_service_nic`は既定で`false`、
 `main.tf`のdynamic `network_device`は`true`の場合だけVLAN 11のNICを作る。
+
+このtokenを使うのはApps VMのTerraformだけで、plan / apply時に`TF_VAR_proxmox_api_token`で渡す。
+稼働中のサービスは使わないため、期限切れでも本番は停止せず、次のTerraform実行時に認証できなくなる。
+2026-12-04の期限を過ぎた場合は、次にTerraformを使う前に再発行（または期限の延長）が必要である。
+再発行は[403の診断手順](#403-permission-check-failedが出たときの診断手順)を参照する。
+運用者は、期限が切れてから必要になったときに対応すると判断した（2026-10-12）。
 
 ### role `HomelabTerraform`の権限一覧
 

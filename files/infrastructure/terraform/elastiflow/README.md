@@ -37,7 +37,24 @@ qm config 103
 pvesm path <qm config 103 の scsi0 に表示された volume-id>
 ```
 
-`vmpool` がZFS storageの場合は、`vm-103-disk-0` のようなZFS zvolとして管理されます。ディスクを削除するとElasticsearchの保存データも消えるため、長期保存したい場合は `disk_size_gb` の増量、Proxmox側のバックアップ、またはElasticsearchデータ用の専用ディスク追加を検討してください。
+`vmpool` がZFS storageの場合は、`vm-103-disk-0` のようなZFS zvolとして管理されます。
+過去のフローデータはVMのdiskにしか無く、diskを失うとrepoからは戻せません。Kibanaのdashboardへの変更も失われます。
+
+## 再構築性とbackup
+
+サービスはTerraformによるVM作成、`install.sh`の実行、dashboardの取り込みで作り直せますが、
+scriptの実行とdashboardの取り込みには手作業が残り、dashboardの取得元も固定されていません。
+template 9000の作成の固定と合わせて、再構築の穴は[#87](https://github.com/koji-genba/homelab/issues/87)で追跡しています。
+過去のフローを残す必要があるかは運用者に確認中で、VM backupを取るかどうかは未決です。
+VM全体の評価と方針は[現行アーキテクチャ](../../../../docs/architecture/target-state.md#再構築性とbackupの方針)を参照してください。
+
+## 実機確認（2026-10-12）
+
+運用者がVMで確認した記録では、`elasticsearch`・`kibana`・`flowcoll`は3つともactiveでした。
+フローのindexは日次でrolloverし、2026-10-08〜10-11に作成されたindexにフローが入っていました。
+Kibanaのdashboardは36個、root diskの使用量は123G中17Gでした。
+[#34](https://github.com/koji-genba/homelab/issues/34)（取り込み停止）はopenのままですが、
+この時点では取り込みを確認しています。いつ・何をして復旧したかは確認していません。
 
 ## 前提条件
 

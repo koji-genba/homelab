@@ -134,6 +134,10 @@ routerのRA、DHCPv6、IPv6 forwardingの明示的な無効化と、各zoneのIP
 | allow/deny試験結果 | 2026-09-13、全zoneのInternet、Trusted→Server/IoT、各deny方向、管理plane、DHCP、tailnet route/exit node、Guest isolationを確認。sFlowはcollector（`.10.103:6343`）への着信をtcpdumpで確認。ElastiFlowのElasticsearch取り込みは2026-07-07から壊れている既存障害で、Phase 4とは無関係（[#34](https://github.com/koji-genba/homelab/issues/34)） |
 | ロールバック結果/判断 | 不要。受入合格後に`write memory`し、`configuration status is already saved`、再起動不要を確認 |
 
+2026-10-12にはVMでElastiFlowの取り込みを確認した。上表の取り込み障害は2026-09-13時点の記録である。
+[#34](https://github.com/koji-genba/homelab/issues/34)はopenのままで、復旧の時期・変更内容は未確認である。
+詳細は[ElastiFlowの実機確認記録](../../files/infrastructure/terraform/elastiflow/README.md#実機確認2026-10-12)を参照する。
+
 ## IX2215変更時の作業継続性
 
 ACL再編では、管理端末のInternet接続とCodex sessionの双方が失われる可能性を前提とする。この段階へ

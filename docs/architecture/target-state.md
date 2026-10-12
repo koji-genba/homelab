@@ -27,6 +27,27 @@ ZFSスナップショット、レプリケーション、NFSサーバー自体�
 ただし、必要なexport、mount、marker、permissionを契約として記録し、mountできない場合は
 アプリケーションを起動しない。
 
+## 再構築性とbackupの方針
+
+2026-10-12の運用者の判断として、他のVMも含め、repoから機能を再構築できるVMはbackupを取らず、
+できないVMは取得する方針とする。repoから再構築できる状態を目標とし、残る穴は
+[#87](https://github.com/koji-genba/homelab/issues/87)で追跡する。
+再構築には上記の復旧済みNFS/ZFSデータと、[復旧用アーティファクト](#復旧用アーティファクト)が必要である。
+
+| 対象 | repoから再構築できるか | diskとともに失うもの | backup |
+| --- | --- | --- | --- |
+| Apps VM（101） | できる。Terraform → Ansible → Compose。tailnet登録とProxmox権限は文書化された手作業。ただし現行11 projectsでの通し再構築は未実証 | AdGuardの統計・query log、Sambaのログ、Gatusの履歴、sparkDashのunit登録（[再登録手順](../operations/sparkdash.md#永続化backup復旧)あり） | 取らない |
+| Tailscale gateway（102） | できる。template 9000からcloneし、手動で`tailscale up`とroute承認を行う。templateの作成が固定されていない点は穴 | nodeのidentity（再登録が必要） | 取らない |
+| ElastiFlow（103） | サービスは作り直せるが、`install.sh`の実行・dashboardの取り込みに手作業が残り、dashboardの取得元も固定されていない（[詳細](../../files/infrastructure/terraform/elastiflow/README.md#再構築性とbackup)） | 過去のフローデータ、Kibanaのdashboardへの変更 | 未決（過去のフローを残す必要があるか運用者に確認中） |
+| stashPadDev（111） | できない。開発環境がrepoに宣言されていない（[詳細](../../files/infrastructure/terraform/stashpad-dev/README.md#再構築性とbackup)） | VMの中にしか無い作業、手作業で入れた開発環境 | 未決（運用者に確認中） |
+| template 9000 | 作成例はあるが固定されていない（[ホスト復旧](../operations/proxmox-host-recovery.md#template-vm-9000)） | — | 取らない（作成の固定は#87で追跡） |
+
+Apps VMのproject定義は`files/services/compose/*/compose.yaml`を正とする。
+[2026-09-06の再構築実証](../archive/implementation-status.md#phase-3-再構築性の証明2026-09-06全項目合格)は当時の7 projectsでの記録である。
+2026-10-12のpve1確認ではProxmoxのbackup jobもVM backupも無い
+（[確認記録とnamed volumeの復旧範囲](../operations/apps-vm-recovery.md#vm内named-volumeの復旧範囲)）。
+この方針はVMの再構築を対象とし、pve1のZFS pool上のデータ（NFSでmountするアプリのデータ・共有）の保護は別に扱う。
+
 ## 実行環境の構成
 
 ```text
@@ -117,8 +138,8 @@ Gatusは`gatus` named volumeにSQLite（`/data/data.db`）の監視履歴とaler
 定義元は各projectの`compose.yaml`と`monitoring/config.yaml`であり、これらはNFS/ZFSデータの
 復旧だけでは戻らない。Gatusのbackup方針は[アプリ更新・promotion・rollback](../operations/application-lifecycle.md#通常のreconcile)、
 VM全体の復旧は[Apps VM復旧](../operations/apps-vm-recovery.md)を参照する。
-2026-10-12のpve1確認ではProxmoxのbackup jobもVM backupも無く、Apps VMのdisk喪失時に
-named volumeはどれも戻らない。backupを構築しておらず、edge/dns/sambaのbackup方針は未決である。
+Apps VMのdisk喪失時にnamed volume自体は戻らないが、サービスの設定・identityは宣言とsecretから再生成する。
+VM backupを取らない判断と、失う履歴・ログは[再構築性とbackupの方針](#再構築性とbackupの方針)に従う。
 確認方法と再生成できる範囲は[VM内named volumeの復旧範囲](../operations/apps-vm-recovery.md#vm内named-volumeの復旧範囲)を参照する。
 
 sparkDashのconfigはApps VMのnamed volume `homelab-sparkdash_sparkdash-config`へ保存する。

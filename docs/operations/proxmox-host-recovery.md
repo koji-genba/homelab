@@ -337,13 +337,18 @@ ElastiFlow・stashPadDevが各`variables.tf`の`disk_size_gb`で宣言する。
 
 user / role / token / ACLは
 [Terraform実行前のProxmox側準備](apps-vm-recovery.md#terraform実行前のproxmox側準備)に従う。
-Apps VMのAPI tokenは2026-12-04の期限を過ぎるとTerraformで認証できなくなるため、
-期限前に[既存の期限確認・token再発行とsecret差し替えの手順](apps-vm-recovery.md#403-permission-check-failedが出たときの診断手順)に従って更新する。
+Apps VMのAPI token `terraform@pve!apps-vm`の期限は2026-12-04 23:59:59 JSTで、
+Apps VMのTerraformだけが使う。稼働中のサービスは使わず、期限切れでも本番は停止しない。
+運用者は、期限が切れてから必要になったときに対応すると判断した（2026-10-12）。
+期限後は次のTerraform実行前に再発行（または期限の延長）が必要で、
+[既存の期限確認・token再発行とsecret差し替えの手順](apps-vm-recovery.md#403-permission-check-failedが出たときの診断手順)を参照する。
 管理端末のSSH agent・host key・state復元・保存plan・state backupの前提も同文書を使う。
 gateway・ElastiFlow・stashPadDevの各`providers.tf`はAPIとProxmox SSHにpasswordを使い、
 Apps VMのAPI token / SSH agent方式とは異なる。
 
 ## VM群の復旧
+
+VMごとの再構築性とbackupの方針は[現行アーキテクチャ](../architecture/target-state.md#再構築性とbackupの方針)を参照する。
 
 次のVMID / LAN IP / 作成方式の正は各Terraformルートの`main.tf`と`variables.tf`である。
 全ルートのnodeは`pve1`、bridgeは`vmbr0`、VM NICはVLAN 10である。
@@ -440,7 +445,7 @@ KeePassXCや運用記録に保存して復旧時の照合元にする。
 | backup jobなし、VM backupなし | `/etc/pve/jobs.cfg`、`/etc/pve/vzdump.cron`、`pvesm list <storage> --content backup`、`/var/lib/vz/dump`、`storage.cfg`（[確認結果](apps-vm-recovery.md#vm内named-volumeの復旧範囲)） |
 | Secure Boot無効 | `mokutil --sb-state` |
 | NFS exportのclient / option / fsid | `exportfs -v`（[契約](nfs-export.md#実測された親export)と比較） |
-| user `terraform@pve`、role `HomelabTerraform`、token `apps-vm`（privsep 0、期限2026-12-04）、ACL 7 path | `pveum user list`、`pveum role list`、`pveum user token list terraform@pve`、`pveum acl list`（[詳細](apps-vm-recovery.md#terraform実行前のproxmox側準備)） |
+| user `terraform@pve`、role `HomelabTerraform`、token `apps-vm`（privsep 0、期限2026-12-04）、ACL 6 path（VLAN 11用ACLは同日に削除） | `pveum user list`、`pveum role list`、`pveum user token list terraform@pve`、`pveum acl list`（[詳細](apps-vm-recovery.md#terraform実行前のproxmox側準備)） |
 
 ### 未確認
 
