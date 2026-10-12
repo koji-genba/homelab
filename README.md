@@ -39,7 +39,7 @@ VLAN 10はServer、20はTrusted、30はIoT、40はGuestです。VLAN 11と63は�
 ## まず読むもの
 
 - [文書索引](docs/README.md)
-- [目標アーキテクチャ](docs/architecture/target-state.md)
+- [現行アーキテクチャと復旧目標](docs/architecture/target-state.md)
 - [コードの配置と責務](docs/CODEBASE_MAP.md)
 - [設計判断（ADR）](docs/adr/README.md)
 - [ネットワークゾーン仕様](docs/network/target-zones.md)

@@ -1,7 +1,7 @@
 # 実装状況
 
 > **この文書はアーカイブである。** Phase 0〜4の実装記録であり、歴史本文の観測値・判断は更新しない。
-> 現行構成は[目標アーキテクチャ](../architecture/target-state.md)、復旧は[Apps VM復旧手順](../operations/apps-vm-recovery.md)、
+> 現行構成は[現行アーキテクチャと復旧目標](../architecture/target-state.md)、復旧は[Apps VM復旧手順](../operations/apps-vm-recovery.md)、
 > 更新・rollbackは[アプリケーションのライフサイクル](../operations/application-lifecycle.md)を参照する。
 > 文書の入口は[文書索引](../README.md)にある。
 

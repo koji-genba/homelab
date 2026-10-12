@@ -4,7 +4,7 @@
 
 ## 現行構成
 
-- [目標アーキテクチャ](architecture/target-state.md): 実行環境、サービス経路、ストレージ契約と復旧目標。
+- [現行アーキテクチャと復旧目標](architecture/target-state.md): 現行の実行環境、サービス経路、ストレージ契約と未達の復旧目標・未決事項。
 - [CODEBASE_MAP](CODEBASE_MAP.md): コードの配置、責務、反映経路と変更箇所の案内。
 
 ## 日常操作

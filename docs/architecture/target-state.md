@@ -76,7 +76,7 @@ route広告設定は手動で行う。移行の経緯は[移行記録](../archiv
 | `dns.kojigenba-srv.com` | Caddy -> AdGuard Home UI | AdGuard内蔵ログイン |
 | `status.kojigenba-srv.com` | Caddy -> Gatus | Caddy Basic Auth |
 | `homepage.kojigenba-srv.com` | Caddy -> Homepage:3000 | 信頼network/tailnet制限 + Caddy Basic Auth（Gatusと共用） |
-| DNS | Apps VM port 53 | Trusted/Tailscaleからの接続制限 |
+| DNS | Apps VM port 53 | Server/Trusted/Tailscaleからの接続制限 |
 | SMB | Apps VM port 445 | 既存Sambaローカルユーザー |
 
 Tailscaleのglobal nameserverはApps VMのtailnet IPを参照する。AdGuardの内部サービス名と
@@ -134,7 +134,7 @@ NFS/ZFS snapshotやTerraform state-backupには含まれない。
 既存4親exportのclientはApps VM `192.168.10.101/32`だけとし、基本optionは
 `rw,sync,no_subtree_check,no_root_squash`とする。詳細は[NFS export契約](../operations/nfs-export.md)を
 正とする。同文書には2026-09-23の`/32`化が記録されているが、pve1の`/etc/exports`は
-repo管理外であり、今回実機の状態は確認していない。
+repo管理外であり、この文書は実機の設定を保証しない。`exportfs -v`で確認する。
 段階的なexport切替の経緯は[移行記録](../archive/k8s-to-compose.md)を参照する。
 
 VM側はNFSv4、`hard,_netdev`を使用する。systemd mount unit、`RequiresMountsFor=`、
