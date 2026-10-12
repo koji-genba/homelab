@@ -14,7 +14,7 @@
 | [implementation-status.md](implementation-status.md) | 2026-08-30〜09-19 | Phase 0〜4の実装・検証・実機反映、Proxmox権限の欠陥、DGXストレージ反映 | [Apps VM復旧手順](../operations/apps-vm-recovery.md)、[DGX Sparkストレージ運用](../operations/dgx-storage.md) |
 | [phase2a-inventory.md](phase2a-inventory.md) | 2026-09-05 | cutover前の読み取り専用調査、writer、IP所有権、snapshot計画 | なし |
 | [ix-acl-stateful-runbook.md](ix-acl-stateful-runbook.md) | 2026-09-13 | IX2215 ACL移行の投入・受入・当時のrollback記録 | [ネットワークゾーン仕様](../network/target-zones.md)、[現行設定](../../files/infrastructure/network/config.txt) |
-| [proxmox-rebuild.md](proxmox-rebuild.md) | 2026年6月 | 旧Kubernetes構成を前提とするホスト再構築手順 | ホスト自体の再構築手順は現行版が未整備。Apps VMは[復旧手順](../operations/apps-vm-recovery.md)を参照 |
+| [proxmox-rebuild.md](proxmox-rebuild.md) | 2026年6月 | 旧Kubernetes構成を前提とするホスト再構築手順。現行とはOS layout等が異なる | [Proxmoxホスト復旧手順](../operations/proxmox-host-recovery.md) |
 
 ## 現役の文書へ移した知見
 

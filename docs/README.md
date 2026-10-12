@@ -13,6 +13,7 @@
 
 ## 復旧
 
+- [Proxmoxホスト復旧手順](operations/proxmox-host-recovery.md): 2026-10-12に確認したpve1の構成に基づく、ホストOS、ネットワーク、ストレージからVM群までの復旧手順。
 - [Apps VM復旧手順](operations/apps-vm-recovery.md): 必要な復旧情報、Proxmox側準備、VM再構築と検証。
 - [Apps VMのtailnet参加](operations/apps-vm-tailnet.md): tailnet登録、サービス公開、DNS切替と戻し方。
 - [NFS export契約](operations/nfs-export.md): 必要なexport、mount、markerと手動反映の契約。
@@ -58,10 +59,6 @@
 ## 履歴
 
 - [アーカイブ索引](archive/README.md): 移行前監査、実測値、完了した移行・実装記録と旧手順。
-
-## 既知の欠落
-
-Proxmoxホスト自体の再構築手順は現行版が未整備である。
 
 ## 文書の置き方
 

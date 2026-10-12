@@ -43,6 +43,7 @@ VLAN 10はServer、20はTrusted、30はIoT、40はGuestです。VLAN 11と63は�
 - [コードの配置と責務](docs/CODEBASE_MAP.md)
 - [設計判断（ADR）](docs/adr/README.md)
 - [ネットワークゾーン仕様](docs/network/target-zones.md)
+- [Proxmoxホスト復旧手順](docs/operations/proxmox-host-recovery.md)
 - [Apps VM復旧手順](docs/operations/apps-vm-recovery.md)
 - [Apps VMのtailnet参加](docs/operations/apps-vm-tailnet.md)
 - [アプリ更新・promotion・rollback](docs/operations/application-lifecycle.md)
