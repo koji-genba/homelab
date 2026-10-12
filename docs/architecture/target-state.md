@@ -1,10 +1,10 @@
-# 目標アーキテクチャ
+# 現行アーキテクチャと復旧目標
 
-- 状態: 承認済みの設計
+- 状態: 現行設計（Compose移行済み）と未達の目標。実機反映の確認日は各運用記録を参照
 - 承認日: 2026-08-29
-- 根拠: [現状監査](../archive/current-state-audit.md)
-- 実機基準点: [実機インベントリ（2026-08-30）](../archive/live-inventory-2026-08-30.md)
-- 移行手順: [KubernetesからComposeへの移行](../archive/k8s-to-compose.md)
+- 根拠: [移行前の監査記録](../archive/current-state-audit.md)
+- 実機基準点: [移行前の実測（2026-08-30）](../archive/live-inventory-2026-08-30.md)
+- 移行記録: [KubernetesからComposeへの移行](../archive/k8s-to-compose.md)
 - 復旧手順: [Apps VM復旧](../operations/apps-vm-recovery.md)
 - 設計判断: [ADR一覧](../adr/README.md)
 - ネットワーク仕様: [目標ネットワークゾーン](../network/target-zones.md)
@@ -18,7 +18,7 @@ KeePassXC内の復旧情報（recovery material）を使って全アプリケー
 
 - stashPad prod/staging、分離されたmetadata、共有media、staging自動更新、prod明示promotion
 - SillyTavernのdata、認証、既存FQDN
-- Sambaの3 shareと既存user
+- Sambaの既存3 shareと既存user（現在は`ai`を加えた4 share。定義は`files/services/compose/samba/config/smb.conf`）
 - 内部DNS record、広告block、allow/block list、TailscaleグローバルDNS
 - LAN/Tailscaleからの既存FQDNとTLS
 - service監視、Discord通知、外部dead-man監視
@@ -43,7 +43,7 @@ Proxmox pve1 192.168.10.11
 │   ├── sparkDash                   内部Docker network -> DGX (SSH/HTTP)
 │   ├── Homepage                    内部Docker network
 │   └── Gatus                       内部Docker network
-├── Tailscale gateway               維持、管理設定はTerraformで管理
+├── Tailscale gateway               VM定義はTerraform、node登録・route広告は手動
 ├── ElastiFlow                      維持
 └── stashPadDev                     一時VM、対象外
 
@@ -51,19 +51,23 @@ Healthchecks.io                     外部dead-man監視
 GitHub/GHCR                         ソース、CI、公開イメージ
 ```
 
-Compose定義は11 projects / 12 services。sparkDashはremote-onlyで、初回反映は
+`files/services/compose/*/compose.yaml`の定義は11 projects / 12 services。sparkDashはremote-onlyで、初回反映は
 [sparkDash運用](../operations/sparkdash.md)に従う。
 HomepageはGit管理の静的リンク集で、[Homepage運用](../operations/homepage.md)に従って初回反映する。
 
-Apps VMはフェーズ1で暫定管理IP `.10.42` とVLAN 11サービスIP `.11.100/.101/.103`を使い、
-VLAN移行後は`.10.101`へ集約する。実値はinventory/preflight確認後に変数へ確定する。
+Apps VMはVMID 101、Debian 13、管理userは`deploy`で、LAN `192.168.10.101`と
+tailnet `100.86.147.127`でサービスを公開する。LAN IP・VMID・legacy NIC無効は
+`files/infrastructure/terraform/apps-vm/variables.tf`、tailnet IP・legacy IP無効は
+`files/infrastructure/ansible/apps/group_vars/apps.yml`に定義する。
+Tailscale gatewayのVM定義とtailnet ACL/DNSはTerraformで管理し、gatewayのnode登録と
+route広告設定は手動で行う。移行の経緯は[移行記録](../archive/k8s-to-compose.md)を参照する。
 
 ## サービス経路
 
 | FQDN/サービス | 転送先 | 認証 |
 | --- | --- | --- |
-| `prod.stashpad.kojigenba-srv.com` | Caddy -> stashpad-prod | ネットワーク境界/現行アプリの挙動 |
-| `staging.stashpad.kojigenba-srv.com` | Caddy -> stashpad-staging | ネットワーク境界/現行アプリの挙動 |
+| `prod.stashpad.kojigenba-srv.com` / `prod.kojigenba-srv.com` | Caddy -> stashpad-prod | ネットワーク境界/現行アプリの挙動 |
+| `staging.stashpad.kojigenba-srv.com` / `staging.kojigenba-srv.com` | Caddy -> stashpad-staging | ネットワーク境界/現行アプリの挙動 |
 | `sillytavern.kojigenba-srv.com` | Caddy -> SillyTavern | 既存Basic Auth |
 | `openwebui.kojigenba-srv.com` | Caddy -> Open WebUI | Open WebUI内蔵ログイン |
 | `searxng.kojigenba-srv.com` | Caddy -> SearXNG | ネットワーク境界（Caddyの信頼network制限、loginなし） |
@@ -74,6 +78,12 @@ VLAN移行後は`.10.101`へ集約する。実値はinventory/preflight確認後
 | `homepage.kojigenba-srv.com` | Caddy -> Homepage:3000 | 信頼network/tailnet制限 + Caddy Basic Auth（Gatusと共用） |
 | DNS | Apps VM port 53 | Trusted/Tailscaleからの接続制限 |
 | SMB | Apps VM port 445 | 既存Sambaローカルユーザー |
+
+Tailscaleのglobal nameserverはApps VMのtailnet IPを参照する。AdGuardの内部サービス名と
+`samba.kojigenba-srv.com`のrewriteも同じIPを返し、Web/SMBはApps VMへ直接到達する。
+DNSの定義元は`files/infrastructure/terraform/tailscale/`と
+`files/infrastructure/ansible/apps/roles/secrets/templates/AdGuardHome.yaml.j2`である。
+client側の経路・接続先は[Apps VM tailnet運用](../operations/apps-vm-tailnet.md)を参照する。
 
 管理UI、SSH、SMB、DNSの到達元はnftablesとIX2215 ACLで制限する。Internetへ公開サービスを
 公開しない。CloudflareはDNS-01 challengeだけに利用する。
@@ -96,9 +106,18 @@ VLAN移行後は`.10.101`へ集約する。実値はinventory/preflight確認後
 | Samba archive | `/mnt/tank-gen1/data/archive` |
 | Samba ai / DGX Spark | `/mnt/tank-gen2/data/ai` |
 
-最初のcutoverではopaque PVC pathをそのままmountする。安定後、Kubernetes停止中に
-`/mnt/tank-gen2/data/apps/{sillytavern,stashpad-prod,stashpad-staging}/`へcopy/検証してから
-宣言を切り替える。`mv`は使わず、UID/GID、ACL、xattr、hardlinkを保持する。
+現在もopaque PVC由来pathをmountする。`k8s-volumes`は現行のデータパスであり、削除対象ではない。
+`files/infrastructure/ansible/apps/group_vars/apps.yml`の`nfs_mounts`は9 mountである。
+初期7 mountに`ai`を加えて8、Open WebUIを加えて9となった。
+
+### Apps VM内のlocal volume
+
+Caddyは`caddy-data`/`caddy-config`、AdGuardは`adguard-work`、SearXNGは`searxng-cache`を持つ。
+Gatusは`gatus` named volumeにSQLite（`/data/data.db`）の監視履歴とalert状態を保存する。
+定義元は各projectの`compose.yaml`と`monitoring/config.yaml`であり、これらはNFS/ZFSデータの
+復旧だけでは戻らない。Gatusのbackup方針は[アプリ更新・promotion・rollback](../operations/application-lifecycle.md#通常のreconcile)、
+VM全体の復旧は[Apps VM復旧](../operations/apps-vm-recovery.md)を参照する。
+Proxmox VM backupがこれらを含むかは未確認である。
 
 sparkDashのconfigはApps VMのnamed volume `homelab-sparkdash_sparkdash-config`へ保存する。
 初回所有権はimageの10001:10001を引き継ぐ。2026-10-11時点では自動backupを構築せず、VM外の暗号化backupも
@@ -107,24 +126,28 @@ sparkDashのconfigはApps VMのnamed volume `homelab-sparkdash_sparkdash-config`
 NFS/ZFS snapshotやTerraform state-backupには含まれない。
 復旧方針は[sparkDash運用](../operations/sparkdash.md)を参照する。
 
-### NFS exportメモ
+### NFS export契約
 
 `/mnt/tank-gen2/data/ai`はDGX Spark 2台とApps VMが共有する単一exportで、client範囲は
-`192.168.10.0/24`のままとする（[ADR-0006](../adr/0006-ai-dataset-single-export.md)）。以下の
-`/32`への収束計画は既存4 exportに対するものである。
+`192.168.10.0/24`のままとする（[ADR-0006](../adr/0006-ai-dataset-single-export.md)）。
 
-最終exportのclientはApps VM `192.168.10.101/32`だけとし、基本optionは
-`rw,sync,no_subtree_check,no_root_squash`とする。`no_root_squash`は初期互換性のためで、
-UID/GID検証後に`root_squash`へ狭められるか再評価する。
-
-移行中はKubernetes nodeもwriterであるため、既存exportを直ちに狭めない。Apps VMの暫定IP
-`.10.42`からmountできることを確認し、Kubernetes停止後に`.10.42/32`、最終IP移行後に
-`.10.101/32`へ変更する。NFS serverの`/etc/exports`はこのrepoから自動反映せず、変更内容と
-`exportfs -v`結果をrunbookへ記録する。
+既存4親exportのclientはApps VM `192.168.10.101/32`だけとし、基本optionは
+`rw,sync,no_subtree_check,no_root_squash`とする。詳細は[NFS export契約](../operations/nfs-export.md)を
+正とする。同文書には2026-09-23の`/32`化が記録されているが、pve1の`/etc/exports`は
+repo管理外であり、今回実機の状態は確認していない。
+段階的なexport切替の経緯は[移行記録](../archive/k8s-to-compose.md)を参照する。
 
 VM側はNFSv4、`hard,_netdev`を使用する。systemd mount unit、`RequiresMountsFor=`、
 `findmnt`でのfilesystem type確認、dataset固有markerのすべてを通過しなければCompose
 プロジェクトを起動しない。
+
+## 未達の目標・未決事項
+
+- opaque PVC由来pathから`/mnt/tank-gen2/data/apps/{sillytavern,stashpad-prod,stashpad-staging}/`へ
+  copy/検証して宣言を切り替える計画は、現行コードには未反映である。既存計画では`mv`を使わず、
+  UID/GID、ACL、xattr、hardlinkを保持する。計画の継続・撤回は未決である。
+- `no_root_squash`は初期互換性のための契約であり、UID/GID検証後に`root_squash`へ
+  狭められるか再評価する目標は未決である。
 
 ## ライフサイクルと更新
 
@@ -147,5 +170,5 @@ VM側はNFSv4、`hard,_netdev`を使用する。systemd mount unit、`RequiresMo
 | SOPS暗号化secret | Git main branch |
 | age復旧鍵 | KeePassXC |
 | ProxmoxとTailscaleのcredential | KeePassXC、デプロイ時に注入 |
-| アプリケーションデータ | 外部で復旧したNFS/ZFS |
+| NFS上のアプリケーションデータ | 外部で復旧したNFS/ZFS（Apps VM内のlocal volumeは含まない） |
 | sparkDash config | 自動backupなし。再deployとUIで2台を再登録（約5分）、token・SSH鍵はSOPSから再配置 |

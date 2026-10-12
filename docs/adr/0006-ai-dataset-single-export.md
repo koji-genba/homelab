@@ -1,6 +1,7 @@
 # ADR-0006: DGX Sparkのデータ置き場を単一NFS exportにする
 
-- 状態: 承認済み（設計）。実機反映は未実施
+- 状態: 承認済み。repo定義済み、pve1/Apps VMは運用記録上反映済み、DGX 2台は同記録で未実施
+- 2026-10-12 補足: 定義元は`files/infrastructure/ansible/apps/group_vars/apps.yml`と`files/services/compose/samba/config/smb.conf`。運用記録によれば、pve1とApps VMは2026-09-19に反映・確認済みで、DGX 2台は同記録で未実施とされている。手順と記録は[DGX Sparkストレージ運用](../operations/dgx-storage.md)を参照する。今回実機の再確認は行っていない。
 - 日付: 2026-09-19
 
 ## 背景
