@@ -131,8 +131,9 @@ iface vmbr0.10 inet static
 source /etc/network/interfaces.d/*
 ```
 
-実機には廃止済みVLAN 11の残骸として`vmbr0.11`（`192.18.11.11/24`）が残っていた（2026-10-12）。
-上の復旧設定には含めず、復旧時には復元しない。
+2026-10-12に`/etc/network/interfaces`を`/etc/network/interfaces.bak-20261012-vmbr0.11`へコピーし、
+`ifdown vmbr0.11`の後、廃止済みVLAN 11の`auto vmbr0.11` stanza（4行）だけを削除した。
+`ifreload`は実行せず、`vmbr0.11`の不存在とVLAN 10・default routeの維持を確認し、削除後の内容は上の復旧設定と一致した。
 
 `ifreload -a`またはrebootで反映し、`ip -br address`、`ip route`、`bridge vlan show`で確認する。
 管理端末から`https://192.168.10.11:8006/`へ接続できることを確認する。
@@ -335,6 +336,8 @@ ElastiFlow・stashPadDevが各`variables.tf`の`disk_size_gb`で宣言する。
 
 user / role / token / ACLは
 [Terraform実行前のProxmox側準備](apps-vm-recovery.md#terraform実行前のproxmox側準備)に従う。
+Apps VMのAPI tokenは2026-12-04の期限を過ぎるとTerraformで認証できなくなるため、
+期限前に[既存の期限確認・token再発行とsecret差し替えの手順](apps-vm-recovery.md#403-permission-check-failedが出たときの診断手順)に従って更新する。
 管理端末のSSH agent・host key・state復元・保存plan・state backupの前提も同文書を使う。
 gateway・ElastiFlow・stashPadDevの各`providers.tf`はAPIとProxmox SSHにpasswordを使い、
 Apps VMのAPI token / SSH agent方式とは異なる。
@@ -435,12 +438,12 @@ KeePassXCや運用記録に保存して復旧時の照合元にする。
 | storage.cfgのcontent、storageのactive状態、VM一覧 | `cat /etc/pve/storage.cfg`、`pvesm status`、`qm list` |
 | Secure Boot無効 | `mokutil --sb-state` |
 | NFS exportのclient / option / fsid | `exportfs -v`（[契約](nfs-export.md#実測された親export)と比較） |
+| user `terraform@pve`、role `HomelabTerraform`、token `apps-vm`（privsep 0、期限2026-12-04）、ACL 7 path | `pveum user list`、`pveum role list`、`pveum user token list terraform@pve`、`pveum acl list`（[詳細](apps-vm-recovery.md#terraform実行前のproxmox側準備)） |
 
 ### 未確認
 
 | 対象 | 再構築前の確認方法（pve1、または保存した復旧記録） |
 | --- | --- |
-| user / role / token / ACL | `pveum user list`、`pveum role list`、`pveum user token list terraform@pve`、`pveum acl list` |
 | NICのMAC、OS diskのserial | `ip link show`、`lsblk -o NAME,MODEL,SERIAL` |
 | UEFI / BIOS設定、MOK / boot entry | UEFI画面、`mokutil --list-enrolled`、`efibootmgr -v` |
 | インストーラの選択肢、DNS、Email | 保存したインストール・復旧記録 |

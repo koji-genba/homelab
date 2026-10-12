@@ -71,22 +71,30 @@ Proxmoxのuser・role・API token・ACLはGitにもTerraformにも宣言され�
 用意しておく必要がある。これらが揃っていない、または欠落した状態で`terraform apply`を実行すると
 `error creating VM: received an HTTP 403 response - Reason: Permission check failed`で失敗する。
 
+2026-10-12に`pveum user list`、`pveum role list`、`pveum user token list terraform@pve`、
+`pveum acl list`で、user、roleの20権限、tokenの期限・`privsep`、ACLの7 path・`propagate`を実機と照合した。
+
 ### 用意が必要なもの
 
 - user `terraform@pve`
 - role `HomelabTerraform`（権限は後述）
-- API token `terraform@pve!apps-vm`（現在の有効期限は2026-12-04 23:59 JST。期限切れでも同様に403で失敗する）。
+- API token `terraform@pve!apps-vm`（2026-10-12の確認時の有効期限は2026-12-04 23:59:59 JST。期限切れでも同様に403で失敗する）。
   現行tokenは`privsep=0`で作成されており、user `terraform@pve`のACLをそのまま継承する。`privsep=1`で
   作り直すとtoken自身へのACL付与が別途必要になるため、下記のACLだけでは足りなくなる。
-- 次の7 ACL path。`/vms/101`と`/nodes/pve1`はVM操作、`/storage/local`と`/storage/vmpool`はimage/disk
-  配置、`/sdn/zones/localnetwork`とその子2件はNIC割当に必要。
+- 既定構成では次のACL path。`/vms/101`と`/nodes/pve1`はVM操作、`/storage/local`と`/storage/vmpool`はimage/disk
+  配置、`/sdn/zones/localnetwork`とその子`vmbr0/10`はNIC割当に必要。
+  実機の`propagate`は`/vms/101`だけが1、他のpathは0である（2026-10-12確認）。
   - `/vms/101`
   - `/storage/local`
   - `/storage/vmpool`
   - `/nodes/pve1`
   - `/sdn/zones/localnetwork`
   - `/sdn/zones/localnetwork/vmbr0/10`
-  - `/sdn/zones/localnetwork/vmbr0/11`
+
+実機には廃止済みVLAN 11用の`/sdn/zones/localnetwork/vmbr0/11`も残っている（2026-10-12）。
+このACLが必要なのはlegacy NICを有効にする場合だけで、現行の既定構成では不要である。
+`files/infrastructure/terraform/apps-vm/variables.tf`の`legacy_service_nic`は既定で`false`、
+`main.tf`のdynamic `network_device`は`true`の場合だけVLAN 11のNICを作る。
 
 ### role `HomelabTerraform`の権限一覧
 
@@ -105,18 +113,24 @@ VM.Config.Options, VM.GuestAgent.Audit, VM.PowerMgmt
 
 pve1のシェルで次を実行する（値は例。tokenのsecretは作成時に一度しか表示されないため、
 表示された値をKeePassXCなど安全な場所へ即座に保管する）。
+以下の投入例は実装から導いた手順で、実機では未検証。
 
 ```sh
 pveum role add HomelabTerraform -privs "Datastore.Allocate,Datastore.AllocateSpace,Datastore.AllocateTemplate,Datastore.Audit,SDN.Use,Sys.AccessNetwork,Sys.Audit,Sys.Modify,VM.Allocate,VM.Audit,VM.Config.CDROM,VM.Config.CPU,VM.Config.Cloudinit,VM.Config.Disk,VM.Config.HWType,VM.Config.Memory,VM.Config.Network,VM.Config.Options,VM.GuestAgent.Audit,VM.PowerMgmt"
 pveum user add terraform@pve
-pveum user token add terraform@pve apps-vm --expire <unixtime> --output-format json
-pveum acl modify /vms/101 --user terraform@pve --role HomelabTerraform
-pveum acl modify /storage/local --user terraform@pve --role HomelabTerraform
-pveum acl modify /storage/vmpool --user terraform@pve --role HomelabTerraform
-pveum acl modify /nodes/pve1 --user terraform@pve --role HomelabTerraform
-pveum acl modify /sdn/zones/localnetwork --user terraform@pve --role HomelabTerraform
-pveum acl modify /sdn/zones/localnetwork/vmbr0/10 --user terraform@pve --role HomelabTerraform
-pveum acl modify /sdn/zones/localnetwork/vmbr0/11 --user terraform@pve --role HomelabTerraform
+pveum user token add terraform@pve apps-vm --privsep 0 --expire <unixtime> --output-format json
+pveum acl modify /vms/101 --user terraform@pve --role HomelabTerraform --propagate 1
+pveum acl modify /storage/local --user terraform@pve --role HomelabTerraform --propagate 0
+pveum acl modify /storage/vmpool --user terraform@pve --role HomelabTerraform --propagate 0
+pveum acl modify /nodes/pve1 --user terraform@pve --role HomelabTerraform --propagate 0
+pveum acl modify /sdn/zones/localnetwork --user terraform@pve --role HomelabTerraform --propagate 0
+pveum acl modify /sdn/zones/localnetwork/vmbr0/10 --user terraform@pve --role HomelabTerraform --propagate 0
+```
+
+`legacy_service_nic=true`でlegacy NICを有効にする場合だけ、次のACLも付与する。
+
+```sh
+pveum acl modify /sdn/zones/localnetwork/vmbr0/11 --user terraform@pve --role HomelabTerraform --propagate 0
 ```
 
 ### 罠: destroyはACLを道連れに削除する
@@ -135,8 +149,8 @@ pveum acl modify /sdn/zones/localnetwork/vmbr0/11 --user terraform@pve --role Ho
 1. `pveum acl list`で対象pathへのACLエントリが存在するか確認する。
 2. pve1上で`grep -E '^(acl|token):' /etc/pve/user.cfg`を実行し、user.cfgの生データからも
    ACLとtokenの存在を確認する。
-3. 上記7 pathのいずれかが欠けていれば、該当pathへ`pveum acl modify <path> --user terraform@pve --role HomelabTerraform`
-   で再付与する。
+3. 既定構成で必要なpath（legacy NICを有効にする場合はVLAN 11用も含む）のいずれかが欠けていれば、
+   [投入コマンド例](#投入コマンド例)の該当コマンドで再付与する。
 4. ACLが揃っているのに403が続く場合は、tokenの有効期限切れを疑う。`pveum user token list terraform@pve`で
    期限を確認し、切れていれば新しいtokenを発行してsecretを差し替える。
 
