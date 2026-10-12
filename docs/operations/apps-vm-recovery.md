@@ -40,15 +40,19 @@ named volumeはNFSデータやTerraform stateからは復元されない。正�
 
 | project | named volume / container内path | 復旧時の扱い |
 | --- | --- | --- |
-| edge | `caddy-data` / `/data`、`caddy-config` / `/config` | Caddyのローカルstate。喪失時はNFS復旧だけでは戻らない |
-| dns | `adguard-work` / `/opt/adguardhome/work` | AdGuardのwork領域。設定は別のbind mountへAnsibleが配置する |
-| samba | `samba-state` / `/var/lib/samba`、`samba-logs` / `/var/log/samba` | Sambaのローカルstate/log。設定・credentialの再配置とvolume復元は別である |
+| edge | `caddy-data` / `/data`、`caddy-config` / `/config` | Caddyのローカルstate。`/data`のACME証明書・accountを失えば、`Caddyfile`のCloudflare DNS-01設定とAnsibleで再配置するtokenを使って再取得する |
+| dns | `adguard-work` / `/opt/adguardhome/work` | AdGuardのwork領域は戻らない。設定はsecrets roleが別のbind mount `/etc/homelab/adguard/AdGuardHome.yaml`へ再生成する |
+| samba | `samba-state` / `/var/lib/samba`、`samba-logs` / `/var/log/samba` | ローカルstate/logは戻らない。共有設定・ユーザー/SID宣言はGitの`config/smb.conf`・`config/users.json`、passwordはsecrets roleから再配置する。空stateからのユーザー・identity再生成はimageの起動処理に依存し、repoでは未確認 |
 | searxng | `searxng-cache` / `/var/cache/searxng` | 喪失を許容するcache（[SearXNG運用](searxng.md#構成)） |
 | sparkdash | `sparkdash-config` / `/app/config` | unit/settings/history等。[backup・復旧方針](sparkdash.md#永続化backup復旧)に従う |
 | monitoring | `gatus` / `/data` | 監視履歴・alert状態。backup対象外（[共通手順](application-lifecycle.md#通常のreconcile)） |
 
-Homepageにはnamed volumeがない。edge/dns/sambaのbackup有無・復元可否はrepoから確定できないため、
-VM backup等の運用記録で確認する。
+Homepageにはnamed volumeがない。2026-10-12にpve1で確認したところ、Proxmoxのbackup jobも既存の
+VM backupも無かった。`/etc/pve/jobs.cfg`は存在せず、`/etc/pve/vzdump.cron`にjobの行は無く、
+`pvesm list <storage> --content backup`は`local` / `local-lvm` / `vmpool`とも0件、
+`/var/lib/vz/dump`は空だった。`storage.cfg`にPBS / NFS / CIFSのbackup先も無い。
+Apps VMのdiskを失うと、上表のnamed volumeはどれも戻らない。backupは構築しておらず、
+edge/dns/sambaを保護するbackup方針は未決である。上表の再生成・再配置はvolumeの復元とは区別する。
 
 ## 管理端末の入力と接続前提
 
@@ -174,6 +178,11 @@ pveum acl modify /sdn/zones/localnetwork/vmbr0/11 --user terraform@pve --role Ho
    全復号stateを検証してからatomic renameでmode `0600`のfileを配置し、既存平文stateは上書きしない。
    plan前に復元結果をreviewする。stateが無ければresourceの存在を調べる。
 
+   backupにあるTerraform rootのdirectoryがcheckoutに無いと、`state-restore.sh`は全体を中止する。
+   rootを撤去するときはローカルのstateも削除して`make state-backup`を取り直し、backupから外す。
+   `state-backup.sh`はローカルに無くなったstateの暗号化copyを削除する。旧`k8s-cluster`は
+   2026-10-12にローカルdirectoryとbackupから撤去済み（backup commit `aae3f05`）。
+
    - Proxmox VMが存在しない場合: 空stateから作成する。
    - Proxmox/Tailscale resourceが存在する場合: 文書化されたimport targetで対応する。
    - plan reviewなしに既存resourceへ空stateをapplyしない。
@@ -204,9 +213,15 @@ pveum acl modify /sdn/zones/localnetwork/vmbr0/11 --user terraform@pve --role Ho
    拒否し、`-auto-approve`を使用しない。apply後に暗号化state recovery copyを作成してpushする。
    詳細は[Apps VM Terraform入口](../../files/infrastructure/terraform/apps-vm/README.md)を参照する。
 7. `AGE_IDENTITY_FILE=/path/to/identity make ansible-apply`でbootstrapとdeploymentを行う。
+   新規構築・復旧で`apps.yml.example`から入力を作る場合は、現行ネットワークの初期値
+   （`network_migration_complete: true`、legacy系flagは`false`）を使い、
+   `application_cutover_confirmed: false`でNFSをread-only、アプリ・reconcile・dead-manを停止して始める。
    新規VMはTailscale package/daemonの準備後、未登録の`not Running`で停止する。
    [tailnet再登録手順](apps-vm-tailnet.md#現在の手順apps-vmを再構築再登録するとき)に従い、旧deviceを削除し、
-   手動登録・同じIPv4への固定・tags/expiry確認を済ませてAnsibleを再実行する。
+   手動登録・同じIPv4への固定・tags/expiry確認を済ませる。exampleの`apps_tailnet_ip`は例示値なので
+   固定した実値に合わせ、DNSの`internal_records_use_tailnet_ip`を`true`にする。
+   復旧したexport・markerと他writerの停止を確認してから`application_cutover_confirmed`も`true`にし、
+   Ansibleを再実行する。これによりsecretを配置し、アプリとtimerを起動する。
    既存cloneの更新が必要な場合は[通常のreconcile](application-lifecycle.md#通常のreconcile)を確認する。
    全NFS mountとmarkerはcontainer起動前にstorage roleとmount guardが検証する。
 8. 必要な場合だけ、[別Terraform rootの手順](../../files/infrastructure/terraform/tailscale/README.md)で

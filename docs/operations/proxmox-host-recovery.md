@@ -29,8 +29,9 @@ Apps VMだけを作り直す場合は[Apps VM復旧手順](apps-vm-recovery.md)�
 - Proxmox ISO、インストール媒体、ローカルconsole / UEFIへ入る手段、ホストroot credential。
 - ディスクのモデル・serial・接続先、ZFS topologyとproperty、ホスト設定の退避記録。
   採取項目は[実機で確認する値](#実機で確認する値)にある。
-- 保持するpoolのデータ、cache-pool上の残存ファイル、必要なVM disk / backup。
-  vmpoolを新規作成するとVM内データは失われる。Apps VMのnamed volumeは
+- 保持するpoolのデータ、cache-pool上の残存ファイル、必要なVM disk。
+  2026-10-12の確認ではProxmoxのbackup jobもVM backupも無い（[確認記録](#2026-10-12に確認済み)）。
+  vmpoolを新規作成するとVM内データは失われ、現状はbackupから戻せない。Apps VMのnamed volumeは
   [復旧範囲](apps-vm-recovery.md#vm内named-volumeの復旧範囲)、ElastiFlowの保存データは
   [データ永続化](../../files/infrastructure/terraform/elastiflow/README.md#データ永続化)を確認する。
 - gateway・ElastiFlow・stashPadDev用のProxmox passwordとSSH key、各Terraformルートのlocal入力。
@@ -169,8 +170,8 @@ by-idと再構築前の採取記録で照合する。
 ### vmpool
 
 vmpoolを保持する場合はimportし、既存VM diskの復元・stateとの対応を先に確認する。
-以下はVM diskを破棄して新規作成する場合だけ使う。必要なbackupの確保と対象serialの照合を
-済ませ、保持するpoolのdiskを選択しない。
+以下はVM diskを破棄して新規作成する場合だけ使う。現状VM backupは無いため、保持するVM内データの
+退避・復旧元を別途確保し、対象serialを照合してから進む。保持するpoolのdiskを選択しない。
 
 対象diskのby-idを実機で確認し、`nvme0n1`全体を指すリンク名を確認する。
 
@@ -436,6 +437,7 @@ KeePassXCや運用記録に保存して復旧時の照合元にする。
 | moverのrepoとの一致、root cron、logrotate配置先 | `sha256sum /usr/local/bin/mover.sh`（repoと比較）、`crontab -l`、`ls -l /etc/logrotate.d/mover.logrotate` |
 | APT suite・component・有効/無効の状態 | `cat /etc/apt/sources.list /etc/apt/sources.list.d/*.sources` |
 | storage.cfgのcontent、storageのactive状態、VM一覧 | `cat /etc/pve/storage.cfg`、`pvesm status`、`qm list` |
+| backup jobなし、VM backupなし | `/etc/pve/jobs.cfg`、`/etc/pve/vzdump.cron`、`pvesm list <storage> --content backup`、`/var/lib/vz/dump`、`storage.cfg`（[確認結果](apps-vm-recovery.md#vm内named-volumeの復旧範囲)） |
 | Secure Boot無効 | `mokutil --sb-state` |
 | NFS exportのclient / option / fsid | `exportfs -v`（[契約](nfs-export.md#実測された親export)と比較） |
 | user `terraform@pve`、role `HomelabTerraform`、token `apps-vm`（privsep 0、期限2026-12-04）、ACL 7 path | `pveum user list`、`pveum role list`、`pveum user token list terraform@pve`、`pveum acl list`（[詳細](apps-vm-recovery.md#terraform実行前のproxmox側準備)） |
@@ -449,7 +451,6 @@ KeePassXCや運用記録に保存して復旧時の照合元にする。
 | インストーラの選択肢、DNS、Email | 保存したインストール・復旧記録 |
 | APTの各stanzaとファイル名の対応、署名設定 | `cat /etc/apt/sources.list.d/*.sources` |
 | `/etc/exports`のファイルそのもの、marker | `cat /etc/exports /etc/exports.d/*`、[marker契約](nfs-export.md#マーカー契約)との照合 |
-| backup jobの有無 | ProxmoxのDatacenter → Backupと保存したbackup記録 |
 | template 9000の詳細設定 | `qm config 9000` |
 
 exportは再構築時にmarkerとともに再照合する。

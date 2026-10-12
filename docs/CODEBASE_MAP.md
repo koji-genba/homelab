@@ -106,7 +106,7 @@ homelab/
 ├── files/
 │   ├── infrastructure/
 │   │   ├── ansible/apps/         # site.yml + 8 roles + group_vars/inventory (+ *.example)
-│   │   ├── terraform/            # apps-vm, tailscale (CI-validated); elastiflow, tailscale-gateway, stashpad-dev; k8s-cluster = dead state only
+│   │   ├── terraform/            # apps-vm, tailscale (CI-validated); elastiflow, tailscale-gateway, stashpad-dev
 │   │   ├── network/              # README + config.txt (annotated IX2215 running-config copy)
 │   │   ├── storage/              # mover.sh + mover.logrotate (run on pve1, not in VM)
 │   │   └── secrets/              # runtime.sops.yaml (encrypted), runtime.yaml.example, README
@@ -134,13 +134,13 @@ Present on disk but untracked/ignored (do not read): `teraterm.log`, `ts.log`, `
 | Terraform apps-vm | `terraform-init`, `terraform-fmt`, `terraform-validate`, `terraform-plan`, `terraform-apply` |
 | Tailscale (manual, import-first) | `terraform-validate-tailscale`, `tailscale-init`, `tailscale-acl-preflight`, `tailscale-plan`, `tailscale-apply`, `tailscale-import-core`, `tailscale-import-acl`, `tailscale-import-dns`, `tailscale-import-router` |
 | Ansible | `ansible-lint`, `ansible-check`, `ansible-apply` |
-| CI fixtures | `ansible-bootstrap-paths-test`, `terraform-apps-vm-lifecycle-test`, `toolbox-uid-test`, `cloud-init-test`, `compose-config`, `adguard-config-check`, `gatus-config-check`, `compose-reconcile-fixture`, `shellcheck`, `secrets-scan`, `state-backup-test`, `state-restore-test`, `state-backup-preflight-test`, `tailscale-acl-path-test` |
-| Not in CI | `mover-test`, `preflight` |
+| CI fixtures | `ansible-bootstrap-paths-test`, `terraform-apps-vm-lifecycle-test`, `toolbox-uid-test`, `cloud-init-test`, `compose-config`, `adguard-config-check`, `gatus-config-check`, `compose-reconcile-fixture`, `mover-test`, `shellcheck`, `secrets-scan`, `state-backup-test`, `state-restore-test`, `state-backup-preflight-test`, `tailscale-acl-path-test` |
+| Not in CI | `preflight` |
 | Ops | `state-backup`, `state-backup-push` (alias), `state-backup-preflight`, `state-restore`, `rollback-app` |
 | Secrets | `secrets-encrypt` (needs `AGE_RECIPIENT`, refuses to overwrite), `secrets-decrypt-check` (needs `AGE_IDENTITY_FILE`) |
 
 **Apply gating**: `terraform-apply`/`tailscale-apply` apply only a saved plan (`terraform.tfplan`, must be mode 0600, non-symlink), run `state-backup-preflight` first and `state-backup` after (needs `AGE_RECIPIENT`, `AGE_IDENTITY_FILE`, `SSH_AUTH_SOCK`). There is **no `make destroy`**.
-**Host extras**: some targets run on the host and need `python3`+PyYAML (`ansible-bootstrap-paths-test`, `cloud-init-test`, `terraform-apps-vm-lifecycle-test`, `compose-reconcile-fixture`), `docker compose` (`compose-config`), bash (`mover-test`). See [toolbox dependencies](../files/tools/homelab-toolbox/README.md).
+**Host extras**: some targets run on the host and need `python3`+PyYAML (`ansible-bootstrap-paths-test`, `cloud-init-test`, `terraform-apps-vm-lifecycle-test`, `compose-reconcile-fixture`), `docker compose` (`compose-config`), bash + rsync + coreutils/findutils + flock (`mover-test`, host-run with mountpoint/ZFS stubs). See [toolbox dependencies](../files/tools/homelab-toolbox/README.md).
 
 ### 3.2 Ansible (`files/infrastructure/ansible/apps/`) — ~16k tokens
 
@@ -175,7 +175,6 @@ State is **local per root, gitignored, mode 0600, no backend, no locking**. Reco
 | `tailscale-gateway` | bpg/proxmox ~>0.81 | VM 102, `192.168.10.102`, template-clone (VMID 9000) | `tailscale up` is manual (issue #29); route approval manual |
 | `elastiflow` | bpg/proxmox ~>0.81 | VM 103, `192.168.10.103`; `install.sh` sets up unauthenticated ES/Kibana + flow collector | sFlow collector `:6343` |
 | `stashpad-dev` | bpg/proxmox ~>0.81 | VM 111 `.41` (out of scope) | Gitignored per-root state/tfvars |
-| `k8s-cluster` | — | **no `.tf` files**, orphan `terraform.tfstate` + tfvars | VMIDs 101-103 are reused by live VMs; `state-backup.sh` searches this root too; actual backup contents are unverified |
 
 Only `apps-vm` and `tailscale` are fmt/validated in CI and tracked by Dependabot.
 
@@ -262,7 +261,7 @@ LAN-only devices get public DNS (1.1.1.1/8.8.8.8) from DHCP, so they do **not** 
 
 ### 4.3 Secrets & state
 
-`runtime.sops.yaml` → (admin terminal, age key) → Ansible → `/etc/homelab/secrets/*` (root 0600) → `env_file` in compose. sparkDash follows the same path (`sparkdash.env` → `env_file`; `sparkdash-ssh/` dir → read-only bind, key file only if supplied) and any secret change force-recreates all projects. Two state stores worth knowing about are **local named volumes on the Apps VM, not NFS** (besides the edge/dns/searxng volumes in §3.4): `sparkdash-config` (units, history, known_hosts; no automated backup, not in NFS/ZFS snapshots/mover/Terraform state-backup; recovery = redeploy + redeliver token/key from SOPS + re-register the 2 DGX units in the UI, ~5 min) and `gatus` (SQLite history/alert state; deliberately not backed up). Whether Proxmox VM backups cover them is unconfirmed. Terraform state → local file → `make state-backup` → age-encrypted → `state-backup` branch (pushed from the **host** via ssh-agent; toolbox only commits locally).
+`runtime.sops.yaml` → (admin terminal, age key) → Ansible → `/etc/homelab/secrets/*` (root 0600) → `env_file` in compose. sparkDash follows the same path (`sparkdash.env` → `env_file`; `sparkdash-ssh/` dir → read-only bind, key file only if supplied) and any secret change force-recreates all projects. Two state stores worth knowing about are **local named volumes on the Apps VM, not NFS** (besides the edge/dns/searxng volumes in §3.4): `sparkdash-config` (units, history, known_hosts; no automated backup, not in NFS/ZFS snapshots/mover/Terraform state-backup; recovery = redeploy + redeliver token/key from SOPS + re-register the 2 DGX units in the UI, ~5 min) and `gatus` (SQLite history/alert state; deliberately not backed up). No Proxmox backup jobs or VM backups existed in the 2026-10-12 pve1 check; see [named-volume recovery scope](operations/apps-vm-recovery.md#vm内named-volumeの復旧範囲). Terraform state → local file → `make state-backup` → age-encrypted → `state-backup` branch (pushed from the **host** via ssh-agent; toolbox only commits locally).
 
 ### 4.4 Storage
 
@@ -304,8 +303,8 @@ Almost all app state is NFS from pve1 (exceptions: local named volumes such as `
 
 - Current project/service definitions are listed in §3.4. ADR-0001's 7 projects record the adoption-time scope. Pre-migration baselines, migration/handoff records and the old IX/Proxmox runbooks are frozen under [archive](archive/README.md). Current Proxmox host recovery is covered by [the host runbook](operations/proxmox-host-recovery.md); [Apps VM recovery](operations/apps-vm-recovery.md) covers the VM alone.
 - Remaining k8s/VLAN-11 code: `.gitignore` rules, `192.168.11.0/24` in `compose-config.sh` synthetic env and in `trusted_networks` (the nft template drops it post-migration), `legacy_ldaps_ip` in the AdGuard fixture, disabled legacy-address Ansible plumbing, Samba `netbios name = k8s-samba`. These differ from the active `k8s-volumes` data path; do not delete that data.
-- Local `terraform/k8s-cluster/` has no tracked definition but still contains ignored state/tfvars. VMIDs 101-103 now belong to different VMs. `state-backup.sh` scans all `*.tfstate` below `files/infrastructure/terraform`, so it includes this root in its search; actual recovery-branch contents are unverified.
-- `compose-config.sh` runs Docker Compose on every discovered definition and command failures are not ignored; it has no assertion that discovery found any files. `adguard-config-check.sh` reports a skip and exits 0 when its local image is unavailable. Render checks are not comprehensive for systemd/Jinja templates; `mover-test` is not in CI. Dead-man checks require a non-empty running-service list per project, rather than every service (relevant to the two-service `searxng` project).
+- The retired `k8s-cluster` local directory and encrypted recovery state were removed on 2026-10-12. VMIDs 101-103 belong to current VMs. See [state recovery and root retirement](operations/apps-vm-recovery.md#復旧フロー).
+- `compose-config.sh` runs Docker Compose on every discovered definition and command failures are not ignored; discovery of zero definitions now fails. `adguard-config-check.sh` reports a skip and exits 0 when its local image is unavailable. Render checks are not comprehensive for systemd/Jinja templates; `mover-test` is now in CI. Dead-man checks require a non-empty running-service list per project, rather than every service (relevant to the two-service `searxng` project); strengthening this check is tracked in [#86](https://github.com/koji-genba/homelab/issues/86).
 - **Router credential review:** credentials in the tracked `files/infrastructure/network/config.txt` were confirmed masked, with no real values, on 2026-10-12.
 
 ## 7. Navigation Guide
@@ -330,14 +329,14 @@ Almost all app state is NFS from pve1 (exceptions: local named volumes such as `
 | Rebuild/recover a Proxmox host | [Proxmox host recovery](operations/proxmox-host-recovery.md) |
 | Rebuild/recover the Apps VM alone | [Apps VM recovery](operations/apps-vm-recovery.md) (see the recovery flow) |
 | Understand current state/next steps | [docs index](README.md) → [current design and unmet goals](architecture/target-state.md) → [operations](operations/); [archive](archive/README.md) for dated history |
-| Run all local checks | the CI list in `validate.yml`; plus `make mover-test` (not in CI) |
+| Run all local checks | the CI list in `validate.yml`, including `make mover-test` |
 
 ## 8. Open items (from docs)
 
 Dated migration records leave interactive acceptance re-run after Phase 5 unconfirmed (follow [Apps VM recovery](operations/apps-vm-recovery.md)); the [DGX storage record](operations/dgx-storage.md#手動反映の記録) confirms that step C was completed on both DGX Sparks as confirmed on 2026-10-12 (`/etc/fstab`, `systemctl list-units --type=automount` and `findmnt -t nfs4`; execution date unknown, read speed still unmeasured); explicit IPv6 disable on IX2215 not confirmed done; IX2215 single-flow slow state (~200 Mbps) unexplained; Proxmox token expiry 2026-12-04; Proxmox identity not in IaC.
 
-Issue status as of 2026-10-12 (owner-provided listing): **open** — #28 (unify Proxmox authentication across 3 Terraform roots with API tokens + tfvars), #29 (gateway advertise-routes / exit-node prefs outside IaC), #32 (explicitly disable IPv6 RA, DHCPv6 and forwarding), #33 (ElastiFlow/Kibana has no FQDN), #34 (ElastiFlow Elasticsearch ingest stopped since 2026-07-07), #35 (all Compose projects re-created on every `make ansible-apply`), #85 (Homepage numeric displays after Prometheus/Grafana introduction); **closed** — #30 (Apps VM Tailscale participation), #31 (IX2215 management-password rotation), #48, #49.
+Issue status as of 2026-10-12 (owner-provided listing): **open** — #28 (unify Proxmox authentication across 3 Terraform roots with API tokens + tfvars), #29 (gateway advertise-routes / exit-node prefs outside IaC), #32 (explicitly disable IPv6 RA, DHCPv6 and forwarding), #33 (ElastiFlow/Kibana has no FQDN), #34 (ElastiFlow Elasticsearch ingest stopped since 2026-07-07), #35 (all Compose projects re-created on every `make ansible-apply`), #85 (Homepage numeric displays after Prometheus/Grafana introduction), [#86](https://github.com/koji-genba/homelab/issues/86) (dead-man checks for all declared services and health); **closed** — #30 (Apps VM Tailscale participation), #31 (IX2215 management-password rotation), #48, #49.
 
-New since 2026-10-11: confirm in production that Gatus sends a "resolved" notice after the next real restart (PR #78 only verified in Docker); whether Proxmox VM backups cover the `sparkdash-config` volume is unconfirmed; revisit the no-backup policy for `sparkdash-config` if units, benchmark results or stored secrets grow (encryption key and ciphertext would share the volume); the accepted sparkDash limits in gotcha 16 remain open (LAN-only DNS, unauthenticated `/`, shared token, `accept-new`, restart after unit changes).
+New since 2026-10-11: confirm in production that Gatus sends a "resolved" notice after the next real restart (PR #78 only verified in Docker); revisit the no-backup policy for `sparkdash-config` if units, benchmark results or stored secrets grow (encryption key and ciphertext would share the volume); the accepted sparkDash limits in gotcha 16 remain open (LAN-only DNS, unauthenticated `/`, shared token, `accept-new`, restart after unit changes).
 
 Resolved since the full-map baseline: Gatus memory-only alert state (persisted to SQLite on volume `gatus`, PR #78).

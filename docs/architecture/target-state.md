@@ -117,7 +117,9 @@ Gatusは`gatus` named volumeにSQLite（`/data/data.db`）の監視履歴とaler
 定義元は各projectの`compose.yaml`と`monitoring/config.yaml`であり、これらはNFS/ZFSデータの
 復旧だけでは戻らない。Gatusのbackup方針は[アプリ更新・promotion・rollback](../operations/application-lifecycle.md#通常のreconcile)、
 VM全体の復旧は[Apps VM復旧](../operations/apps-vm-recovery.md)を参照する。
-Proxmox VM backupがこれらを含むかは未確認である。
+2026-10-12のpve1確認ではProxmoxのbackup jobもVM backupも無く、Apps VMのdisk喪失時に
+named volumeはどれも戻らない。backupを構築しておらず、edge/dns/sambaのbackup方針は未決である。
+確認方法と再生成できる範囲は[VM内named volumeの復旧範囲](../operations/apps-vm-recovery.md#vm内named-volumeの復旧範囲)を参照する。
 
 sparkDashのconfigはApps VMのnamed volume `homelab-sparkdash_sparkdash-config`へ保存する。
 初回所有権はimageの10001:10001を引き継ぐ。2026-10-11時点では自動backupを構築せず、VM外の暗号化backupも

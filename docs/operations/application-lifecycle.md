@@ -173,5 +173,6 @@ Ansibleのpre-taskも同じ順序を強制し、ExecStopが失敗した状態で
 - `shared_mount_path`で一時probe fileの作成・書込み・削除に失敗する。
 - helperに宣言されたprojectのいずれかでrunning serviceを取得できない。
   各projectに1つ以上のrunning serviceを要求し、全serviceのhealthyまでは判定しない。
+  全serviceの稼働・health判定の強化は[#86](https://github.com/koji-genba/homelab/issues/86)で追跡する。
 - LAN側の`http://status.kojigenba-srv.com/` probeが2xx、3xx、401、403以外を返す（接続失敗も含む）。
 - `healthchecks.env`の読み込みに失敗する、`HEALTHCHECKS_PING_URL`が空、またはping送信自体が失敗する。

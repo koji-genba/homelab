@@ -12,4 +12,4 @@ ADR は採用時点の判断を固定するもので、前提が変わった場�
 | [0004](0004-dns-and-minimal-observability.md) | 承認済み | AdGuard Home と最小監視を採用する。global nameserverの接続先は[0007](0007-apps-vm-tailnet-dns.md)で具体化 |
 | [0005](0005-secrets-and-terraform-state.md) | 承認済み | SOPS/age と暗号化 state recovery copy を採用する |
 | [0006](0006-ai-dataset-single-export.md) | 承認済み。repo定義済み、pve1/Apps VMは反映済み、DGX 2台の手順Cも2026-10-12に実施済みと確認 | DGX Spark のデータ置き場を単一 NFS export にする。pve1/Apps VMは2026-09-19に反映済み。DGXの実施日は不明、read速度は未測定（[確認方法・記録](../operations/dgx-storage.md#手動反映の記録)） |
-| [0007](0007-apps-vm-tailnet-dns.md) | 承認済み | Apps VMのtailnet addressへ内部DNSを切り替える（0003と0004の一部を更新） |
+| [0007](0007-apps-vm-tailnet-dns.md) | 承認済み。2026-10-12補足あり | Apps VMのtailnet addressへ内部DNSを切り替える（0003と0004の一部を更新）。補足でSMBの正式な接続先とServer route維持を明記 |
