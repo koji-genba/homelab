@@ -1,9 +1,16 @@
 # Homelab toolbox（実行環境）
 
 このimageは、version固定したTerraform、Ansible、SOPS、age、shellcheckと各linterの実行環境である。
-rootの`Makefile`はこれらのtoolをDocker経由で実行するため、管理端末に必要なのはGit、Docker、Make、SSHだけ
-となる。baseはDockerfileで固定したOCI index digestの`debian:13-slim`で、Debian trixieの
+rootの`Makefile`はこれらのtoolをDocker経由で実行するため、通常運用のwrapperには管理端末のGit、Docker、Make、SSHが
+必要となる。host上で実行する検証fixtureには次の追加依存がある。
+
+- Python 3とPyYAML: `make ansible-bootstrap-paths-test`（[fixture](../../../scripts/tests/ansible-bootstrap-paths-fixture.sh)）、`make cloud-init-test`（[fixture](../../../scripts/tests/cloud-init-apps-vm-fixture.sh)）。
+- Python 3: `make terraform-apps-vm-lifecycle-test`（[fixture](../../../scripts/tests/terraform-apps-vm-lifecycle-fixture.sh)）、`make compose-reconcile-fixture`（[fixture](../../../scripts/tests/compose-reconcile-fixture.sh)）。
+- Docker Compose: `make compose-config`はhostのDocker Composeで[compose-config.sh](../../../scripts/compose-config.sh)を実行する。
+
+baseはDockerfileで固定したOCI index digestの`debian:13-slim`で、Debian trixieの
 `shellcheck=0.10.0-1`をinstallする。
+publishするimageは`linux/amd64`であり、Dockerfileが取得するtool binaryもlinux/amd64用である。
 
 公式AdGuard Home v0.107.79 amd64 checkerも組み込む。release archiveのSHA256
 `c48f4a43000665484c5ec28177de11a004759b620dae8f77b2aabefc9ef3687f`を検証してから配置し、fixtureは
@@ -20,11 +27,13 @@ Dockerfileを変えていないのにタグを`sha256:7607f2c7...`から`sha256:
 
 - 実行に使う参照は`TOOLBOX_IMAGE`（`TOOLBOX_IMAGE_REPO@TOOLBOX_IMAGE_DIGEST`）である。
 - `make toolbox-build`がlocalに付けるtagは`TOOLBOX_BUILD_IMAGE`（`TOOLBOX_IMAGE_REPO:TOOLBOX_IMAGE_TAG`）で、
-  実行用の参照とは分離してある。
+  実行用の参照とは分離してある。buildだけでは通常実行のdigest参照は切り替わらない。
 - imageを更新するときは、workflowのpublish後に
   `docker buildx imagetools inspect ghcr.io/koji-genba/homelab-toolbox:1.0.1`で新しいdigestを確認し、
   Makefileの`TOOLBOX_IMAGE_DIGEST`を差し替える。
-- localでbuildしたimageを試すときは`make TOOLBOX_IMAGE=$(TOOLBOX_BUILD_IMAGE) <target>`のように上書きする。wrapperはrepositoryを呼び出し元のUID/GIDで
+- localでbuildしたimageを試すときは`make TOOLBOX_IMAGE=ghcr.io/koji-genba/homelab-toolbox:1.0.1 ansible-check`のように上書きする。repo名 / tagを変えた場合は実際のlocal build tagを指定する。
+
+wrapperはrepositoryを呼び出し元のUID/GIDで
 mountし、一時worktreeにはcontainer内で書込み可能な`/tmp`を使い、optional SSH agent socketをmountする。
 `AGE_IDENTITY_FILE`を設定した場合だけ、そのfileを`/run/secrets/age-identity`へread-onlyでmountする。
 hostの`~/.ssh/known_hosts`が存在する場合は、`/etc/ssh/ssh_known_hosts`としてread-onlyでmountする。

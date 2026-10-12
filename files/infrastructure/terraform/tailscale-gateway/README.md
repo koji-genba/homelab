@@ -4,7 +4,12 @@ TerraformでProxmox VE上にTailscale VPN Gateway用のVMを構築します。
 
 ## 構築されるVM
 
-- **tailscale-gateway**: 192.168.10.102（サブネットルーター）
+- **tailscale-gateway**: 192.168.10.102（サブネットルーター、VMID 102）
+- CPU: 2 cores / メモリ: 4096 MB / ディスク: 20 GB（`vmpool`）
+- Template: `template_vm_id`（default: 9000）からfull clone
+
+PVE上のVM名とguest hostnameは`tailscale-gateway`です。tailnet hostnameは手動登録時に指定する
+`home-gateway`で、両者を区別します。数値は[main.tf](main.tf) / [variables.tf](variables.tf)の定義です。
 
 IPは`ip_address`変数で管理する。2026-09-12に`.30`から`.102`へ変更した。PVEのcloud-init設定を変えると
 instance-idが変わるため、`reboot_after_update = true`による再起動後にcloud-initがnetplanを描き直し、
@@ -14,21 +19,14 @@ guestの実IPが切り替わる。再起動でSSH host鍵が作り直される�
 
 - Proxmox VE環境（192.168.10.11）
 - Tailscaleアカウント
-- Tailscale認証キー（Auth Key）
 - SSHキーペア
+- Cloud-init対応のVMテンプレート（VMID 9000、現存は別途確認）
 
 ## 構築手順
 
-### 1. Tailscale認証キー取得
+以下はTerraformの定義と`outputs.tf`の案内に基づく手順です。
 
-1. [Tailscale Admin Console](https://login.tailscale.com/admin/settings/keys)にアクセス
-2. 新しい認証キーを生成
-3. オプション：
-   - Reusable: 有効化（複数回使用可能）
-   - Ephemeral: 無効化（永続的なデバイス）
-   - Preauthorized: 有効化（自動承認）
-
-### 2. 設定ファイル作成
+### 1. 設定ファイル作成
 
 ```bash
 cd files/infrastructure/terraform/tailscale-gateway/
@@ -36,11 +34,15 @@ cd files/infrastructure/terraform/tailscale-gateway/
 # 設定ファイルをテンプレートからコピー
 cp terraform.tfvars.example terraform.tfvars
 
-# Proxmox認証情報とTailscale認証キーを設定
+# Proxmox接続情報とSSH公開鍵を設定
 vim terraform.tfvars
 ```
 
-### 3. Terraform実行
+`proxmox_endpoint` / `proxmox_username` / `proxmox_password`でProxmoxへ接続し、`ssh_public_key`を
+guestへ配置します。[provider](providers.tf)はAPIとProxmox SSHにpasswordを使います。
+このルートにはTailscale認証キーの変数はなく、TerraformはTailscaleのinstallと`tailscaled`の起動までを行います。
+
+### 2. Terraform実行
 
 ```bash
 terraform init
@@ -48,12 +50,22 @@ terraform plan
 terraform apply
 ```
 
-### 4. サブネットルーター設定
+### 3. guest内でTailscale登録
 
-VMが起動したら、Tailscale Admin Consoleでサブネットルーターを有効化します。
+[outputs.tf](outputs.tf)が案内する次のコマンドをguest内で実行し、認証を完了します。
+
+```bash
+ssh ubuntu@192.168.10.102
+sudo tailscale up --advertise-exit-node --advertise-routes=192.168.10.0/24 --accept-dns=false --hostname=home-gateway
+tailscale status
+```
+
+### 4. device確認とルート承認
+
+登録後にTailscale Admin Consoleでdeviceを確認し、サブネットルートとexit nodeを承認します。
 
 1. [Tailscale Admin Console](https://login.tailscale.com/admin/machines)にアクセス
-2. tailscale-gatewayデバイスを選択
+2. tailnet hostname `home-gateway`のdeviceが作成したVMに対応することを確認して選択
 3. "Edit route settings"をクリック
 4. アドバタイズされたルート（192.168.10.0/24）とexit nodeを承認
 
@@ -69,6 +81,14 @@ tailscale status
 # ルーティング確認
 ip route
 ```
+
+## Terraform state
+
+active stateはこのルートのlocal `terraform.tfstate`で、Git ignore対象です。
+このルートはraw `terraform apply`で実行し、state backupを呼ばないため、成功後にrepository rootで
+このルートのstateも収集する`make state-backup`を実行します。
+backup / restoreの仕組みと前提は[ADR-0005](../../../../docs/adr/0005-secrets-and-terraform-state.md)と
+[state-backup.sh](../../../../scripts/state-backup.sh) / [state-restore.sh](../../../../scripts/state-restore.sh)を参照してください。
 
 ## 使用方法
 
@@ -118,11 +138,12 @@ tailscale status
 sysctl net.ipv4.ip_forward
 # 出力が "net.ipv4.ip_forward = 1" であることを確認
 
-# ファイアウォール確認
+# UFWを別途導入している場合だけ確認（Terraformは導入しない）
 sudo ufw status
 ```
 
 ## 関連ドキュメント
 
 - [Tailscale Subnet Routers](https://tailscale.com/kb/1019/subnets/)
+- [tailnet側のTerraform管理](../tailscale/README.md)
 - [プロジェクトルートREADME](../../../../README.md)
