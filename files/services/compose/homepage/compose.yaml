@@ -12,6 +12,8 @@ services:
       - ./config/services.yaml:/app/config/services.yaml:ro
       - ./config/bookmarks.yaml:/app/config/bookmarks.yaml:ro
       - ./config/widgets.yaml:/app/config/widgets.yaml:ro
+      - ./config/custom.css:/app/config/custom.css:ro
+      - ./config/custom.js:/app/config/custom.js:ro
     networks:
       - frontend
     cap_drop:
