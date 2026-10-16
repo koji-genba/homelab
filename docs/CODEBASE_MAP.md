@@ -1,7 +1,7 @@
 ---
 last_mapped: 2026-10-16T12:55:43Z
-total_files: 190
-total_tokens: 284946
+total_files: 191
+total_tokens: 285278
 ---
 
 # Codebase Map
@@ -16,7 +16,7 @@ total_tokens: 284946
 - **Never run live operations without explicit user approval:** `make terraform-apply`, `make tailscale-apply`, `make ansible-apply`, `make rollback-app`, `make state-restore`, NFS/ZFS/IX2215 changes, `terraform destroy`. Read-only validation (`make` fixtures/lint/validate) is fine.
 - **Do not read or print secrets.** `files/infrastructure/secrets/runtime.sops.yaml` is encrypted (leave it alone); plaintext `runtime.yaml`, `*.tfstate*`, `terraform.tfvars`, `acl-policy.live.json`, `tmp/`, `*.log` (`teraterm.log`, `ts.log` at repo root) are gitignored and may hold sensitive data.
 - **Hard "never" list** (from docs): never delete the `state-backup` branch; never delete dataset `tank-gen2/data/k8s-volumes` or its in-use data: retirement preserved 3 app directories (SillyTavern and stashPad prod/staging); `group_vars/apps.yml` now declares a fourth use, Open WebUI; do not modify VMID 111 (`stashPadDev`, outside production recovery) or 9000 (shared clone template) unless the task explicitly concerns them; rebuilding either follows [Proxmox host recovery](operations/proxmox-host-recovery.md); keep ZFS snapshot `@pre-phase5-retire-20260923` until explicitly approved; never remove the `192.168.10.0/24` advertisement from the Tailscale gateway; never copy the age private key to the Apps VM; preserve adoption-time ADR decisions; later decisions/clarifications go in dated supplements or a new ADR, and replacing a premise requires a new ADR plus current design, runbook and index updates; never put the sparkDash token, SSH private key or NodeID in docs/commits.
-- **Root [CLAUDE.md](../CLAUDE.md) points to this map; no `AGENTS.md` or `CONTRIBUTING.md` exists.** Docs are mostly Japanese; identifiers/commands are English.
+- **Root [CLAUDE.md](../CLAUDE.md) and [AGENTS.md](../AGENTS.md) carry the same short pointer to this map and must be kept identical; no `CONTRIBUTING.md` exists.** Docs are mostly Japanese; identifiers/commands are English.
 
 ## 1. System Overview
 
