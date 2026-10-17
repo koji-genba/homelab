@@ -4,8 +4,8 @@
 generic-cloud imageをProxmoxへ直接importし、SHA-512 checksumを検証する。手動管理のtemplate VMや
 clone操作は使わない。方式は[apps-vm](../apps-vm/README.md)に倣う。
 
-- VMID `104`、VLAN 10 `192.168.10.104/24`、初期8 vCPU / 16 GiB、OS disk 40 GiB
-  （2026-10-17ユーザー決定。rerank速度改善のため6 → 8 vCPU、メモリは維持。本番未適用）。
+- VMID `104`、VLAN 10 `192.168.10.104/24`、初期12 vCPU / 24 GiB、OS disk 40 GiB
+  （2026-10-17 WS14ユーザー決定。embedding 4 CPU・reranker 6 CPUと、swapなしのTEI warm-upに余裕を持たせる。本番未適用）。
 - データdisk 100 GiB（`scsi1`）を追加し、Ansibleが`/srv/agent`へext4でmountする。
 - tailnetには参加しない。外向きはDiscord / GHCR / Debian / DGX / Apps VM / pve1 NFS。
 

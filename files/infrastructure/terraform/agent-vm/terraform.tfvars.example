@@ -11,8 +11,8 @@ snippet_datastore_id = "local"
 vm_id                = 104
 vm_name              = "agent"
 management_ip        = "192.168.10.104/24"
-cpu_cores            = 8
-memory_mb            = 16384
+cpu_cores            = 12
+memory_mb            = 24576
 os_disk_size_gb      = 40
 data_disk_size_gb    = 100
 

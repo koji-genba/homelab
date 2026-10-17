@@ -19,10 +19,12 @@
 # silently empty directory. `unless-stopped` revives a crashed service after a
 # reboot while leaving an operator-stopped service stopped.
 #
-# Resource limits: the Agent VM is a 16 GiB guest running six services, two of
-# them CPU inference servers, so every service carries an explicit `mem_limit`
+# Resource limits: the Agent VM is a 24 GiB guest without swap, running six
+# services, two of them CPU inference servers. Every service has a `mem_limit`
 # and the two TEI servers a `cpus` cap. The limits are sized for the pinned
-# models and leave ~4 GiB for the OS and Docker. Model prefetch is download-only,
+# models: 16.625 GiB total leaves 7.375 GiB for OS/Docker and page cache.
+# CPU caps total 10 on the 12-vCPU VM, leaving 2 for the other services and OS;
+# caps are ceilings, not reservations. Model prefetch is download-only,
 # capped at 1 GiB, and finishes before the inference servers start.
 #
 # All images are pinned by digest, the repo convention. The two self-built
@@ -96,14 +98,12 @@ services:
     # text-embeddings-inference pinned to the cpu-1.8.3 index digest.
     image: ghcr.io/huggingface/text-embeddings-inference@sha256:8de25e75ce39617f17f2f6c77d60a4f75b65e779ed5005420eb1400072a15c1c
     restart: unless-stopped
-    # ruri-v3-310m is ~1.7 GiB resident; the 4096-token Candle warm-up
-    # needs additional activation memory. Measured peak: see WS7a report.
-    # WS12: on the 8-vCPU VM, cap embedding at 1 CPU alongside reranker's 6;
-    # concurrent model inference leaves 1 CPU for OS/Hermes/Hindsight/DB.
-    # Query embedding precedes reranking, but background retain can overlap it.
-    # Embedding throughput and end-to-end latency need live remeasurement.
-    mem_limit: 4g
-    cpus: 1
+    # WS13/WS14: swap-free 4096-token warm-up peaks at ~5.8 GiB; 4g OOMs.
+    # Use 8g for startup headroom (steady 1.5-1.9 GiB, workload peak 2.74 GiB).
+    # Throughput scales almost linearly from 1 to 2 to 4 CPUs. Background retain
+    # can overlap rerank: embedding 4 + reranker 6 leaves 2 of the VM's 12 vCPUs.
+    mem_limit: 8g
+    cpus: "${TEI_EMBEDDING_CPUS:?set TEI_EMBEDDING_CPUS}"
     # Non-privileged port so the container can drop every capability.
     command:
       - --model-id
@@ -112,13 +112,12 @@ services:
       - "${TEI_EMBEDDING_REVISION:?set TEI_EMBEDDING_REVISION}"
       - --max-concurrent-requests
       - "16"
-      # Retain chunks default to 3000 CHARACTERS (config.py), not 3000
-      # tokens. 2048 clips a full Japanese chunk: TEI explicitly warns that
-      # auto-truncate lowers max_input_length to max_batch_tokens. Use 4096
-      # for full Japanese chunks plus the ruri passage prefix; Hindsight's
-      # separate input cap counts with o200k, so it is NOT an exact ruri bound.
+      # WS13b: retain embeds extracted facts augmented with dates/entities,
+      # not chunk bodies (only retain_extraction_mode=chunks with LLM provider
+      # none embeds those). Keep 4096 as headroom for long facts/observations
+      # plus the ruri passage prefix. TEI auto-truncate lowers max_input_length
+      # to max_batch_tokens; Hindsight's separate o200k cap is not a ruri bound.
       # Very long/arbitrary Unicode inputs can still be truncated by TEI.
-      # Startup and a 3000-character Japanese probe: see WS7a report.
       - --max-batch-tokens
       - "${HINDSIGHT_EMBEDDINGS_MAX_INPUT_TOKENS:?set HINDSIGHT_EMBEDDINGS_MAX_INPUT_TOKENS}"
       - --auto-truncate
@@ -156,9 +155,11 @@ services:
     image: ghcr.io/huggingface/text-embeddings-inference@sha256:8de25e75ce39617f17f2f6c77d60a4f75b65e779ed5005420eb1400072a15c1c
     restart: unless-stopped
     # ruri-v3-reranker-310m (ModernBERT, Candle backend) is ~1.7 GiB resident on
-    # CPU; 3 GiB holds the model plus request buffers. Explicit thread pools
+    # CPU. WS13c: swap-free warm-up peaks at ~2.8-2.9 GiB and hits the 3g
+    # cap with page cache; 4g leaves headroom. Keep 6 CPUs: Candle ModernBert's
+    # batch-size-4 limit gives little benefit from 8/10 CPUs. Explicit thread pools
     # prevent oversubscription behind the CPU quota (WS7c local measurements).
-    mem_limit: 3g
+    mem_limit: 4g
     cpus: "${TEI_RERANKER_CPUS:?set TEI_RERANKER_CPUS}"
     command:
       - --model-id

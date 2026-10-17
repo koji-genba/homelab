@@ -45,17 +45,36 @@ Runner VM 192.168.10.105 (VMID 105, VLAN 10, tailnet外)
 
 ### サービスの資源上限
 
-2026-10-17のユーザー決定（WS12）でAgent VMを6 → **8 vCPU**へ増やす。メモリは16 GiBのまま。
-Agent stackの各サービスは`mem_limit`を持ち、rerankerは`TEI_RERANKER_CPUS=6`、embeddingは`cpus: 1`とする。
+2026-10-17のユーザー決定（WS14）でAgent VMを**12 vCPU / 24 GiB**とする。swapはない前提で設計する。
+Agent stackの各サービスは`mem_limit`を持ち、rerankerは`TEI_RERANKER_CPUS=6`、embeddingは`TEI_EMBEDDING_CPUS=4`とする。
 rerankerはCPU推論プールを明示し、`RAYON/OMP/MKL`のthreadsとtokenization workersを各6、
 1 batchのrequestを1にする（`max-batch-tokens`は2048を維持し、候補本文を切らない）。
 検索queryのembeddingはrerankに先行するが、背景retainのembeddingは併走し得るため、両TEIの上限合計を
-7 CPUに抑え、OS・Hermes・Hindsight・memory-db・CDP用に1 CPU相当の余地を残す。
+10 CPUに抑え、OS・Hermes・Hindsight・memory-db・CDP用に2 CPU相当の余地を残す。
 これら他サービスにはCPU上限を設けず、固定CPUの予約や応答時間の保証とはしない。
 WS7cのF3再生はreranker 4 CPUで約6.23秒、6 CPUで約5.07秒だった。
-embeddingを1 CPUへ抑えた影響を含む新配分の会話p95・同時稼働時の応答性は本番で再計測する（未適用・未計測）。
+新配分の会話p95・同時稼働時の応答性は本番適用後に再計測する（未適用・未計測）。
 モデルの事前取得はdownload-onlyで1 GiBに制限し、TEI起動前に完了する。上限は固定モデル前提の値で、
-OSとDockerに約4 GiBを残す。
+全6サービスの合計16.625 GiBに対し、OS・Docker・page cache用に7.375 GiBを残す。
+
+| サービス | メモリ上限 | 根拠 |
+| --- | --- | --- |
+| embedding | 8 GiB | WS13: swapなしの4096-token warm-upは約5.4〜5.8 GiBで4 GiBではOOM。定常1.5〜1.9 GiB、負荷時ピーク2.74 GiB |
+| reranker | 4 GiB | WS13c: warm-up約2.8〜2.9 GiB、3 GiBでは上限に張り付く。threads/workers各10ではOOM |
+| memory-db | 2 GiB | WS7a/WS7c statsの最大254.7 / 175.1 MiB（旧上限の12.44% / 8.55%）のため据え置き |
+| hindsight | 1 GiB | 同339.6 / 431.1 MiB（33.16% / 42.10%）のため据え置き |
+| hermes | 1.5 GiB | 同473.4 / 392.6 MiB（30.82% / 25.56%）のため据え置き |
+| cdp-tunnel | 128 MiB | メモリ計測記録が見つからないため据え置き |
+
+メモリ記録はWS7aの`itest/logs/{stats,stats-all}.jsonl`、WS7cの`itest/r2/logs/stats.jsonl`を照合した
+サンプル最大であり、厳密なピークではない。上記の他サービスは70%を超えていない。
+WS13ではembeddingは1 → 2 → 4 CPUでほぼ比例して速くなった。一方rerankerは6 / 8 / 10 CPUで
+20候補p50が約3.40 / 3.29 / 3.49秒とほぼ変わらず、Candle ModernBertのbatch size 4制約により
+CPU追加では3秒目標に届かない。手元のRyzen 7 9800X3Dは本番5900Xより速い見込みだが、速度差は未計測。
+WS7cの4.24秒もローカルstack（`http://reranker:8080`）の値で、本番pve1の実測ではない。
+embeddingの`--max-batch-tokens`は4096を維持する。通常のretainは日付・entity付きfactをembeddingし、
+chunk本文を送るのは`retain_extraction_mode=chunks`（LLM providerがnoneのとき）だけであるため、
+4096の理由は長いfact・observationとprefixの余裕とする。Hindsightのo200kとruriのtokenizerは異なる。
 
 2026-10-17の2回のローカル結合試験（いずれも架空データ）で、35会話、export、age暗号化scratch restore、
 bank消去→DB復元を確認した。1回目（WS7a、修正前）は**記憶品質の総合受入は未達**、2回目（WS7c、WS12変更前の6-vCPU設定）は
@@ -81,7 +100,7 @@ stubにしており、本番restore helper全体・NFS日次backupの検証と�
 正式回答のHermes usageは72 calls。Hindsightは識別できる本処理168回とstartup 6回で、初期ログ18回は呼出元不明。
 初期の再開・probeも含むため、268回を正式35回答だけの消費量とは扱わない。
 
-2回目（WS7c、現行設定）:
+2回目（WS7c、WS14変更前の設定）:
 
 | 項目 | ローカル実測 / 判定 |
 | --- | --- |
@@ -98,7 +117,7 @@ stubにしており、本番restore helper全体・NFS日次backupの検証と�
 145記憶・98質問でnDCG@10 0.873（embedding単体）、0.923（rerank後）とWS4のベストペア値に一致する。
 GLM中継はHermes本処理55生成（p50 3.77秒）、Hindsight 118生成（p50 5.28秒）、startup 3生成。
 20候補のrerank p50 3秒以内は未達だが、2026-10-17のユーザー決定で品質優先のMID 20 / HIGH 30を維持し、
-未達のまま受け入れる。8 vCPUでの再計測は本番で行う。
+未達のまま受け入れる。12 vCPU / 24 GiBの新配分の会話応答性は本番適用後に再計測する。
 E群・I群で複数生成になる問の応答時間（E5 82.04秒、I1 78.10秒）は残課題で、品質とのバランスは引き続きユーザー判断とする。
 
 ローカル模擬Runnerによる結合試験（WS7b、2026-10-17、架空データ）:
@@ -329,7 +348,7 @@ Agent VM側の値はrole `agent_stack`が`/etc/homelab/secrets/*.env`へroot 060
   （2回目はF群4/4正答）。2回目は推論threads・tokenization workers・batch request数を絞って速度を
   改善した（診断rerank p50 7.03→4.03秒、20候補p50 9.00→4.24秒）。20候補のp50 3秒以内は未達で、
   2026-10-17のユーザー決定で品質を優先して未達を受け入れ、MID 20 / HIGH 30を維持する。
-  8 vCPUでの再計測は本番で行う。
+  WS13では6 CPUを超えてもほぼ伸びず、12 vCPU / 24 GiBの新配分の会話応答性は本番適用後に再計測する。
 - rerankerの低い絶対値は、固定revisionをtransformersの分類head+sigmoidで照合して最大絶対差7e-7未満だった。
   モデル本来の分布として`agent_stack_recall_min_reranker_score: 0.0`を維持する。未知属性を拒否する閾値ではない。
 - 年の無い発話をHermesが明示retain時に2025年へ補い、自動retainの2026年と矛盾させた事例がある。

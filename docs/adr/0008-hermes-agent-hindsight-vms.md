@@ -113,7 +113,7 @@ assistant由来語句の混入は0件だった。速度は候補の順位を変�
 - rerankerはCPU推論プールを明示する。`cpus: 4`、`RAYON/OMP/MKL` threads 4、tokenization workers 2、
   1 batchのrequestを1、`max-batch-tokens` 2048（候補本文は切らない）。2スレッドは遅く、batch512は本文を
   切るため、より小型のrerankerは品質または対応の面で採れなかった。この時点ではVMのvCPU増設は変更案だった。
-  現在の資源配分は下記WS12補足に従い、applyはしていない。
+  現在の資源配分は下記WS14補足に従い、applyはしていない。
 - 候補数はLOW 8 / MID 20 / HIGH 30。MID 12は一部の検索で根拠が落ちるため採用しない。
   複合質問は20でも落ちるため、質問の分割だけで完全に直ったとはしない。2回目のF群は4/4正答だった。
 - 低いreranker絶対スコアは同じ固定モデルをtransformersの分類経路で照合して一致した。
@@ -136,6 +136,8 @@ custom方針適用を修正し、ローカルfixtureで確認した。修正後�
 
 ## 2026-10-17補足: WS12ユーザー決定
 
+この節は当時の決定を保存する。CPU・メモリ配分と再計測対象は後述のWS14補足で更新した。
+
 - Agent VMを6 → **8 vCPU**へ増やす。メモリは16 GiBのまま。rerankerを6 CPU、
   `RAYON/OMP/MKL` threadsとtokenization workersを各6、embeddingを1 CPUにする。
   両TEIの上限合計を7 CPUとして、同時稼働時もOS・Hermes・Hindsight・DB用に1 CPU相当の余地を残す。
@@ -152,3 +154,27 @@ custom方針適用を修正し、ローカルfixtureで確認した。修正後�
   （LLMへの指示であり、誤記憶を完全に防ぐ保証ではない）。運用は[記憶の運用](../operations/hermes-agent.md#記憶の運用)を参照する。
 
 いずれも2026-10-17のユーザー決定をrepoへ反映したもので、本番適用は未実施。他の未決事項は継続する。
+
+## 2026-10-17補足: WS13計測とWS14資源配分
+
+対話の快適性を優先するユーザー判断で、Agent VMを**12 vCPU / 24 GiB**とする（WS12の資源配分を更新）。
+pve1はRyzen 9 5900X（12C/24T）で普段の負荷が低く、ユーザー観測ではメモリも約60 GB空いている。
+embeddingを**4 CPU / 8 GiB**、rerankerを**6 CPU / 4 GiB**とし、rerankerのthreads・workersは各6を維持する。
+CPU上限の合計10で他サービスとOSに2 CPU相当の余地を残す。上限は予約ではない。
+memory-db 2 GiB、Hindsight 1 GiB、Hermes 1.5 GiB、CDP 128 MiBは据え置く。
+全サービスのメモリ上限合計16.625 GiBに対し、OS・Docker・page cacheへ7.375 GiBを残す。
+モデル事前取得は1 GiBでTEI起動前に完了する。本番適用・新配分の会話応答性の測定は未実施。
+
+WS13のローカル計測要旨:
+
+- embeddingは1 → 2 → 4 CPUでほぼ比例して速くなる（query p50 0.90 → 0.41 → 0.21秒）。
+  swapなしの4096-token warm-upは約5.4〜5.8 GiBを使い、4 GiBではOOMKilled（137）となった。
+  定常1.5〜1.9 GiB・負荷時ピーク2.74 GiBより起動スパイクが支配的なため、余裕を持って8 GiBにする。
+- rerankerは6 / 8 / 10 CPUで20候補p50が約3.40 / 3.29 / 3.49秒とほぼ不変（10 CPU時のworkersは6）。
+  Candle ModernBert backendのbatch size上限4で20候補が直列の小バッチになるため、CPU追加では3秒目標に届かない。
+  swapなしのwarm-upピークは約2.8〜2.9 GiBで3 GiB上限に張り付き、threads/workers各10ではOOMとなったため4 GiBにする。
+- 手元のRyzen 7 9800X3Dは本番5900Xより速い見込みで、絶対時間を本番性能と同一視しない。
+  **WS7cの4.24秒も`itest/r2`のローカルstack（`http://reranker:8080`）の値であり、pve1実測ではない。**
+  本番との速度差の割合は未計測。品質優先のMID 20 / HIGH 30と、3秒目標未達の受け入れは継続する。
+- WS13bでretainがembeddingするのは日付・entity付きの抽出factと確認した。chunk本文は
+  `retain_extraction_mode=chunks`（LLM providerがnoneのとき）だけである。4096は長いfact・observationの余裕として維持する。

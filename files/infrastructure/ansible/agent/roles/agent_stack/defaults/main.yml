@@ -77,9 +77,11 @@ agent_stack_reranker_revision: bb46934ee9ed09f850b9fcff17501b3ef7ddb2b3
 # WS7c: bound the CPU inference pools explicitly instead of letting Rayon see
 # all host cores behind a Docker CPU quota. Single-pair batches bound batch
 # work without shortening candidates; retain the 2048-token pair limit.
-# WS12 (2026-10-17 user decision): 8-vCPU VM; reranker 6 + embedding 1
-# leave one CPU of capacity for OS/Hermes/Hindsight/DB during concurrent TEI work.
-# Embedding's quota is in compose.yaml; full-stack latency needs live remeasurement.
+# WS14 (2026-10-17 user decision, WS13 measurements): 12-vCPU VM;
+# reranker 6 + embedding 4 leave 2 CPUs for OS/Hermes/Hindsight/DB.
+# Embedding scales with CPU; reranker barely improves above 6 (batch-size-4
+# backend limit). Caps are not reservations; full-stack latency is unmeasured.
+agent_stack_embedding_cpus: 4
 agent_stack_reranker_cpus: 6
 agent_stack_reranker_threads: 6
 agent_stack_reranker_tokenization_workers: 6
@@ -92,9 +94,9 @@ agent_stack_reranker_max_batch_requests: 1
 # includes it.
 agent_stack_embedding_query_prefix: "検索クエリ: "
 agent_stack_embedding_passage_prefix: "検索文書: "
-# Retain chunks are at most 3000 characters by default. Preserve full ordinary
-# Japanese chunks with a 4096-token embedding batch. Hindsight's cap uses o200k
-# rather than ruri's tokenizer: it is a guard, not an exact provider length bound.
+# WS13b: retain embeds date/entity-augmented facts, not chunk bodies (except
+# chunks mode with LLM provider none). Keep 4096 for long facts/observations.
+# Hindsight uses o200k, not ruri: this is not an exact provider length bound.
 # TEI's auto-truncate remains the final guard for exceptionally long inputs.
 agent_stack_embeddings_max_input_tokens: 4096
 # The reranker scores the top candidates Hindsight retrieves. The flat default
@@ -105,7 +107,7 @@ agent_stack_embeddings_max_input_tokens: 4096
 # MID 20 / HIGH 30 and split multi-topic recalls. WS7c tunes inference threads
 # and batching without reducing these candidate pools or truncating the text.
 # WS12 (2026-10-17 user decision): retain MID 20 / HIGH 30 for quality;
-# accept the unmet 3-second rerank target and remeasure on the 8-vCPU VM.
+# accept the unmet 3-second rerank target. WS14: remeasure on the 12-vCPU VM.
 agent_stack_reranker_max_candidates_low: 8
 agent_stack_reranker_max_candidates_mid: 20
 agent_stack_reranker_max_candidates_high: 30
@@ -118,7 +120,7 @@ agent_stack_recall_min_reranker_score: 0.0
 # (the workstation/AdGuard path NXDOMAINs it). Runtime containers stay offline.
 agent_stack_model_fetch_dns: 1.1.1.1
 # Fetch only: never initialize TEI/Candle during provisioning. Bound even the
-# downloader so it cannot exhaust the 16 GiB VM. Image digest inspected locally.
+# downloader so it cannot exhaust the 24 GiB VM. Image digest inspected locally.
 agent_stack_model_fetch_image: docker.io/library/python:3.13-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f
 agent_stack_model_fetch_memory: 1g
 agent_stack_pinned_models:

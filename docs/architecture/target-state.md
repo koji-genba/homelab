@@ -211,8 +211,11 @@ VM側はNFSv4、`hard,_netdev`を使用する。systemd mount unit、`RequiresMo
 Agent/Runner VMの初回構築は未実施。ローカルでは会話・export・暗号化scratch restoreとDB復元を確認したが、
 新規sessionの想起等の品質閾値と会話p95目標は達成したが、創作1件と20候補rerank速度目標の未達が残る。
 Runnerは模擬コンテナの部分試験までで、実VMの復旧・systemd制限・NFS/Discordは未検証。
-2026-10-17のユーザー決定でAgent VMを6 → 8 vCPU（メモリ16 GiB維持）へ増やし、reranker 6 CPU・embedding 1 CPUとする。
-品質優先でrerank候補MID 20 / HIGH 30を維持し、3秒目標は未達のまま受け入れる。8 vCPUでの再計測は本番で行う。
+2026-10-17のユーザー決定（WS14）でAgent VMを12 vCPU / 24 GiBとし、reranker 6 CPU / 4 GiB・embedding 4 CPU / 8 GiBとする。
+TEIのCPU上限合計10に対して他サービスとOSに2 CPU相当の余地を残す（予約ではない）。全サービスのメモリ上限合計は
+16.625 GiBで、OS・Docker・page cacheに7.375 GiBの余裕がある。swapなしのwarm-upピークを踏まえた値とする。
+品質優先でrerank候補MID 20 / HIGH 30を維持し、3秒目標は未達のまま受け入れる。WS13ではbatch 4制約により
+rerankerは6 CPUを超えてもほぼ伸びず、新配分の会話応答性は本番適用後に再計測する。
 `memory.write_approval: false`で組み込み記憶は即時書き込み、`skills.write_approval: true`は維持する。
 Hindsightの自動retainは承認ゲートの対象外で、custom抽出とSOULによる方針を継続する。これらの本番適用は未実施。
 計測値と制約は[Hermes Agent運用](../operations/hermes-agent.md#サービスの資源上限)を参照する。

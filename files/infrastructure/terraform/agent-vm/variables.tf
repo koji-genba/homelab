@@ -83,15 +83,15 @@ variable "vm_name" {
 }
 
 variable "cpu_cores" {
-  description = "vCPU cores for the Agent VM (2026-10-17 user decision: start at 8, grow to 24 later)"
+  description = "vCPU cores for the Agent VM (2026-10-17 WS14 user decision: 12)"
   type        = number
-  default     = 8
+  default     = 12
 }
 
 variable "memory_mb" {
-  description = "Dedicated memory in MiB for the Agent VM (see PRD: start at 16384, grow to 24576 later)"
+  description = "Dedicated memory in MiB for the Agent VM (2026-10-17 WS14: 24 GiB for swap-free TEI warm-up and OS headroom)"
   type        = number
-  default     = 16384
+  default     = 24576
 }
 
 variable "os_disk_size_gb" {

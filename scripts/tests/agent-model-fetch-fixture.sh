@@ -8,6 +8,7 @@ import runpy
 import sys
 import tempfile
 import types
+from decimal import Decimal
 
 import yaml
 
@@ -92,13 +93,39 @@ for suffix in ('cpus', 'threads', 'tokenization_workers', 'max_batch_requests'):
     assert variable + '={{ ' + key + ' }}' in env_template
     assert variable + '=' + str(limits[key]) in validator
 assert limits['agent_stack_reranker_threads'] <= limits['agent_stack_reranker_cpus']
-# WS12: the two CPU-heavy models must leave capacity on the 8-vCPU VM even
+# WS14: the two CPU-heavy models must leave capacity on the 12-vCPU VM even
 # when background retain embeds documents during a foreground rerank.
 assert limits['agent_stack_reranker_cpus'] == 6
 assert limits['agent_stack_reranker_threads'] == 6
 assert limits['agent_stack_reranker_tokenization_workers'] == 6
-assert compose['services']['embedding']['cpus'] == 1
-assert limits['agent_stack_reranker_cpus'] + compose['services']['embedding']['cpus'] <= 7
+embedding = compose['services']['embedding']
+assert limits['agent_stack_embedding_cpus'] == 4
+assert embedding['cpus'] == '${TEI_EMBEDDING_CPUS:?set TEI_EMBEDDING_CPUS}'
+assert 'TEI_EMBEDDING_CPUS={{ agent_stack_embedding_cpus }}' in env_template
+assert 'TEI_EMBEDDING_CPUS=4' in validator
+# Tie resource accounting to the actual VM defaults, including the example.
+tf_root = pathlib.Path('files/infrastructure/terraform/agent-vm')
+tf_variables = (tf_root / 'variables.tf').read_text()
+def vm_default(name):
+    block = re.search(r'variable "' + name + r'" \{(.*?)\n\}', tf_variables, re.S).group(1)
+    return int(re.search(r'default\s*=\s*(\d+)', block).group(1))
+vm_cpus, vm_memory_mb = vm_default('cpu_cores'), vm_default('memory_mb')
+assert (vm_cpus, vm_memory_mb) == (12, 24576)
+example = (tf_root / 'terraform.tfvars.example').read_text()
+for name, value in [('cpu_cores', vm_cpus), ('memory_mb', vm_memory_mb)]:
+    assert re.search(r'^' + name + r'\s*=\s*' + str(value) + r'$', example, re.M)
+assert limits['agent_stack_reranker_cpus'] + limits['agent_stack_embedding_cpus'] <= vm_cpus - 2
+assert embedding['mem_limit'] == '8g'
+assert reranker['mem_limit'] == '4g'
+def memory_mib(value):
+    match = re.fullmatch(r'([0-9.]+)([gm])', value)
+    return Decimal(match[1]) * (1024 if match[2] == 'g' else 1)
+memory_total_mb = sum(memory_mib(service['mem_limit']) for service in compose['services'].values())
+# Include every service, and retain at least 6 GiB for OS/Docker and page cache.
+assert memory_total_mb + 6 * 1024 <= vm_memory_mb
+embedding_argv = embedding['command']
+assert embedding_argv[embedding_argv.index('--max-batch-tokens') + 1] == '${HINDSIGHT_EMBEDDINGS_MAX_INPUT_TOKENS:?set HINDSIGHT_EMBEDDINGS_MAX_INPUT_TOKENS}'
+assert limits['agent_stack_embeddings_max_input_tokens'] == 4096
 assert reranker['cpus'] == '${TEI_RERANKER_CPUS:?set TEI_RERANKER_CPUS}'
 for key in ('RAYON_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS'):
     assert reranker['environment'][key] == '${TEI_RERANKER_THREADS:?set TEI_RERANKER_THREADS}'

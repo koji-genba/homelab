@@ -191,7 +191,7 @@ State uses the **default local backend per root** (`terraform.tfstate`, gitignor
 | `apps-vm` | bpg/proxmox 0.112.0 | Apps VM (VMID 101, 4c/12G/40G, `192.168.10.101`, VLAN 10) from pinned Debian trixie cloud image + cloud-init snippet | `ignore_changes=[initialization[0].user_data_file_id]` (guarded by a CI fixture); optional VLAN-11 NIC `legacy_service_nic=false`; needs ssh-agent for root@pve ops |
 | `tailscale` | tailscale 0.29.2 | tailnet ACL + DNS (AdGuard nameserver `100.86.147.127`, `use_with_exit_node`) + optional subnet-router | gated by `manage_tailnet`, `enable_adguard_dns`, `adguard_ready`, `acl_policy_file`; ACL/DNS are imported, router is not; DNS has `prevent_destroy` |
 | `tailscale-gateway` | bpg/proxmox ~>0.81 | VM 102, `192.168.10.102`, template-clone (VMID 9000) | `tailscale up` is manual (issue #29); route approval manual |
-| `agent-vm` | bpg/proxmox | Hermes Agent VM (VMID 104, initial 8 vCPU / 16 GiB / 40 GiB OS + 100 GiB data disk, `192.168.10.104`, VLAN 10; 2026-10-17 user decision) from its own pinned Debian 13 cloud image | not on the tailnet; `ignore_changes=[initialization[0].user_data_file_id]`; Proxmox user/role/ACL manual; Ansible-only runtime |
+| `agent-vm` | bpg/proxmox | Hermes Agent VM (VMID 104, initial 12 vCPU / 24 GiB / 40 GiB OS + 100 GiB data disk, `192.168.10.104`, VLAN 10; 2026-10-17 WS14 user decision) from its own pinned Debian 13 cloud image | not on the tailnet; `ignore_changes=[initialization[0].user_data_file_id]`; Proxmox user/role/ACL manual; Ansible-only runtime |
 | `runner-vm` | bpg/proxmox | Hermes Runner VM (VMID 105, 8 vCPU / 16 GiB / 40 GiB OS + 150 GiB work disk, `192.168.10.105`, VLAN 10) | separate cloud image `file_name`; no Docker, no Discord token/memory DB/management keys |
 | `elastiflow` | bpg/proxmox ~>0.81 | VM 103, `192.168.10.103`; `install.sh` sets up unauthenticated ES/Kibana + flow collector | sFlow collector `:6343` |
 | `stashpad-dev` | bpg/proxmox ~>0.81 | VM 111 `.41` (out of scope) | Gitignored per-root state/tfvars |
@@ -418,8 +418,9 @@ WS8ではagent_opsの失敗通知/掃除、停止後の安全snapshot、healthch
 rebuildの設定タイムゾーン/operation再開/新bank方針を修正した。rebuildはHindsight専用で、汎用provider投入器ではない。
 現行の仕様・検証範囲は[helper運用文書](operations/hermes-agent-backup.md)を正とする。gotcha番号は変更していない。
 
-WS12（2026-10-17ユーザー決定）でAgent VMを8 vCPUへ増やす（16 GiB維持）。rerankerは6 CPU・
-RAYON/OMP/MKL threads・tokenization workers各6、embeddingは1 CPUとし、両TEI併走時も1 CPU相当の余地を残す。
-品質優先でMID 20 / HIGH 30を維持し、3秒目標は未達のまま受け入れた。8 vCPUでの再計測は本番で行う。
+WS14（2026-10-17ユーザー決定・WS13計測）でAgent VMを12 vCPU / 24 GiBとする。rerankerは6 CPU / 4 GiB・
+RAYON/OMP/MKL threads・tokenization workers各6、embeddingは4 CPU / 8 GiBとし、CPU上限合計10で2 CPU相当の余地を残す（予約ではない）。
+メモリ上限合計16.625 GiB、OS/Docker・page cache用7.375 GiB。品質優先でMID 20 / HIGH 30を維持し、3秒目標未達を受け入れた。
+rerankerはbatch 4制約で6 CPUを超えてもほぼ伸びず、新配分の会話応答性は本番適用後に再計測する。
 `memory.write_approval: false`、`skills.write_approval: true`も決定済み。前者は組み込みMEMORY.md/USER.mdのゲートで、
 Hindsight自動retainには適用されない。Hindsight側はcustom抽出とSOULで方針を与える。本番適用は未実施。
