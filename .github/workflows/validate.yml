@@ -21,10 +21,18 @@ jobs:
         run: make terraform-validate
       - name: Terraform Tailscale validation
         run: make terraform-validate-tailscale
+      - name: Terraform Agent VM validation
+        run: make terraform-validate-agent-vm
+      - name: Terraform Runner VM validation
+        run: make terraform-validate-runner-vm
       - name: Ansible lint and syntax check
         run: |
           make ansible-lint
           make ansible-check
+      - name: Hermes Agent Ansible lint and syntax check
+        run: |
+          make ansible-lint-agent
+          make ansible-check-agent
       - name: Ansible bootstrap path regression
         run: make ansible-bootstrap-paths-test
       - name: Compose reconcile bind-mount regression
@@ -33,10 +41,32 @@ jobs:
         run: make toolbox-uid-test
       - name: Apps VM cloud-init schema regression
         run: make cloud-init-test
+      - name: Agent VM cloud-init schema regression
+        run: make agent-vm-cloud-init-test
+      - name: Runner VM cloud-init schema regression
+        run: make runner-vm-cloud-init-test
       - name: Apps VM cloud-init lifecycle regression
         run: make terraform-apps-vm-lifecycle-test
+      - name: Agent/Runner VM cloud-init lifecycle regression
+        run: make terraform-agent-runner-vm-lifecycle-test
+      - name: Runner privilege regression
+        run: make runner-privilege-fixture
+      - name: Runner egress firewall regression
+        run: make runner-firewall-fixture
+      - name: Agent/Runner Terraform scope regression
+        run: make agent-runner-scope-fixture
+      - name: Agent Docker DNAT guard regression
+        run: make agent-dnat-guard-fixture
+      - name: Agent backup regression
+        run: make agent-backup-fixture
+      - name: Agent health check regression
+        run: make agent-healthcheck-fixture
+      - name: Agent restore/export/rebuild regression
+        run: make agent-restore-fixture
       - name: Compose configuration
         run: make compose-config
+      - name: Agent Compose configuration
+        run: make agent-compose-config
       - name: AdGuard schema-34 configuration check
         run: make adguard-config-check
       - name: Gatus Caddy probe regression check

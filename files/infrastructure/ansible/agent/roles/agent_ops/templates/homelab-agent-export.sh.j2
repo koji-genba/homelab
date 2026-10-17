@@ -1,0 +1,269 @@
+#!/usr/bin/env bash
+# Provider-independent knowledge export, installed by the Ansible role agent_ops
+# at {{ agent_ops_helpers_dir }}/homelab-agent-export.
+#
+# Usage: homelab-agent-export
+#
+# Produces a human/portable set under {{ agent_ops_exports_dir }}/<ts>/:
+#   sessions.jsonl       Hermes session transcripts (hermes sessions export)
+#   hindsight-bank.zip   Hindsight export-bank (native, importable)
+#   memories.jsonl       Provider-independent JSONL: one memory per line with
+#                        text, type, dates, document and tags, read straight from
+#                        the Hindsight HTTP API so it survives a provider swap
+#   documents.jsonl      One line per Hindsight document
+#   METADATA.txt         Versions, bank id and counts
+#
+# With agent_ops_export_encrypt an additional age-encrypted copy of the whole
+# set is written to the backup NFS export. Nothing here is destructive.
+set -Eeuo pipefail
+umask 077
+
+PROG=homelab-agent-export
+
+PROJECT_DIR={{ agent_ops_project_dir | to_json }}
+PROJECT_NAME={{ agent_ops_project_name | to_json }}
+ENV_FILE={{ agent_ops_env_file | to_json }}
+SECRET_ENV_FILE={{ agent_ops_secrets_dir | to_json }}/memory-db.env
+MONITORING_ENV={{ agent_ops_monitoring_env | to_json }}
+EXPORTS_DIR={{ agent_ops_exports_dir | to_json }}
+BACKUP_MOUNT={{ agent_ops_backup_mount | to_json }}
+BACKUP_SOURCE={{ agent_ops_backup_source | to_json }}
+BACKUP_MARKER={{ agent_ops_backup_marker | to_json }}
+BACKUP_MARKER_VALUE={{ agent_ops_backup_marker_value | to_json }}
+HERMES_DATA_DIR={{ agent_ops_hermes_data_dir | to_json }}
+BANK_ID={{ agent_ops_bank_id | to_json }}
+ENCRYPT={{ agent_ops_export_encrypt | bool | to_json }}
+AGE_RECIPIENTS=({% for recipient in agent_ops_backup_age_recipients %}{{ recipient | to_json }} {% endfor %})
+
+log() { printf '%s: %s\n' "$PROG" "$*" >&2; }
+fail() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
+json_str() { python3 -c 'import json,sys; sys.stdout.write(json.dumps(sys.argv[1]))' "$1"; }
+
+load_env_file() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+    set -a
+    # shellcheck disable=SC1090
+    . "$file"
+    set +a
+}
+
+notify_operator() {
+    local message="$1" url
+    load_env_file "$MONITORING_ENV"
+    url="${OPERATOR_WEBHOOK_URL:-}"
+    [ -n "$url" ] || return 0
+    curl -fsS --max-time 15 -X POST -H 'Content-Type: application/json' \
+        --data "$(printf '{"content": %s}' "$(json_str "$message")")" \
+        "$url" >/dev/null 2>&1 || log 'operator webhook delivery failed'
+}
+
+on_exit() {
+    local rc=$?
+    trap - EXIT
+    if ! cleanup; then
+        log 'cleanup incomplete; inspect private work directories'
+        [ "$rc" -ne 0 ] || rc=1
+    fi
+    if [ "$rc" -ne 0 ]; then
+        notify_operator "$PROG failed (exit $rc) on $(hostname)"
+    fi
+    exit "$rc"
+}
+
+compose() {
+    docker compose \
+        --project-name "$PROJECT_NAME" \
+        --env-file "$ENV_FILE" \
+        --env-file "$SECRET_ENV_FILE" \
+        --file "$PROJECT_DIR/compose.yaml" \
+        "$@"
+}
+
+require_backup_mount() {
+    if ! findmnt -rn -M "$BACKUP_MOUNT" >/dev/null 2>&1; then
+        fail "$BACKUP_MOUNT is not mounted; refusing to write a backup to local disk (provision the pve1 export)"
+    fi
+    local source fstype marker
+    source="$(findmnt -rn -M "$BACKUP_MOUNT" -o SOURCE)"
+    fstype="$(findmnt -rn -M "$BACKUP_MOUNT" -o FSTYPE)"
+    [ "$source" = "$BACKUP_SOURCE" ] || fail "$BACKUP_MOUNT source is '$source', expected '$BACKUP_SOURCE'"
+    [ "$fstype" = nfs4 ] || fail "$BACKUP_MOUNT is not nfs4 (found '$fstype')"
+    [ -e "$BACKUP_MOUNT/$BACKUP_MARKER" ] || fail "missing export marker $BACKUP_MOUNT/$BACKUP_MARKER"
+    marker="$(cat "$BACKUP_MOUNT/$BACKUP_MARKER")"
+    [ "$marker" = "$BACKUP_MARKER_VALUE" ] || fail "export marker content is '$marker', expected '$BACKUP_MARKER_VALUE'"
+}
+
+# hindsight is read-only with a tmpfs /tmp, so a staged archive cannot be copied
+# out of it; drop it from inside the container on success and failure alike.
+rm_bank_archive() {
+    compose exec -T hindsight rm -f "$1" >/dev/null 2>&1 || true
+}
+
+EXPORT_BANK_ARCHIVE=''
+EXPORT_HERMES_DIR=''
+cleanup() {
+    [ -z "${EXPORT_ENCRYPTED_TMP:-}" ] || rm -f "$EXPORT_ENCRYPTED_TMP"
+    [ -z "$EXPORT_BANK_ARCHIVE" ] || rm_bank_archive "$EXPORT_BANK_ARCHIVE"
+    [ -z "$EXPORT_HERMES_DIR" ] || compose exec -T --user {{ agent_ops_uid }}:{{ agent_ops_gid }} hermes rm -rf "$EXPORT_HERMES_DIR" >/dev/null 2>&1 || true
+}
+
+main() {
+    [ "$(id -u)" -eq 0 ] || fail 'must run as root'
+    mkdir -p {{ agent_ops_state_dir | to_json }}
+    exec 9>{{ (agent_ops_state_dir ~ '/ops.lock') | to_json }}
+    flock -n 9 || fail 'another backup/restore/export is running'
+    [ "$#" -eq 0 ] || fail "unexpected argument: $1"
+
+    local ts dest final
+    ts="$(date -u +%Y%m%dT%H%M%SZ)"
+    final="$EXPORTS_DIR/$ts"
+    dest="$EXPORTS_DIR/.incomplete-$ts"
+    if [ -e "$dest" ] || [ -e "$final" ]; then
+        fail 'export set already exists'
+    fi
+    mkdir -p "$dest"
+    EXPORT_HERMES_DIR="/opt/data/exports/$ts"
+    EXPORT_BANK_ARCHIVE="/tmp/export-bank-$ts.zip"
+
+    log 'exporting Hermes sessions as JSONL'
+    compose exec -T --user {{ agent_ops_uid }}:{{ agent_ops_gid }} hermes mkdir -p "/opt/data/exports/$ts"
+    compose exec -T --user {{ agent_ops_uid }}:{{ agent_ops_gid }} hermes hermes sessions export \
+        "/opt/data/exports/$ts/sessions.jsonl" --format jsonl \
+        || fail 'hermes sessions export failed'
+    cp "$HERMES_DATA_DIR/exports/$ts/sessions.jsonl" "$dest/sessions.jsonl"
+    compose exec -T --user {{ agent_ops_uid }}:{{ agent_ops_gid }} hermes rm -rf "/opt/data/exports/$ts" >/dev/null 2>&1 || true
+
+    log 'exporting the Hindsight bank (native)'
+    # hindsight's read-only container hides the archive, so the bank is streamed
+    # straight out through exec instead. A failing exec also proves the service
+    # is unreachable, replacing the old compose ps -q guard.
+    compose exec -T hindsight hindsight-admin export-bank \
+        --bank "$BANK_ID" --output "/tmp/export-bank-$ts.zip" \
+        || { rm_bank_archive "/tmp/export-bank-$ts.zip"; fail 'hindsight-admin export-bank failed'; }
+    compose exec -T hindsight cat "/tmp/export-bank-$ts.zip" >"$dest/hindsight-bank.zip.tmp" \
+        || { rm -f "$dest/hindsight-bank.zip.tmp"; rm_bank_archive "/tmp/export-bank-$ts.zip"; fail 'could not read the exported bank out of the container'; }
+    [ -s "$dest/hindsight-bank.zip.tmp" ] \
+        || { rm -f "$dest/hindsight-bank.zip.tmp"; rm_bank_archive "/tmp/export-bank-$ts.zip"; fail 'exported bank archive is empty'; }
+    mv "$dest/hindsight-bank.zip.tmp" "$dest/hindsight-bank.zip"
+    rm_bank_archive "/tmp/export-bank-$ts.zip"
+
+    log 'exporting provider-independent memories and documents'
+    compose exec -T hindsight python3 - "$BANK_ID" <<'PY' >"$dest/memories.jsonl" \
+        || fail 'provider-independent memory export failed'
+import json
+import sys
+import urllib.request
+
+bank = sys.argv[1]
+base = "http://127.0.0.1:8888"
+page = 100
+
+
+def get(path):
+    with urllib.request.urlopen(base + path, timeout=60) as response:
+        return json.load(response)
+
+
+offset = 0
+while True:
+    data = get(f"/v1/default/banks/{bank}/memories/list?limit={page}&offset={offset}")
+    items = data.get("items") or []
+    for memory in items:
+        record = {
+            "kind": "memory",
+            "id": memory.get("id"),
+            "text": memory.get("text"),
+            "context": memory.get("context"),
+            "type": memory.get("fact_type"),
+            "state": memory.get("state"),
+            "document_id": memory.get("document_id"),
+            "occurred_start": memory.get("occurred_start"),
+            "occurred_end": memory.get("occurred_end"),
+            "mentioned_at": memory.get("mentioned_at"),
+            "tags": memory.get("tags") or [],
+            "metadata": memory.get("metadata") or {},
+            "updated_at": memory.get("updated_at"),
+        }
+        print(json.dumps(record, ensure_ascii=False))
+    offset += len(items)
+    if not items or offset >= (data.get("total") or 0):
+        break
+PY
+    compose exec -T hindsight python3 - "$BANK_ID" <<'PY' >"$dest/documents.jsonl" \
+        || fail 'provider-independent document export failed'
+import json
+import sys
+import urllib.parse
+import urllib.request
+
+bank = sys.argv[1]
+base = "http://127.0.0.1:8888"
+page = 100
+
+
+def get(path):
+    with urllib.request.urlopen(base + path, timeout=60) as response:
+        return json.load(response)
+
+
+offset = 0
+while True:
+    data = get(f"/v1/default/banks/{bank}/documents?limit={page}&offset={offset}")
+    items = data.get("items") or []
+    for document in items:
+        document_id = document.get("id")
+        detail = {}
+        if document_id:
+            quoted = urllib.parse.quote(str(document_id), safe="/")
+            detail = get(f"/v1/default/banks/{bank}/documents/{quoted}")
+        record = {
+            "kind": "document",
+            "id": document_id,
+            "text": detail.get("original_text") if isinstance(detail, dict) else None,
+            "retain_params": detail.get("retain_params"),
+            "content_hash": document.get("content_hash"),
+            "memory_unit_count": document.get("memory_unit_count"),
+            "tags": document.get("tags") or [],
+            "metadata": document.get("document_metadata") or {},
+            "created_at": document.get("created_at"),
+            "updated_at": document.get("updated_at"),
+        }
+        print(json.dumps(record, ensure_ascii=False))
+    offset += len(items)
+    if not items or offset >= (data.get("total") or 0):
+        break
+PY
+
+    {
+        printf 'created_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        printf 'host=%s\n' "$(hostname)"
+        printf 'bank_id=%s\n' "$BANK_ID"
+        printf 'hermes_version=%s\n' "$(compose exec -T --user {{ agent_ops_uid }}:{{ agent_ops_gid }} hermes python3 -c 'import hermes_cli; print(hermes_cli.__version__)' 2>/dev/null || echo unknown)"
+        printf 'hindsight_version=%s\n' "$(compose exec -T hindsight python3 -c 'import importlib.metadata as m; print(m.version("hindsight-api"))' 2>/dev/null || echo unknown)"
+        printf 'sessions=%s\n' "$(wc -l <"$dest/sessions.jsonl")"
+        printf 'memories=%s\n' "$(wc -l <"$dest/memories.jsonl")"
+        printf 'documents=%s\n' "$(wc -l <"$dest/documents.jsonl")"
+    } >"$dest/METADATA.txt"
+    (cd "$dest" && sha256sum ./*.jsonl ./*.zip >SHA256SUMS)
+
+    if [ "$ENCRYPT" = true ]; then
+        [ -n "${AGE_RECIPIENTS[0]:-}" ] || fail 'agent_ops_export_encrypt is on but agent_backup_age_recipients is empty'
+        require_backup_mount
+        log "writing an encrypted copy to $BACKUP_MOUNT"
+        local args=() recipient
+        for recipient in "${AGE_RECIPIENTS[@]}"; do
+            args+=(-r "$recipient")
+        done
+        EXPORT_ENCRYPTED_TMP="$BACKUP_MOUNT/.incomplete-agent-export-$ts.tar.gz.age"
+        tar -C "$dest" -czf - . | age "${args[@]}" -o "$EXPORT_ENCRYPTED_TMP" \
+            || fail 'encrypted export copy failed'
+        mv "$EXPORT_ENCRYPTED_TMP" "$BACKUP_MOUNT/agent-export-$ts.tar.gz.age"
+    fi
+
+    mv "$dest" "$final"
+    log "export set written to $final"
+}
+
+trap on_exit EXIT
+main "$@"

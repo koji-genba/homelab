@@ -1,0 +1,120 @@
+---
+# Agent data disk (/srv/agent) and the optional backup NFS mount
+# (/mnt/agent-backups). The backup export does not exist yet, so the play only
+# mounts it when pve1 advertises it and the guard treats "not mounted" as a safe
+# skip. The guard still fails closed when the mount is present but wrong.
+- name: Create the Agent data mount point
+  ansible.builtin.file:
+    path: "{{ agent_data_mount }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+
+- name: Inspect the Agent data disk
+  ansible.builtin.stat:
+    path: "{{ agent_data_disk }}"
+  register: agent_storage_data_disk_stat
+
+- name: Refuse to continue when the Agent data disk is missing
+  ansible.builtin.assert:
+    that:
+      - agent_storage_data_disk_stat.stat.exists
+    fail_msg: >-
+      The Agent data disk {{ agent_data_disk }} was not found. Confirm the
+      Proxmox by-id path and set agent_data_disk in group_vars/agent.yml.
+
+- name: Read the current filesystem type on the Agent data disk
+  ansible.builtin.command:
+    argv:
+      - blkid
+      - -s
+      - TYPE
+      - -o
+      - value
+      - "{{ agent_data_disk }}"
+  register: agent_storage_data_blkid
+  changed_when: false
+  failed_when: false
+
+- name: Create the ext4 filesystem on the Agent data disk
+  ansible.builtin.command:
+    argv:
+      - mkfs.ext4
+      - -F
+      - -L
+      - "{{ agent_data_disk_label }}"
+      - "{{ agent_data_disk }}"
+  when: agent_storage_data_blkid.stdout | trim == ''
+  changed_when: true
+
+- name: Mount the Agent data disk
+  ansible.posix.mount:
+    path: "{{ agent_data_mount }}"
+    src: "{{ agent_data_disk }}"
+    fstype: ext4
+    opts: defaults,noatime
+    state: mounted
+
+- name: Check whether the backup NFS export is advertised by pve1
+  ansible.builtin.command:
+    argv:
+      - showmount
+      - -e
+      - "{{ item.server }}"
+  loop: "{{ agent_backup_mounts }}"
+  register: agent_storage_backup_showmount
+  changed_when: false
+  failed_when: false
+
+- name: Create the backup mount points
+  ansible.builtin.file:
+    path: "{{ item.local_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+  loop: "{{ agent_backup_mounts }}"
+
+- name: Mount the backup exports that pve1 currently advertises
+  ansible.posix.mount:
+    path: "{{ item.item.local_path }}"
+    src: "{{ item.item.server }}:{{ item.item.export }}"
+    fstype: nfs4
+    opts: "{{ item.item.options }}"
+    state: mounted
+  loop: "{{ agent_storage_backup_showmount.results }}"
+  when: item.item.export in (item.stdout | default(''))
+
+- name: Report backup exports that are not provisioned yet
+  ansible.builtin.debug:
+    msg: >-
+      {{ item.item.export }} is not advertised by {{ item.item.server }}; the
+      backup mount is skipped. Create the pve1 dataset, export and marker before
+      the backup timer is enabled (WS5).
+  loop: "{{ agent_storage_backup_showmount.results }}"
+  when: item.item.export not in (item.stdout | default(''))
+
+- name: Install the backup mount guard
+  ansible.builtin.template:
+    src: agent-backup-guard.sh.j2
+    dest: /usr/local/sbin/homelab-agent-backup-guard
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install the backup mount guard service
+  ansible.builtin.template:
+    src: homelab-agent-backup-guard.service.j2
+    dest: /etc/systemd/system/homelab-agent-backup-guard.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload systemd
+
+- name: Enable the backup mount guard
+  ansible.builtin.systemd:
+    name: homelab-agent-backup-guard.service
+    daemon_reload: true
+    enabled: true
+    state: started

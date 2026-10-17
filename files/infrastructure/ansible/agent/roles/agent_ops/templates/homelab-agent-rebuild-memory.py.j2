@@ -1,0 +1,455 @@
+#!/usr/bin/env python3
+# Provider-independent Hermes -> Hindsight memory rebuild worker, installed by
+# the Ansible role agent_ops at
+# {{ agent_ops_helpers_dir }}/homelab-agent-rebuild-memory.py and executed inside
+# the hindsight container by homelab-agent-rebuild-memory.
+#
+# It reads a Hermes session export (JSONL, one session object per line with an
+# "id" and a "messages" list) and rebuilds Hindsight memory in the same shape the
+# Hermes Hindsight plugin writes automatically via sync_turn: one document per
+# session, one retain request per session, whose content is the flat JSON array
+# of turn messages the plugin builds in _build_turn_messages
+# ([{"role", "content": "User: ...", "timestamp"}, ...]).
+#
+# Idempotency: every item carries document_id = session id and an explicit
+# update_mode = "replace". A session is always sent whole, in one request, so the
+# replace rewrites that document with byte-identical text and a re-run converges
+# instead of duplicating. (An append would duplicate on re-run; splitting one
+# session across several requests would let a later replace tombstone the part an
+# earlier request wrote.)
+#
+# A turn is the pair the plugin retains: a user message and the final assistant
+# prose that answers it. Tool/system messages and tool-call-only assistant
+# messages are never retained, exactly as sync_turn never receives them. Each
+# turn is stamped with the user message's time (session start when absent) and
+# both messages of a turn share that timestamp, like the plugin.
+#
+# The checkpoint records the input's SHA-256 and the target bank. If the state
+# file does not match the input being processed, the run fails instead of
+# resuming from another input's progress (the wrapper's --fresh clears it).
+import argparse
+import hashlib
+import json
+import math
+import os
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+EVENT_TIMEZONE = ZoneInfo("Asia/Tokyo")
+STATE_VERSION = 2
+
+# Shape constants, kept in lockstep with the Hermes Hindsight plugin
+# (plugins/memory/hindsight/__init__.py) so a rebuilt document is shaped like an
+# automatically retained one.
+RETAIN_USER_PREFIX = "User"
+RETAIN_ASSISTANT_PREFIX = "Assistant"
+RETAIN_CONTEXT = "conversation between Hermes Agent and the User"
+OBSERVATION_SCOPES = "shared"
+SOURCE = "hermes-session-export"
+
+# A session is retained as one async operation; the wait for it to finish must
+# cover the whole extraction + consolidation the server runs server-side.
+DEFAULT_TIMEOUT = 1800
+DEFAULT_POLL_INTERVAL = 5.0
+
+
+class OperationFailed(RuntimeError):
+    pass
+
+
+def log(message):
+    print(f"homelab-agent-rebuild-memory: {message}", file=sys.stderr, flush=True)
+
+
+def iter_sessions(path):
+    with open(path, encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                yield line_number, json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise SystemExit(f"invalid JSON at line {line_number}; input not skipped") from exc
+
+
+def _text_of(message):
+    content = message.get("content")
+    if isinstance(content, list):
+        content = "\n".join(
+            part.get("text", "")
+            for part in content
+            if isinstance(part, dict)
+        )
+    if content is None:
+        return ""
+    return str(content).strip()
+
+
+def _parse_timestamp(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(value, tz=timezone.utc)
+        except (ValueError, OverflowError, OSError):
+            return None
+    if isinstance(value, str) and value.strip():
+        text = value.strip()
+        try:
+            return datetime.fromtimestamp(float(text), tz=timezone.utc)
+        except (ValueError, OverflowError, OSError):
+            pass
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=EVENT_TIMEZONE)
+        return parsed
+    return None
+
+
+def _iso_timestamp(value):
+    parsed = _parse_timestamp(value)
+    if parsed is None:
+        return None
+    return parsed.astimezone(EVENT_TIMEZONE).isoformat(timespec="seconds")
+
+
+def _iso_now():
+    return datetime.now(EVENT_TIMEZONE).isoformat(timespec="seconds")
+
+
+def _session_started_at(session):
+    # last_activity_at is the END of activity, never evidence of the start date.
+    for key in ("started_at", "created_at", "start_time"):
+        if session.get(key) is not None:
+            started = _iso_timestamp(session.get(key))
+            if started:
+                return started
+    return None
+
+
+def build_turns(session):
+    """Return (turns, dropped_user_turns, missing_timestamp_turns).
+
+    Each turn is (user_text, assistant_text, isoTimestamp). Only a user message
+    paired with the last assistant prose before the next user message becomes a
+    turn; a user message with no assistant answer is dropped (the plugin never
+    saw a completed turn to retain).
+    """
+    started_at = _session_started_at(session)
+    turns = []
+    dropped = 0
+    missing = 0
+    user = None
+    assistant = None
+
+    def flush():
+        nonlocal user, assistant, dropped, missing
+        if user is not None:
+            if assistant is None:
+                dropped += 1
+            else:
+                timestamp = user[1] or started_at
+                if timestamp is None:
+                    missing += 1
+                turns.append((user[0], assistant, timestamp))
+        user = None
+        assistant = None
+
+    for message in session.get("messages") or []:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "").lower()
+        text = _text_of(message)
+        if role == "user":
+            flush()
+            if text:
+                user = (text, _iso_timestamp(message.get("timestamp")))
+        elif role == "assistant" and text and not message.get("tool_calls") and user is not None:
+            # Keep the last assistant prose of the turn: tool-call-only
+            # assistant turns and intermediate text are superseded by the answer.
+            assistant = text
+    flush()
+    return turns, dropped, missing
+
+
+def build_item(session, turns, fallback_timestamp=None):
+    session_id = str(session.get("id") or session.get("session_id") or "")
+    parent = str(session.get("parent_session_id") or "")
+    flat = []
+    for user_text, assistant_text, timestamp in turns:
+        timestamp = timestamp or fallback_timestamp
+        flat.append({"role": "user", "content": f"{RETAIN_USER_PREFIX}: {user_text}", "timestamp": timestamp})
+        flat.append({"role": "assistant", "content": f"{RETAIN_ASSISTANT_PREFIX}: {assistant_text}", "timestamp": timestamp})
+    content = json.dumps(flat, ensure_ascii=False)
+    tags = [f"session:{session_id}"]
+    if parent and parent != session_id:
+        tags.append(f"parent:{parent}")
+    metadata = {
+        # UTC write/audit time; the event time lives on the item timestamp and on
+        # each message inside the content array.
+        "retained_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        "message_count": str(len(flat)),
+        "turn_index": str(len(turns)),
+        "session_id": session_id,
+        "source": SOURCE,
+    }
+    for key in ("user_id", "chat_id", "chat_type", "thread_id", "model"):
+        value = session.get(key)
+        if value not in (None, ""):
+            metadata[key] = str(value)
+    title = session.get("title")
+    if title:
+        metadata["title"] = str(title)
+    item = {
+        "content": content,
+        "context": RETAIN_CONTEXT,
+        "document_id": session_id,
+        "tags": tags,
+        "observation_scopes": OBSERVATION_SCOPES,
+        "update_mode": "replace",
+        "metadata": metadata,
+    }
+    item_timestamp = turns[0][2] or fallback_timestamp
+    if item_timestamp:
+        item["timestamp"] = item_timestamp
+    return item
+
+
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def load_state(state_file):
+    if os.path.exists(state_file):
+        with open(state_file, encoding="utf-8") as handle:
+            return json.load(handle)
+    return {"last_line": 0, "posted": 0, "sessions": 0}
+
+
+def save_state(state_file, state):
+    tmp = f"{state_file}.tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(state, handle)
+    os.replace(tmp, state_file)
+
+
+def _request_json(url, payload=None, method="GET", timeout=60):
+    data = json.dumps(payload).encode() if payload is not None else None
+    request = urllib.request.Request(url, data=data, method=method)
+    if data is not None:
+        request.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        raw = response.read()
+    return json.loads(raw) if raw else {}
+
+
+def _bank_url(api, bank, path):
+    return f"{api}/v1/default/banks/{urllib.parse.quote(bank, safe='')}{path}"
+
+
+def retain(api, bank, item, timeout):
+    """Submit one session as one async retain; return the operation id."""
+    body = _request_json(
+        _bank_url(api, bank, "/memories"),
+        {"items": [item], "async": True},
+        method="POST",
+        timeout=timeout,
+    )
+    operation_id = body.get("operation_id")
+    if not operation_id:
+        ids = body.get("operation_ids") or []
+        operation_id = ids[0] if ids else None
+    if not operation_id:
+        raise SystemExit(f"retain response for bank {bank!r} carried no operation_id")
+    return operation_id
+
+
+def wait_operation(api, bank, operation_id, timeout, interval):
+    url = _bank_url(api, bank, f"/operations/{urllib.parse.quote(operation_id, safe='')}")
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            status = _request_json(url, timeout=30)
+        except urllib.error.URLError as exc:
+            if time.monotonic() >= deadline:
+                raise SystemExit(f"async retain {operation_id} status check failed: {exc}") from exc
+            log(f"status check for {operation_id} failed ({exc}); retrying")
+            time.sleep(interval)
+            continue
+        state = status.get("status")
+        if state == "completed":
+            return
+        if state in ("failed", "cancelled", "not_found"):
+            # Server diagnostics can contain conversation/LLM text.
+            raise OperationFailed(f"async retain {operation_id} ended {state}; inspect privately")
+        if time.monotonic() >= deadline:
+            raise SystemExit(
+                f"async retain {operation_id} not complete after {timeout}s (last status={state!r})"
+            )
+        time.sleep(interval)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--input", required=True, help="Hermes session JSONL export")
+    parser.add_argument("--bank", required=True)
+    parser.add_argument("--timezone", default="Asia/Tokyo", help="Hermes configured IANA timezone")
+    parser.add_argument("--api", default="http://hindsight:8888")
+    parser.add_argument("--state-dir", default="/progress")
+    parser.add_argument("--rate-limit", type=float, default=0.5, help="seconds between sessions")
+    # One async retain per session runs the whole extraction server-side; the
+    # wait for it must be generous or a healthy large session is aborted.
+    parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT,
+                        help="seconds to wait for one async retain operation")
+    parser.add_argument("--poll-interval", type=float, default=DEFAULT_POLL_INTERVAL,
+                        help="seconds between async operation status checks")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="report the shape of the run without retaining anything")
+    parser.add_argument("--allow-missing-timestamp", action="store_true",
+                        help="permit sessions with no message or start time (stamped with now)")
+    args = parser.parse_args()
+    global EVENT_TIMEZONE
+    EVENT_TIMEZONE = ZoneInfo(args.timezone)
+    for name in ("rate_limit", "timeout", "poll_interval"):
+        value = getattr(args, name)
+        if not math.isfinite(value) or value < 0 or (name != "rate_limit" and value == 0):
+            parser.error(f"--{name.replace('_', '-')} must be finite and {'nonnegative' if name == 'rate_limit' else 'positive'}")
+
+    os.makedirs(args.state_dir, exist_ok=True)
+    state_file = os.path.join(args.state_dir, "progress.json")
+    input_sha = file_sha256(args.input)
+    state = load_state(state_file)
+    if os.path.exists(state_file):
+        # Never resume from progress that belongs to another input or bank.
+        if (state.get("input_sha256") != input_sha or state.get("bank") != args.bank
+                or state.get("version") != STATE_VERSION or state.get("timezone") != args.timezone):
+            raise SystemExit(
+                "progress state does not match this input/bank "
+                f"(state bank={state.get('bank')!r}, input bank={args.bank!r}, "
+                f"state sha256={state.get('input_sha256')!r}, input sha256={input_sha!r}); "
+                "use --fresh to restart"
+            )
+    state["bank"] = args.bank
+    state["input_sha256"] = input_sha
+    state["version"] = STATE_VERSION
+    state["timezone"] = args.timezone
+    if not args.dry_run:
+        save_state(state_file, state)
+    log(f"resuming after line {state['last_line']} ({state['posted']} session(s) posted)")
+
+    sessions_seen = 0
+    sessions_retained = 0
+    turns_seen = 0
+    messages_seen = 0
+    dropped_turns = 0
+    missing_timestamps = 0
+    max_item_bytes = 0
+
+    for line_number, session in iter_sessions(args.input):
+        if not isinstance(session, dict):
+            raise SystemExit(f"line {line_number}: expected a session object")
+        if line_number <= state["last_line"]:
+            continue
+        session_id = str(session.get("id") or session.get("session_id") or "")
+        if not session_id:
+            raise SystemExit(f"line {line_number}: session has no id")
+
+        turns, dropped, missing = build_turns(session)
+        sessions_seen += 1
+        turns_seen += len(turns)
+        dropped_turns += dropped
+        messages_seen += len(turns) * 2
+        missing_timestamps += missing
+
+        if not turns:
+            log(f"session {session_id}: no complete turns; skipping")
+            state["last_line"] = line_number
+            if not args.dry_run:
+                save_state(state_file, state)
+            continue
+
+        fallback_timestamp = _iso_now() if args.allow_missing_timestamp else None
+
+        if args.dry_run:
+            item = build_item(session, turns, fallback_timestamp)
+            sessions_retained += 1
+            max_item_bytes = max(max_item_bytes, len(item["content"].encode("utf-8")))
+            log(
+                f"dry-run: session {session_id}: {len(turns)} turn(s), "
+                f"{len(item['content'].encode('utf-8'))} bytes, document_id={item['document_id']}"
+            )
+            continue
+
+        if missing and fallback_timestamp is None:
+            raise SystemExit(
+                f"session {session_id} has {missing} turn(s) with no export timestamp and no "
+                "session start time; refusing to date them with the re-run time "
+                "(use --allow-missing-timestamp to stamp them with now)"
+            )
+
+        item = build_item(session, turns, fallback_timestamp)
+        max_item_bytes = max(max_item_bytes, len(item["content"].encode("utf-8")))
+
+        try:
+            # Persist the submitted operation before polling. An interrupted
+            # wait resumes that operation instead of racing a second replace.
+            pending = state.get("pending")
+            if pending:
+                if pending["line"] != line_number:
+                    raise SystemExit("pending operation line mismatch; inspect progress")
+                operation_id = pending["operation_id"]
+            else:
+                operation_id = retain(args.api, args.bank, item, args.timeout)
+                state["pending"] = {"line": line_number, "operation_id": operation_id}
+                save_state(state_file, state)
+            wait_operation(args.api, args.bank, operation_id, args.timeout, args.poll_interval)
+        except OperationFailed as exc:
+            state.pop("pending", None)
+            save_state(state_file, state)
+            raise SystemExit(str(exc)) from exc
+        except urllib.error.URLError as exc:
+            raise SystemExit(f"retain request failed for session {session_id}: {exc}") from exc
+
+        # The session is retained and confirmed complete before its line is
+        # checkpointed, so an interrupted run never resumes past a session it did
+        # not actually retain.
+        sessions_retained += 1
+        state["posted"] += 1
+        state["sessions"] += 1
+        state["last_line"] = line_number
+        state.pop("pending", None)
+        save_state(state_file, state)
+        if args.rate_limit:
+            time.sleep(args.rate_limit)
+
+    if args.dry_run:
+        log(
+            "dry-run summary: "
+            f"sessions={sessions_seen} retained={sessions_retained} turns={turns_seen} "
+            f"messages={messages_seen} max_item_bytes={max_item_bytes} "
+            f"missing_timestamp_turns={missing_timestamps} dropped_user_turns={dropped_turns}"
+        )
+        if missing_timestamps:
+            log(
+                f"WARNING: {missing_timestamps} turn(s) have neither an export timestamp nor a "
+                "session start time; a real run would fail (use --allow-missing-timestamp)"
+            )
+    else:
+        log(f"done: {sessions_retained} session(s) retained, {turns_seen} turn(s) across this run")
+
+
+if __name__ == "__main__":
+    main()

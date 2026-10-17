@@ -1,0 +1,17 @@
+---
+# Runner VM specifics: the unprivileged execution account, the forwarding-only
+# CDP tunnel account, the coding toolchain, the work disk and headless Chromium.
+- name: Configure the runner execution account
+  ansible.builtin.import_tasks: user.yml
+
+- name: Configure the CDP tunnel account
+  ansible.builtin.import_tasks: cdp.yml
+
+- name: Configure the runner runtime
+  ansible.builtin.import_tasks: runtime.yml
+
+- name: Configure the runner work disk
+  ansible.builtin.import_tasks: storage.yml
+
+- name: Configure the headless Chromium service
+  ansible.builtin.import_tasks: chromium.yml

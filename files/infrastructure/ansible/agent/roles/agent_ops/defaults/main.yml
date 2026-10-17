@@ -1,0 +1,118 @@
+---
+# WS5 operational layer for the Agent VM: daily backup, restore (production and
+# an isolated scratch restore test), provider-independent export / memory
+# rebuild, and a short-interval health check. Everything runs as root through
+# systemd timer/units and /usr/local/sbin helpers. The role runs after
+# Host helpers run as root; Hermes commands run as the data UID. The role follows
+# agent_stack so the Compose project, the generated secrets and the Runner SSH
+# keys already exist.
+#
+# Contract from WS1/WS2 (all have defaults so the role lints/syntax-checks
+# without the other roles having run):
+#   agent_data_mount            (/srv/agent)
+#   agent_backup_mounts         (the pve1 NFS export + marker)
+#   agent_runner_ssh_key_dir    (/etc/homelab/agent/ssh)
+#   agent_stack_*               (project/env/secrets/model/bank values)
+
+# --- Layout ------------------------------------------------------------------
+agent_ops_helpers_dir: "{{ agent_stack_helpers_dir | default('/usr/local/sbin') }}"
+agent_ops_state_dir: /var/lib/homelab-agent
+agent_ops_project_dir: "{{ agent_stack_project_dir | default('/opt/homelab-agent') }}"
+agent_ops_project_name: "{{ agent_stack_project_name | default('agent') }}"
+agent_ops_env_file: "{{ agent_stack_env_file | default('/etc/homelab/agent/compose.env') }}"
+agent_ops_secrets_dir: "{{ agent_stack_secrets_dir | default('/etc/homelab/secrets') }}"
+agent_ops_monitoring_env: "{{ agent_ops_secrets_dir }}/agent-monitoring.env"
+agent_ops_ssh_key_dir: "{{ agent_runner_ssh_key_dir | default('/etc/homelab/agent/ssh') }}"
+agent_ops_uid: "{{ agent_stack_uid | default(10000) }}"
+agent_ops_gid: "{{ agent_stack_gid | default(10000) }}"
+
+agent_ops_data_mount: "{{ agent_data_mount | default('/srv/agent') }}"
+agent_ops_hermes_data_dir: "{{ agent_stack_hermes_data_dir | default(agent_ops_data_mount ~ '/hermes') }}"
+agent_ops_exports_dir: "{{ agent_ops_data_mount }}/exports"
+agent_ops_scratch_dir: "{{ agent_ops_data_mount }}/restore-scratch"
+agent_ops_safety_dir: "{{ agent_ops_data_mount }}/restore-safety"
+agent_ops_rebuild_dir: "{{ agent_ops_data_mount }}/rebuild"
+agent_ops_tmp_dir: "{{ agent_ops_data_mount }}/tmp"
+
+# --- Backup target -----------------------------------------------------------
+# Derived from WS1's agent_backup_mounts so the mount source, marker and path in
+# the backup guard can never drift from the mount itself.
+agent_ops_backup_mount_map: "{{ (agent_backup_mounts | default([])) | first | default({}) }}"
+agent_ops_backup_mount: "{{ agent_ops_backup_mount_map.local_path | default('/mnt/agent-backups') }}"
+agent_ops_backup_source: >-
+  {{ (agent_ops_backup_mount_map.server | default('192.168.10.11'))
+     ~ ':' ~ (agent_ops_backup_mount_map.export | default('/mnt/tank-gen2/data/agent-backups')) }}
+agent_ops_backup_marker: "{{ agent_ops_backup_mount_map.marker | default('.homelab-export-agent-backups') }}"
+agent_ops_backup_marker_value: "{{ agent_ops_backup_mount_map.marker_value | default('agent-backups') }}"
+
+# age public recipients. Set in group_vars/agent.yml so an operator can change
+# them without touching the role. The matching identities must never live on the
+# Agent VM or in git; a set produced while this is empty is refused.
+agent_ops_backup_age_recipients: "{{ agent_backup_age_recipients | default([]) }}"
+
+# Generation management counts completed sets only (incomplete sets are always
+# removed). A set created on agent_ops_backup_weekly_dow (1=Mon..7=Sun, UTC) is
+# additionally retained as that week's set.
+agent_ops_backup_daily_keep: 14
+agent_ops_backup_weekly_keep: 8
+agent_ops_backup_weekly_dow: 7
+# systemd OnCalendar, host local time (PRD example: 03:30).
+agent_ops_backup_on_calendar: "*-*-* 03:30:00"
+
+# --- Runner work tree --------------------------------------------------------
+# Streamed over SSH with the dedicated execution key WS2 generated, using the
+# same account the Hermes terminal backend uses (command execution is allowed;
+# only forwarding is denied on that key). Caches and virtualenvs are excluded.
+agent_ops_runner_host: "{{ agent_stack_runner_host | default(runner_management_ip | default('192.168.10.105')) }}"
+agent_ops_runner_user: "{{ agent_stack_runner_user | default(runner_user | default('hermes-runner')) }}"
+agent_ops_runner_workspace: "{{ agent_stack_runner_workspace | default('/srv/agent-work') }}"
+agent_ops_runner_excludes:
+  - node_modules
+  - .venv
+  - venv
+  - .cache
+  - __pycache__
+  - .git
+  - .pytest_cache
+  - .mypy_cache
+  - .ruff_cache
+  - .tox
+  - .nox
+  - .npm
+  - target
+
+# --- Memory stack identifiers / versions -------------------------------------
+agent_ops_bank_id: "{{ agent_stack_bank_id | default('personal') }}"
+agent_ops_postgres_user: hindsight_user
+agent_ops_postgres_db: hindsight_db
+agent_ops_embedding_model: "{{ agent_stack_embedding_model | default('cl-nagoya/ruri-v3-310m') }}"
+agent_ops_embedding_revision: "{{ agent_stack_embedding_revision | default('18b60fb8c2b9df296fb4212bb7d23ef94e579cd3') }}"
+agent_ops_reranker_model: "{{ agent_stack_reranker_model | default('cl-nagoya/ruri-v3-reranker-310m') }}"
+agent_ops_reranker_revision: "{{ agent_stack_reranker_revision | default('bb46934ee9ed09f850b9fcff17501b3ef7ddb2b3') }}"
+# Scratch restore shares this Compose project's TEI servers (stateless, read
+# only) instead of starting a second pair, so it must join the project network.
+agent_ops_production_network: "{{ agent_ops_project_name }}_internal"
+
+# --- Health check ------------------------------------------------------------
+# Every five minutes (PRD 4.6). Failures notify only on state change; a still
+# failing check is re-notified every agent_ops_health_renotify_seconds.
+agent_ops_health_on_calendar: "*:0/5"
+agent_ops_health_renotify_seconds: 21600
+agent_ops_health_services:
+  - memory-db
+  - embedding
+  - reranker
+  - hindsight
+  - hermes
+  - cdp-tunnel
+agent_ops_health_inference_url: "{{ agent_stack_llm_base_url | default('http://192.168.10.51:8000/v1') }}"
+agent_ops_health_pending_ops_threshold: 1000
+# A fixed Japanese query; recall must return a result list for it.
+agent_ops_health_recall_query: "最近の出来事を教えて"
+agent_ops_cdp_port: "{{ agent_stack_cdp_port | default(9222) }}"
+
+# --- Export / rebuild --------------------------------------------------------
+# Optionally also encrypt an export set and copy it to the backup NFS export
+# (requires the same recipients as backups).
+agent_ops_export_encrypt: false
+agent_ops_rebuild_rate_limit: "0.5"

@@ -1,0 +1,25 @@
+---
+# Idempotency is by job name: `hermes cron create` has no upsert, so the job is
+# only registered when it is not already present in the full list.
+- name: Read the current Hermes cron jobs
+  ansible.builtin.command:
+    argv: >-
+      {{ agent_stack_compose_argv_prefix + [
+           'exec', '-T', '--user', agent_stack_uid ~ ':' ~ agent_stack_gid,
+           'hermes', 'hermes', 'cron', 'list', '--all'] }}
+  register: agent_stack_cron_list
+  changed_when: false
+  failed_when: false
+
+- name: Register the weekly review job when it is missing
+  ansible.builtin.command:
+    argv: >-
+      {{ agent_stack_compose_argv_prefix + [
+           'exec', '-T', '--user', agent_stack_uid ~ ':' ~ agent_stack_gid, 'hermes', 'hermes', 'cron', 'create',
+           agent_stack_weekly_review_schedule,
+           agent_stack_weekly_review_prompt,
+           '--name', agent_stack_weekly_review_name,
+           '--deliver', 'discord',
+           '--skill', agent_stack_weekly_review_skill ] }}
+  when: agent_stack_weekly_review_name not in (agent_stack_cron_list.stdout | default(''))
+  changed_when: true

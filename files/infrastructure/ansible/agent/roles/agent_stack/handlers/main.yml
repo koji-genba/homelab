@@ -1,0 +1,10 @@
+---
+# Handlers flush at the end of the play, so the bank policy and cron job are
+# applied through `docker compose exec` against the containers that are already
+# running; the recreation below is what makes Hermes/Hindsight pick up rendered
+# configuration changes on their next start.
+- name: Restart the Agent stack
+  ansible.builtin.command:
+    argv:
+      - "{{ agent_stack_helpers_dir }}/homelab-agent-compose-up"
+  changed_when: true

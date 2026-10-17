@@ -1,0 +1,446 @@
+# Agent VM (agent-vm, VMID 104) resident services.
+#
+# This project is deliberately OUTSIDE files/services/compose/ so the Apps VM
+# reconciler, its hardcoded project allowlist, the digest gate and
+# scripts/compose-config.sh never pick it up. It is rendered and started by the
+# Ansible role agent_stack (files/infrastructure/ansible/agent/roles/agent_stack)
+# after manual approval; it is not wired to the 15-minute Apps reconcile timer.
+#
+# Everything runs on one private bridge network with no host port published:
+# nothing on the LAN or tailnet can reach these services directly. Hermes reaches
+# outward (Discord, the GLM endpoint on 192.168.10.51, the Apps VM FQDNs mapped
+# below) and the memory stack is only reachable from this project.
+#
+# Restart policy: every long-running service uses `restart: unless-stopped`.
+# This differs from the Apps VM, which leaves `restart` unset and relies on its
+# systemd-ordered reconcile loop. The Agent stack has no reconciler and no unit
+# ordering: its state is on the local data disk (not NFS) and its bind mounts use
+# create_host_path:false, so a missing mount is a loud start failure rather than a
+# silently empty directory. `unless-stopped` revives a crashed service after a
+# reboot while leaving an operator-stopped service stopped.
+#
+# Resource limits: the Agent VM is a 16 GiB guest running six services, two of
+# them CPU inference servers, so every service carries an explicit `mem_limit`
+# and the two TEI servers a `cpus` cap. The limits are sized for the pinned
+# models and leave ~4 GiB for the OS and Docker. Model prefetch is download-only,
+# capped at 1 GiB, and finishes before the inference servers start.
+#
+# All images are pinned by digest, the repo convention. The two self-built
+# images still carry the ALL-ZERO placeholder until the image workflows
+# (.github/workflows/hermes-agent-image.yml, memory-db-image.yml) publish a
+# first digest; copy that digest from the workflow step summary into this file in
+# a follow-up change. The role's helper (installed as
+# /usr/local/sbin/homelab-agent-compose-up from
+# roles/agent_stack/templates/homelab-agent-compose-up.sh.j2) refuses to start
+# while the placeholder is present.
+name: agent
+
+services:
+  memory-db:
+    # Built by .github/workflows/memory-db-image.yml (PostgreSQL 17 + pgvector +
+    # PGroonga). PLACEHOLDER — transcribe the published digest after the first
+    # workflow run.
+    image: ghcr.io/koji-genba/homelab-memory-db@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    restart: unless-stopped
+    # PostgreSQL with a small shared buffer: 2 GiB covers connections, index
+    # builds and pgroonga maintenance without letting a runaway query take the VM.
+    mem_limit: 2g
+    env_file:
+      # POSTGRES_PASSWORD, generated on the Agent VM by the Ansible role (not a
+      # SOPS value: it is reproducible and nothing external depends on it). The
+      # role's compose wrapper also passes this file with --env-file so the same
+      # value interpolates into Hindsight's DATABASE_URL below; there is exactly
+      # one file, not a second copy.
+      - path: "${SECRETS_DIR:?set SECRETS_DIR}/memory-db.env"
+        format: raw
+    environment:
+      # The image extends the upstream PGroonga PostgreSQL 17 image with
+      # pgvector. It runs no init SQL: Hindsight creates the vector, pg_trgm and
+      # pgroonga extensions itself on first boot (POSTGRES_USER is a superuser)
+      # and then owns the schema.
+      POSTGRES_USER: hindsight_user
+      POSTGRES_DB: hindsight_db
+    volumes:
+      # Data lives on the Agent VM's dedicated data disk, never on NFS.
+      - type: bind
+        source: "${POSTGRES_DATA_DIR:?set POSTGRES_DATA_DIR}"
+        target: /var/lib/postgresql/data
+        bind:
+          create_host_path: false
+    networks:
+      - internal
+    # The Debian PostgreSQL entrypoint starts as root, chowns the data directory
+    # and then drops to the postgres account (su-exec), so it needs exactly these
+    # capabilities instead of Docker's default set.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    # PostgreSQL uses shared memory for parallel workers and index builds.
+    shm_size: 512m
+    healthcheck:
+      test: [CMD, pg_isready, -U, hindsight_user, -d, hindsight_db]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  embedding:
+    # HuggingFace Text Embeddings Inference (CPU), ghcr.io/huggingface/
+    # text-embeddings-inference pinned to the cpu-1.8.3 index digest.
+    image: ghcr.io/huggingface/text-embeddings-inference@sha256:8de25e75ce39617f17f2f6c77d60a4f75b65e779ed5005420eb1400072a15c1c
+    restart: unless-stopped
+    # ruri-v3-310m is ~1.7 GiB resident; the 4096-token Candle warm-up
+    # needs additional activation memory. Measured peak: see WS7a report.
+    # WS12: on the 8-vCPU VM, cap embedding at 1 CPU alongside reranker's 6;
+    # concurrent model inference leaves 1 CPU for OS/Hermes/Hindsight/DB.
+    # Query embedding precedes reranking, but background retain can overlap it.
+    # Embedding throughput and end-to-end latency need live remeasurement.
+    mem_limit: 4g
+    cpus: 1
+    # Non-privileged port so the container can drop every capability.
+    command:
+      - --model-id
+      - "${TEI_EMBEDDING_MODEL:?set TEI_EMBEDDING_MODEL}"
+      - --revision
+      - "${TEI_EMBEDDING_REVISION:?set TEI_EMBEDDING_REVISION}"
+      - --max-concurrent-requests
+      - "16"
+      # Retain chunks default to 3000 CHARACTERS (config.py), not 3000
+      # tokens. 2048 clips a full Japanese chunk: TEI explicitly warns that
+      # auto-truncate lowers max_input_length to max_batch_tokens. Use 4096
+      # for full Japanese chunks plus the ruri passage prefix; Hindsight's
+      # separate input cap counts with o200k, so it is NOT an exact ruri bound.
+      # Very long/arbitrary Unicode inputs can still be truncated by TEI.
+      # Startup and a 3000-character Japanese probe: see WS7a report.
+      - --max-batch-tokens
+      - "${HINDSIGHT_EMBEDDINGS_MAX_INPUT_TOKENS:?set HINDSIGHT_EMBEDDINGS_MAX_INPUT_TOKENS}"
+      - --auto-truncate
+    environment:
+      PORT: "8080"
+      # Never reach the network: the role pre-fetched the pinned revision into
+      # MODELS_DIR with a one-shot container that had a working resolver for the
+      # xet CDN. See docs in the role defaults.
+      HF_HUB_OFFLINE: "1"
+    volumes:
+      - type: bind
+        source: "${MODELS_DIR:?set MODELS_DIR}"
+        target: /data
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - internal
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: [CMD, curl, -fsS, "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+
+  reranker:
+    # Same TEI CPU image as embedding (cpu-1.8.3 index digest).
+    image: ghcr.io/huggingface/text-embeddings-inference@sha256:8de25e75ce39617f17f2f6c77d60a4f75b65e779ed5005420eb1400072a15c1c
+    restart: unless-stopped
+    # ruri-v3-reranker-310m (ModernBERT, Candle backend) is ~1.7 GiB resident on
+    # CPU; 3 GiB holds the model plus request buffers. Explicit thread pools
+    # prevent oversubscription behind the CPU quota (WS7c local measurements).
+    mem_limit: 3g
+    cpus: "${TEI_RERANKER_CPUS:?set TEI_RERANKER_CPUS}"
+    command:
+      - --model-id
+      - "${TEI_RERANKER_MODEL:?set TEI_RERANKER_MODEL}"
+      - --revision
+      - "${TEI_RERANKER_REVISION:?set TEI_RERANKER_REVISION}"
+      - --max-concurrent-requests
+      - "16"
+      # The token limit also caps each query/document pair under auto-truncate.
+      # Keep it at 2048; shrinking it for throughput can discard evidence.
+      # Limit requests per batch instead, without changing candidate contents.
+      - --max-batch-tokens
+      - "2048"
+      - --max-batch-requests
+      - "${TEI_RERANKER_MAX_BATCH_REQUESTS:?set TEI_RERANKER_MAX_BATCH_REQUESTS}"
+      - --tokenization-workers
+      - "${TEI_RERANKER_TOKENIZATION_WORKERS:?set TEI_RERANKER_TOKENIZATION_WORKERS}"
+      - --auto-truncate
+    environment:
+      PORT: "8080"
+      HF_HUB_OFFLINE: "1"
+      RAYON_NUM_THREADS: "${TEI_RERANKER_THREADS:?set TEI_RERANKER_THREADS}"
+      OMP_NUM_THREADS: "${TEI_RERANKER_THREADS:?set TEI_RERANKER_THREADS}"
+      MKL_NUM_THREADS: "${TEI_RERANKER_THREADS:?set TEI_RERANKER_THREADS}"
+    volumes:
+      - type: bind
+        source: "${MODELS_DIR:?set MODELS_DIR}"
+        target: /data
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - internal
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: [CMD, curl, -fsS, "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+
+  hindsight:
+    # ghcr.io/vectorize-io/hindsight slim (API v1.0.0): external embeddings and
+    # reranking, no baked-in models. Pinned to the 1.0.0-slim index digest.
+    image: ghcr.io/vectorize-io/hindsight@sha256:f284d0d63e92e993686e18c15f6e4a221cd80fdfd47625a7c5f6cd8568078440
+    restart: unless-stopped
+    # API server only: PostgreSQL and the models are external, so 1 GiB is ample.
+    mem_limit: 1g
+    depends_on:
+      memory-db:
+        condition: service_healthy
+      embedding:
+        condition: service_healthy
+      reranker:
+        condition: service_healthy
+    environment:
+      # --- Database: external PostgreSQL, vector + multilingual full text. ---
+      HINDSIGHT_API_DATABASE_URL: "postgresql://hindsight_user:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@memory-db:5432/hindsight_db"
+      HINDSIGHT_API_VECTOR_EXTENSION: pgvector
+      HINDSIGHT_API_TEXT_SEARCH_EXTENSION: pgroonga
+      # Multilingual bank: keep the query analyzer broad for Japanese/English.
+      HINDSIGHT_API_QUERY_ANALYZER_LANGUAGES: "en,ja"
+      # --- Embeddings / reranking: the TEI sidecars above. ---
+      HINDSIGHT_API_EMBEDDINGS_PROVIDER: tei
+      HINDSIGHT_API_EMBEDDINGS_TEI_URL: "http://embedding:8080"
+      # ruri-v3 is asymmetric: Hindsight prepends these literally on the recall
+      # query side and the retained-document side (the TEI provider is plain
+      # text-in/vector-out, so the client carries the task prefix). The trailing
+      # space is part of the model card's prefix.
+      HINDSIGHT_API_EMBEDDINGS_QUERY_PREFIX: "${HINDSIGHT_EMBEDDINGS_QUERY_PREFIX:?set HINDSIGHT_EMBEDDINGS_QUERY_PREFIX}"
+      HINDSIGHT_API_EMBEDDINGS_PASSAGE_PREFIX: "${HINDSIGHT_EMBEDDINGS_PASSAGE_PREFIX:?set HINDSIGHT_EMBEDDINGS_PASSAGE_PREFIX}"
+      # Hindsight's o200k input guard; TEI uses the same numeric ceiling with
+      # ruri's tokenizer. See the length/truncation caveat above.
+      HINDSIGHT_API_EMBEDDINGS_MAX_INPUT_TOKENS: "${HINDSIGHT_EMBEDDINGS_MAX_INPUT_TOKENS:?set HINDSIGHT_EMBEDDINGS_MAX_INPUT_TOKENS}"
+      HINDSIGHT_API_RERANKER_PROVIDER: tei
+      HINDSIGHT_API_RERANKER_TEI_URL: "http://reranker:8080"
+      # Match TEI's max_client_batch_size=32; Hindsight's default 128 gets
+      # HTTP 413 above 32. Serialize CPU batches across recall operations.
+      HINDSIGHT_API_RERANKER_TEI_BATCH_SIZE: "32"
+      HINDSIGHT_API_RERANKER_TEI_MAX_CONCURRENT: "1"
+      # Cap how many candidates the CPU cross-encoder scores per recall. The flat
+      # default (300) is far too slow here; the plugin recalls at budget=mid.
+      HINDSIGHT_API_RERANKER_MAX_CANDIDATES_LOW: "${HINDSIGHT_RERANKER_MAX_CANDIDATES_LOW:?set HINDSIGHT_RERANKER_MAX_CANDIDATES_LOW}"
+      HINDSIGHT_API_RERANKER_MAX_CANDIDATES_MID: "${HINDSIGHT_RERANKER_MAX_CANDIDATES_MID:?set HINDSIGHT_RERANKER_MAX_CANDIDATES_MID}"
+      HINDSIGHT_API_RERANKER_MAX_CANDIDATES_HIGH: "${HINDSIGHT_RERANKER_MAX_CANDIDATES_HIGH:?set HINDSIGHT_RERANKER_MAX_CANDIDATES_HIGH}"
+      # --- LLM: the existing GLM endpoint (OpenAI-compatible). --------------
+      # Hindsight's "openai" provider refuses to start with an empty key even
+      # though tensorfold ignores Authorization, so send a fixed dummy. It is
+      # not a credential; the endpoint authenticates nothing.
+      HINDSIGHT_API_LLM_PROVIDER: openai
+      HINDSIGHT_API_LLM_BASE_URL: "${HINDSIGHT_LLM_BASE_URL:?set HINDSIGHT_LLM_BASE_URL}"
+      HINDSIGHT_API_LLM_MODEL: "${HINDSIGHT_LLM_MODEL:?set HINDSIGHT_LLM_MODEL}"
+      HINDSIGHT_API_LLM_REASONING_EFFORT: "${HINDSIGHT_LLM_REASONING_EFFORT:?set HINDSIGHT_LLM_REASONING_EFFORT}"
+      HINDSIGHT_API_LLM_API_KEY: no-key-required
+      # Content is text-only; image attachments are refused rather than dropped.
+      HINDSIGHT_API_LLM_VISION: "false"
+      # Bound background extraction/consolidation/reflect so it cannot saturate
+      # the single shared inference endpoint.
+      HINDSIGHT_API_LLM_MAX_CONCURRENT: "${HINDSIGHT_LLM_MAX_CONCURRENT:?set HINDSIGHT_LLM_MAX_CONCURRENT}"
+      HINDSIGHT_API_CONSOLIDATION_LLM_MAX_CONCURRENT: "${HINDSIGHT_LLM_MAX_CONCURRENT:?set HINDSIGHT_LLM_MAX_CONCURRENT}"
+      HINDSIGHT_API_REFLECT_LLM_MAX_CONCURRENT: "${HINDSIGHT_LLM_MAX_CONCURRENT:?set HINDSIGHT_LLM_MAX_CONCURRENT}"
+      HINDSIGHT_API_RETAIN_LLM_MAX_CONCURRENT: "${HINDSIGHT_LLM_MAX_CONCURRENT:?set HINDSIGHT_LLM_MAX_CONCURRENT}"
+      # Do not inherit Hindsight's 64000-token extraction default or unbounded
+      # consolidation/reflect output on the shared endpoint. The local test saw
+      # a consolidation exceed the client timeout without an explicit ceiling.
+      # Retain's limit must exceed the 3000-character chunk size (startup check).
+      HINDSIGHT_API_RETAIN_MAX_COMPLETION_TOKENS: "8192"
+      HINDSIGHT_API_CONSOLIDATION_MAX_COMPLETION_TOKENS: "8192"
+      # GLM exhausted 4096 even for one fact. Use a finite 8192 ceiling and
+      # small two-fact batches rather than the default eight-fact batches.
+      HINDSIGHT_API_CONSOLIDATION_LLM_BATCH_SIZE: "2"
+      HINDSIGHT_API_REFLECT_MAX_COMPLETION_TOKENS: "8192"
+      # --- Telemetry / tracing off. ---
+      HINDSIGHT_API_LLM_TRACE_ENABLED: "false"
+      HINDSIGHT_API_OTEL_TRACES_ENABLED: "false"
+      # OpenAI-style strict json_schema is enabled: the GLM endpoint accepts it
+      # (verified on the main side 2026-10-17) and returned schema-conformant
+      # JSON, so extraction uses the grammar-constrained path instead of the soft
+      # schema-in-prompt + json_object fallback.
+      HINDSIGHT_API_LLM_STRICT_SCHEMA: "${HINDSIGHT_LLM_STRICT_SCHEMA:?set HINDSIGHT_LLM_STRICT_SCHEMA}"
+    networks:
+      - internal
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # The image runs as the unprivileged hindsight user (UID 1000) and needs no
+    # writable mount when using an external database and external models.
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      # python3 from the image base; no curl/wget is guaranteed in the slim image.
+      test:
+        - CMD-SHELL
+        - >-
+          python3 -c "import urllib.request,sys;
+          sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8888/health/ready', timeout=4).status == 200 else 1)"
+      interval: 15s
+      timeout: 8s
+      retries: 20
+      start_period: 60s
+
+  hermes:
+    # Built by .github/workflows/hermes-agent-image.yml (nousresearch/hermes-agent
+    # v2026.9.24 base + the Hindsight Hermes integration pinned at d952b6e).
+    # PLACEHOLDER — transcribe the published digest after the first workflow run.
+    image: ghcr.io/koji-genba/homelab-hermes-agent@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    # The pinned upstream image has no CMD: without this it starts an
+    # interactive CLI, hits EOF under Compose and restarts continuously.
+    # Keep the s6 entrypoint and explicitly select its gateway service.
+    command: ["gateway", "run"]
+    restart: unless-stopped
+    # The gateway holds no resident model; 1.5 GiB covers the Python runtime, the
+    # HTTP/WebSocket clients and the session caches (spillover would be a bug).
+    mem_limit: 1.5g
+    depends_on:
+      hindsight:
+        condition: service_healthy
+    env_file:
+      # Discord token, allowed user/channel IDs, the operator webhook and the
+      # optional dead-man ping URL — sourced from the Agent SOPS bundle.
+      - path: "${SECRETS_DIR:?set SECRETS_DIR}/hermes.env"
+        format: raw
+    environment:
+      HERMES_HOME: /opt/data
+      TZ: "${AGENT_TIMEZONE:?set AGENT_TIMEZONE}"
+      # The terminal backend connects to the Runner VM over SSH with the Agent
+      # VM's dedicated key; config.yaml points terminal.ssh_key at this path.
+      # The key name is passed so the role and the config template cannot drift.
+      TERMINAL_SSH_KEY: /run/agent-ssh/id_ed25519
+    volumes:
+      # HERMES_HOME: config.yaml, SOUL.md, USER.md/MEMORY.md, skills, cron,
+      # sessions and the SQLite state live here (the durable backup target).
+      - type: bind
+        source: "${HERMES_DATA_DIR:?set HERMES_DATA_DIR}"
+        target: /opt/data
+        bind:
+          create_host_path: false
+      # The Agent VM SSH identity directory (WS1's agent_runner_ssh_key_dir). It
+      # holds id_ed25519 (terminal backend, TERMINAL_SSH_KEY below) and
+      # known_hosts. The same known_hosts is copied into the Hermes data tree so
+      # the terminal backend's hardcoded default path verifies the Runner host
+      # key; see tasks/ssh_keys.yml.
+      - type: bind
+        source: "${AGENT_SSH_KEY_DIR:?set AGENT_SSH_KEY_DIR}"
+        target: /run/agent-ssh
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - internal
+    # The s6-overlay stage2 hook remaps HERMES_UID/GID and chowns /opt/data, so
+    # it needs these capabilities; everything else is dropped.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+      - KILL
+    security_opt:
+      - no-new-privileges:true
+    # Ansible injects host entries so the internal FQDNs resolve to the Apps VM
+    # LAN IP even though the AdGuard answer points at a tailnet address the Agent
+    # VM (off-tailnet) cannot use. Caddy listens on the LAN IP and its
+    # admin_networks include the Server /24, so these are reachable.
+    extra_hosts:
+      - "${SEARXNG_FQDN:?set SEARXNG_FQDN}:${APPS_VM_LAN_IP:?set APPS_VM_LAN_IP}"
+      - "${MCP_SEARXNG_FQDN:?set MCP_SEARXNG_FQDN}:${APPS_VM_LAN_IP:?set APPS_VM_LAN_IP}"
+
+  # Forwards the Runner VM's loopback Chromium CDP port into the Hermes
+  # container's network namespace over SSH. Browser control is in the initial
+  # scope, so it starts with the rest of the stack (no profile); the SSH command
+  # is the container entrypoint rather than an `apk add` at start, so nothing is
+  # fetched from the network on boot.
+  cdp-tunnel:
+    # Reuses the self-built Hermes image: it already ships the OpenSSH client and
+    # is digest-pinned, so no separate (and unpinnable-by-digest-content) apk
+    # install is needed.
+    image: ghcr.io/koji-genba/homelab-hermes-agent@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    restart: unless-stopped
+    # Tiny: one ssh process holding a port forward.
+    mem_limit: 128m
+    # Run as the Hermes data UID so the ssh process can read the 0600 identity
+    # (owned by 10000) despite cap_drop: ALL removing CAP_DAC_OVERRIDE. Running as
+    # root here fails EACCES on the key (verified locally). The pinned image has
+    # a passwd entry/home for UID 10000; known_hosts is explicit regardless.
+    user: "10000:10000"
+    depends_on:
+      hermes:
+        condition: service_started
+    # Share Hermes' network namespace so `--bind-address 127.0.0.1` lands inside
+    # the container and browser.cdp_url=http://127.0.0.1:<port> resolves.
+    network_mode: "service:hermes"
+    environment:
+      CDP_TUNNEL_PORT: "${CDP_TUNNEL_PORT:-9222}"
+      CDP_RUNNER_TARGET: "${CDP_RUNNER_TARGET:?set CDP_RUNNER_TARGET}"
+    volumes:
+      - type: bind
+        source: "${AGENT_SSH_KEY_DIR:?set AGENT_SSH_KEY_DIR}"
+        target: /run/agent-ssh
+        read_only: true
+        bind:
+          create_host_path: false
+    # Override the Hermes entrypoint: this container only runs ssh. The Runner
+    # host key is pinned by /run/agent-ssh/known_hosts (written by the role), so
+    # StrictHostKeyChecking=yes fails closed on a changed or unknown key instead
+    # of silently trusting first contact.
+    entrypoint: ["ssh"]
+    command:
+      - -N
+      - -o
+      - BatchMode=yes
+      - -o
+      - UserKnownHostsFile=/run/agent-ssh/known_hosts
+      - -o
+      - StrictHostKeyChecking=yes
+      - -o
+      - ExitOnForwardFailure=yes
+      - -o
+      - ServerAliveInterval=30
+      - -i
+      - /run/agent-ssh/cdp_tunnel_ed25519
+      - -L
+      - "127.0.0.1:${CDP_TUNNEL_PORT:-9222}:127.0.0.1:${CDP_TUNNEL_PORT:-9222}"
+      - "${CDP_RUNNER_TARGET:?set CDP_RUNNER_TARGET}"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  # Project-scoped bridge. Not `internal: true` because Hermes and Hindsight need
+  # outbound internet; nothing is published to the host.
+  internal:
+    driver: bridge

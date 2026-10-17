@@ -1,0 +1,35 @@
+---
+# nftables input default-drop for both hosts. The Runner additionally enables
+# the PRD 4.2 egress restriction through firewall_egress_restrict.
+- name: Install nftables
+  ansible.builtin.apt:
+    name: nftables
+    state: present
+    update_cache: true
+
+- name: Install the idempotent managed-table reload helper
+  ansible.builtin.template:
+    src: homelab-nft-reload.sh.j2
+    dest: /usr/local/sbin/homelab-nft-reload
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install the host firewall policy
+  ansible.builtin.template:
+    src: nftables.conf.j2
+    dest: /etc/nftables.conf
+    owner: root
+    group: root
+    mode: '0644'
+    # The helper deletes/recreates only our managed table in the candidate
+    # transaction, so re-rendering validates cleanly when the live table exists
+    # and never flushes Docker's tables.
+    validate: /usr/local/sbin/homelab-nft-reload %s
+  notify: Reload nftables
+
+- name: Enable nftables
+  ansible.builtin.systemd:
+    name: nftables
+    enabled: true
+    state: started

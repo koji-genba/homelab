@@ -1,0 +1,12 @@
+# Hindsight Hermes integration runtime dependencies (mode: local_external).
+#
+# Compiled to requirements.txt with `uv pip compile --generate-hashes` and
+# installed with `uv pip install --require-hashes`. Regenerate with the command
+# in the header of requirements.txt after changing a pin.
+#
+# hindsight-embed is intentionally NOT listed: it is only imported by the
+# plugin's local_embedded daemon path (`embedded.py::_start_daemon`, reached
+# from `_new_embedded_client`), never for local_external. See the plugin's
+# `is_available()`: local_external returns True without probing the embedded
+# runtime. Add it back only if the mode ever changes to local_embedded.
+hindsight-client==0.10.2

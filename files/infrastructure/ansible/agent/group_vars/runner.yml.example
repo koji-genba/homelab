@@ -1,0 +1,37 @@
+---
+# Runner VM desired state for a new or recovered deployment. No credentials.
+common_hostname: runner
+runner_management_ip: 192.168.10.105
+agent_management_ip: 192.168.10.104
+agent_data_mount: /srv/agent
+
+runner_data_disk: /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
+runner_data_disk_label: runner-work
+runner_data_mount: /srv/agent-work
+
+runner_user: hermes-runner
+cdp_user: hermes-cdp
+cdp_home: /var/lib/hermes-cdp
+cdp_port: 9222
+
+browser_user: hermes-browser
+browser_home: /var/lib/hermes-browser
+chromium_binary: /usr/bin/chromium
+
+runner_node_major: 24
+runner_uv_version: "0.13.1"
+
+common_ssh_extra_allow_users:
+  - hermes-runner
+  - hermes-cdp
+
+firewall_ssh_allowed_networks:
+  - 192.168.10.104/32
+  - 192.168.10.0/24
+  - 192.168.20.0/24
+  - 100.64.0.0/10
+firewall_input_allowed_tcp_ports: []
+firewall_egress_restrict: true
+firewall_egress_allowed_dns: []
+firewall_egress_allowed_networks: []
+firewall_dnat_guard: false

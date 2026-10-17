@@ -1,0 +1,49 @@
+---
+# Shared, non-secret desired state for a new or recovered Agent/Runner pair.
+# Copy to group_vars/all.yml only if you need to change the defaults.
+deploy_user: deploy
+deploy_public_key: "ssh-ed25519 AAAA... operator@example"
+
+common_packages:
+  - ca-certificates
+  - curl
+  - git
+  - iproute2
+  - iputils-ping
+  - jq
+  - nfs-common
+  - openssh-server
+  - procps
+  - python3
+  - sudo
+  - systemd-resolved
+  - unattended-upgrades
+
+common_ssh_extra_allow_users: []
+
+common_upstream_dns_servers:
+  - 1.1.1.1
+  - 8.8.8.8
+
+common_extra_directories: []
+
+firewall_ssh_allowed_networks:
+  - 192.168.10.0/24
+  - 192.168.20.0/24
+  - 100.64.0.0/10
+firewall_input_allowed_tcp_ports: []
+firewall_egress_restrict: false
+firewall_egress_allowed_dns: []
+firewall_egress_allowed_networks: []
+firewall_egress_rejected_networks:
+  - 10.0.0.0/8
+  - 172.16.0.0/12
+  - 192.168.0.0/16
+  - 100.64.0.0/10
+  - 169.254.0.0/16
+
+firewall_dnat_guard: true
+firewall_trusted_networks:
+  - 192.168.10.0/24
+  - 192.168.20.0/24
+  - 100.64.0.0/10

@@ -1,0 +1,84 @@
+---
+# Coding/runtime toolchain for the Hermes Runner: git, Python 3 + venv + uv,
+# Node.js LTS, build tools and the usual CLI utilities. Docker is deliberately
+# not installed (docker group is root-equivalent, PRD 4.2).
+- name: Install the runner runtime packages
+  ansible.builtin.apt:
+    name:
+      - build-essential
+      - ca-certificates
+      - curl
+      - git
+      - jq
+      - pkg-config
+      - python3
+      - python3-pip
+      - python3-venv
+      - ripgrep
+      - sqlite3
+      - unzip
+      - zip
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure the apt keyring directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+# Node.js LTS is pinned by major. The upstream Debian nodejs package does not
+# track current LTS, so the NodeSource repository is used; a pinned major keeps
+# rebuilds reproducible while still receiving security updates. Bump
+# runner_node_major in a reviewed change.
+- name: Download the NodeSource signing key
+  ansible.builtin.get_url:
+    url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
+    dest: /etc/apt/keyrings/nodesource.asc
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Configure the Node.js LTS repository
+  ansible.builtin.deb822_repository:
+    name: nodesource
+    types: deb
+    uris: https://deb.nodesource.com/node_{{ runner_node_major }}.x
+    suites: nodistro
+    components: main
+    architectures:
+      - amd64
+    signed_by: /etc/apt/keyrings/nodesource.asc
+    state: present
+
+- name: Install Node.js LTS
+  ansible.builtin.apt:
+    name: nodejs
+    state: present
+    update_cache: true
+
+# uv is installed with an exact PyPI pin so the toolchain is reproducible.
+# The version is checked first so a matching install is a no-op.
+- name: Read the installed uv version
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/uv
+      - --version
+  register: runner_uv_version_check
+  changed_when: false
+  failed_when: false
+
+- name: Install the pinned uv
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -m
+      - pip
+      - install
+      - --break-system-packages
+      - "uv=={{ runner_uv_version }}"
+  when: runner_uv_version not in (runner_uv_version_check.stdout | default(''))
+  changed_when: true

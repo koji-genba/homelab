@@ -1,0 +1,26 @@
+# Exact versions already present in the pinned hermes-agent base image venv
+# (/opt/hermes/.venv). They are passed as constraints to `uv pip compile` so the
+# Hindsight lock resolves against Hermes' own pins instead of upgrading shared
+# dependencies (pydantic, aiohttp, ...) that Hermes pins exactly.
+#
+# Regenerate from the base image after bumping the base digest:
+#   docker run --rm --entrypoint uv <base> pip freeze --python /opt/hermes/.venv/bin/python
+# then keep only the packages in requirements.txt's closure.
+aiohappyeyeballs==2.6.1
+aiohttp==3.14.3
+aiohttp-retry==2.9.1
+aiosignal==1.4.0
+annotated-types==0.7.0
+attrs==25.4.0
+frozenlist==1.8.0
+idna==3.18
+multidict==6.7.1
+propcache==0.4.1
+pydantic==2.13.4
+pydantic-core==2.46.4
+python-dateutil==2.9.0.post0
+six==1.17.0
+typing-extensions==4.15.0
+typing-inspection==0.4.2
+urllib3==2.7.0
+yarl==1.22.0

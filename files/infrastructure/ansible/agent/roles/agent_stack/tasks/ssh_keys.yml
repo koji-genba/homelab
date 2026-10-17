@@ -1,0 +1,117 @@
+---
+# Two Ed25519 identities live only on the Agent VM:
+#   id_ed25519             - the Hermes terminal backend's SSH key to the Runner
+#   cdp_tunnel_ed25519     - the CDP tunnel's key (restricted by the Runner's
+#                            authorized_keys permitopen / no-forwarding options)
+# The public halves are published as facts for the Runner play (WS1).
+
+- name: Check the Runner terminal identity
+  ansible.builtin.stat:
+    path: "{{ agent_stack_ssh_key_dir }}/id_ed25519"
+  register: agent_stack_runner_key_stat
+
+- name: Generate the Runner terminal identity
+  ansible.builtin.command:
+    argv:
+      - ssh-keygen
+      - -t
+      - ed25519
+      - -N
+      - ""
+      - -C
+      - hermes-runner@agent-vm
+      - -f
+      - "{{ agent_stack_ssh_key_dir }}/id_ed25519"
+  when: not agent_stack_runner_key_stat.stat.exists
+  changed_when: true
+
+- name: Check the CDP tunnel identity
+  ansible.builtin.stat:
+    path: "{{ agent_stack_ssh_key_dir }}/cdp_tunnel_ed25519"
+  register: agent_stack_cdp_key_stat
+
+- name: Generate the CDP tunnel identity
+  ansible.builtin.command:
+    argv:
+      - ssh-keygen
+      - -t
+      - ed25519
+      - -N
+      - ""
+      - -C
+      - hermes-cdp-tunnel@agent-vm
+      - -f
+      - "{{ agent_stack_ssh_key_dir }}/cdp_tunnel_ed25519"
+  when: not agent_stack_cdp_key_stat.stat.exists
+  changed_when: true
+
+# Both Hermes and the CDP tunnel run as UID 10000 and can read these 0600 keys.
+- name: Harden the identity directory and private keys
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: "{{ item.state | default('file') }}"
+    owner: "{{ agent_stack_uid }}"
+    group: "{{ agent_stack_gid }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ agent_stack_ssh_key_dir }}", state: directory, mode: "0700" }
+    - { path: "{{ agent_stack_ssh_key_dir }}/id_ed25519", mode: "0600" }
+    - { path: "{{ agent_stack_ssh_key_dir }}/cdp_tunnel_ed25519", mode: "0600" }
+    - { path: "{{ agent_stack_ssh_key_dir }}/id_ed25519.pub", mode: "0644" }
+    - { path: "{{ agent_stack_ssh_key_dir }}/cdp_tunnel_ed25519.pub", mode: "0644" }
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Read the Runner terminal public key
+  ansible.builtin.slurp:
+    src: "{{ agent_stack_ssh_key_dir }}/id_ed25519.pub"
+  register: agent_stack_runner_pub
+
+- name: Read the CDP tunnel public key
+  ansible.builtin.slurp:
+    src: "{{ agent_stack_ssh_key_dir }}/cdp_tunnel_ed25519.pub"
+  register: agent_stack_cdp_pub
+
+# Pin the Runner host key rather than trusting first contact. The key is written
+# both to the SSH identity directory (for the CDP tunnel, which reads it via the
+# read-only /run/agent-ssh mount) and to the Hermes data tree's ~/.ssh (for the
+# terminal backend, which uses the default known_hosts path with its hardcoded
+# StrictHostKeyChecking=accept-new: an existing entry is enforced, so a changed
+# host key fails the connection instead of being silently accepted).
+- name: Scan the Runner SSH host key
+  ansible.builtin.command:
+    argv:
+      - ssh-keyscan
+      - -t
+      - ed25519
+      - "{{ agent_stack_runner_host }}"
+  register: agent_stack_runner_host_key
+  until: >-
+    agent_stack_runner_host_key.rc == 0
+    and 'ssh-ed25519' in agent_stack_runner_host_key.stdout
+  retries: 30
+  delay: 10
+  changed_when: false
+
+- name: Pin the Runner host key for the CDP tunnel
+  ansible.builtin.copy:
+    content: "{{ agent_stack_runner_host_key.stdout }}"
+    dest: "{{ agent_stack_ssh_key_dir }}/known_hosts"
+    owner: "{{ agent_stack_uid }}"
+    group: "{{ agent_stack_gid }}"
+    mode: "0644"
+
+- name: Pin the Runner host key for the Hermes terminal backend
+  ansible.builtin.copy:
+    content: "{{ agent_stack_runner_host_key.stdout }}"
+    dest: "{{ agent_stack_hermes_data_dir }}/.ssh/known_hosts"
+    owner: "{{ agent_stack_uid }}"
+    group: "{{ agent_stack_gid }}"
+    mode: "0600"
+
+- name: Publish the Agent SSH public keys for the Runner play
+  # WS1's runner play consumes these exact fact names from hostvars.
+  # noqa: var-naming[no-role-prefix]
+  ansible.builtin.set_fact:
+    agent_runner_ssh_public_key: "{{ (agent_stack_runner_pub.content | b64decode) | trim }}"
+    agent_cdp_tunnel_ssh_public_key: "{{ (agent_stack_cdp_pub.content | b64decode) | trim }}"

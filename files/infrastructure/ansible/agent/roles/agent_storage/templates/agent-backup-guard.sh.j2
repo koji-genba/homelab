@@ -1,0 +1,27 @@
+#!/bin/sh
+set -eu
+
+fail() {
+  echo "agent backup mount guard: $*" >&2
+  exit 1
+}
+
+{% for mount in agent_backup_mounts %}
+mount_path={{ mount.local_path | quote }}
+marker="$mount_path/{{ mount.marker }}"
+expected_source={{ (mount.server ~ ':' ~ mount.export) | quote }}
+if findmnt -rn -M "$mount_path" >/dev/null 2>&1; then
+  actual_source=$(findmnt -rn -M "$mount_path" -o SOURCE 2>/dev/null || true)
+  actual_fstype=$(findmnt -rn -M "$mount_path" -o FSTYPE 2>/dev/null || true)
+  test "$actual_source" = "$expected_source" || fail "$mount_path source is $actual_source, expected $expected_source"
+  test "$actual_fstype" = nfs4 || fail "$mount_path is not an nfs4 mount (fstype: $actual_fstype)"
+  test -e "$marker" || fail "missing export marker $marker"
+  expected_marker={{ mount.marker_value | default(mount.name) | quote }}
+  actual_marker=$(cat "$marker" 2>/dev/null || true)
+  test "$actual_marker" = "$expected_marker" || fail "marker mismatch at $marker"
+else
+  echo "agent backup mount guard: $mount_path not mounted; skipping (export not provisioned)" >&2
+fi
+{% endfor %}
+
+exit 0

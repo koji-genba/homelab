@@ -1,0 +1,52 @@
+[Unit]
+Description=Headless Chromium with a loopback-only CDP endpoint for Hermes
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ browser_user }}
+Group={{ browser_user }}
+# Chromium's own sandbox is left enabled: it runs as a dedicated, unprivileged
+# system user, so the sandbox-disabling flag is deliberately NOT used. The CDP
+# endpoint binds to 127.0.0.1 only and is reached from the Agent VM through the
+# restrict,permitopen=... SSH tunnel (PRD 4.2).
+ExecStart={{ chromium_binary }} \
+  --headless=new \
+  --remote-debugging-address=127.0.0.1 \
+  --remote-debugging-port={{ cdp_port }} \
+  --user-data-dir={{ browser_home }}/chromium \
+  --no-first-run \
+  --no-default-browser-check \
+  --disable-background-networking \
+  --disable-component-update \
+  --disable-default-apps \
+  --disable-sync \
+  --disable-extensions \
+  --disable-dev-shm-usage \
+  --window-size=1280,800 \
+  about:blank
+Restart=on-failure
+RestartSec=5s
+
+# systemd hardening. The browser profile is the only writable host path.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+# A blanket namespace restriction would break Chromium's own namespace sandbox,
+# which creates user, pid and net namespaces for its renderer/GPU processes.
+# Allow only those three; every other namespace type (mnt, uts, ipc, cgroup)
+# stays blocked.
+RestrictNamespaces=user pid net
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+ReadWritePaths={{ browser_home }}
+
+[Install]
+WantedBy=multi-user.target
