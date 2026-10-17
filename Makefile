@@ -4,6 +4,17 @@ TERRAFORM_ROOT ?= files/infrastructure/terraform/apps-vm
 ANSIBLE_ROOT ?= files/infrastructure/ansible/apps
 ANSIBLE_INVENTORY ?= $(ANSIBLE_ROOT)/inventory/hosts.yml
 TAILSCALE_ROOT ?= files/infrastructure/terraform/tailscale
+# Hermes Agent/Runner VM (WS1). Separate roots so their state never mixes with
+# the Apps VM state; validated in CI via the dedicated validate targets.
+AGENT_VM_ROOT ?= files/infrastructure/terraform/agent-vm
+RUNNER_VM_ROOT ?= files/infrastructure/terraform/runner-vm
+# Hermes OS-level Ansible root (groups `agent` and `runner`). ANSIBLE_CONFIG is
+# set explicitly because ansible-playbook only reads ansible.cfg from the
+# working directory; the Agent root reuses generic roles from the Apps root
+# through roles_path.
+AGENT_ANSIBLE_ROOT ?= files/infrastructure/ansible/agent
+AGENT_ANSIBLE_INVENTORY ?= $(AGENT_ANSIBLE_ROOT)/inventory/hosts.yml
+AGENT_ANSIBLE_CONFIG ?= $(AGENT_ANSIBLE_ROOT)/ansible.cfg
 TERRAFORM_PLAN_NAME := terraform.tfplan
 TAILSCALE_PLAN_NAME := terraform.tfplan
 TERRAFORM_PLAN_FILE := $(TERRAFORM_ROOT)/$(TERRAFORM_PLAN_NAME)
@@ -61,10 +72,10 @@ TOOLBOX_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_IMAGE)
 TOOLBOX_PROXMOX_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_PROXMOX_ENV) $(TOOLBOX_IMAGE)
 TOOLBOX_TAILSCALE_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_TAILSCALE_ENV) $(TOOLBOX_IMAGE)
 
-.PHONY: toolbox-build terraform-init terraform-fmt terraform-validate terraform-validate-tailscale terraform-plan terraform-apply
-.PHONY: ansible-lint ansible-check ansible-apply ansible-bootstrap-paths-test compose-reconcile-fixture terraform-apps-vm-lifecycle-test toolbox-uid-test cloud-init-test compose-config adguard-config-check gatus-config-check mover-test shellcheck secrets-scan preflight
+.PHONY: toolbox-build terraform-init terraform-fmt terraform-validate terraform-validate-tailscale terraform-validate-agent-vm terraform-validate-runner-vm terraform-plan terraform-apply
+.PHONY: ansible-lint ansible-check ansible-apply ansible-lint-agent ansible-check-agent ansible-apply-agent ansible-bootstrap-paths-test compose-reconcile-fixture terraform-apps-vm-lifecycle-test terraform-agent-runner-vm-lifecycle-test toolbox-uid-test cloud-init-test agent-vm-cloud-init-test runner-vm-cloud-init-test runner-privilege-fixture runner-firewall-fixture agent-runner-scope-fixture agent-dnat-guard-fixture compose-config adguard-config-check gatus-config-check mover-test shellcheck secrets-scan preflight
 .PHONY: state-backup-preflight state-backup-preflight-test state-backup state-backup-push state-restore state-restore-test state-backup-test rollback-app
-.PHONY: secrets-encrypt secrets-decrypt-check
+.PHONY: secrets-encrypt secrets-decrypt-check secrets-encrypt-agent secrets-decrypt-check-agent
 .PHONY: tailscale-init tailscale-acl-preflight tailscale-plan tailscale-apply tailscale-import-core tailscale-import-acl tailscale-import-dns tailscale-import-router tailscale-acl-path-test
 
 toolbox-build:
@@ -76,6 +87,8 @@ terraform-init:
 terraform-fmt:
 	$(TOOLBOX_RUN) terraform -chdir=$(TERRAFORM_ROOT) fmt -check -recursive
 	$(TOOLBOX_RUN) terraform -chdir=$(TAILSCALE_ROOT) fmt -check -recursive
+	$(TOOLBOX_RUN) terraform -chdir=$(AGENT_VM_ROOT) fmt -check -recursive
+	$(TOOLBOX_RUN) terraform -chdir=$(RUNNER_VM_ROOT) fmt -check -recursive
 
 terraform-validate: terraform-init
 	$(TOOLBOX_RUN) terraform -chdir=$(TERRAFORM_ROOT) validate
@@ -83,6 +96,16 @@ terraform-validate: terraform-init
 terraform-validate-tailscale:
 	$(TOOLBOX_RUN) terraform -chdir=$(TAILSCALE_ROOT) init -backend=false -input=false
 	$(TOOLBOX_RUN) terraform -chdir=$(TAILSCALE_ROOT) validate
+
+# Agent/Runner VM roots are separate from the Apps VM root so their state never
+# mixes. `-backend=false` keeps this read-only (CI-safe): no remote state access.
+terraform-validate-agent-vm:
+	$(TOOLBOX_RUN) terraform -chdir=$(AGENT_VM_ROOT) init -backend=false -input=false
+	$(TOOLBOX_RUN) terraform -chdir=$(AGENT_VM_ROOT) validate
+
+terraform-validate-runner-vm:
+	$(TOOLBOX_RUN) terraform -chdir=$(RUNNER_VM_ROOT) init -backend=false -input=false
+	$(TOOLBOX_RUN) terraform -chdir=$(RUNNER_VM_ROOT) validate
 
 # Tailscale changes are deliberately explicit/manual. Import existing objects
 # before planning; apply also records encrypted Terraform state using the
@@ -156,17 +179,66 @@ ansible-check:
 ansible-apply:
 	$(TOOLBOX_RUN) ansible-playbook -i $(ANSIBLE_INVENTORY) $(ANSIBLE_ROOT)/site.yml
 
+# Hermes OS-level Ansible root. ANSIBLE_CONFIG is passed explicitly: the root's
+# ansible.cfg sets roles_path so generic roles (e.g. docker) are reused from the
+# Apps root, and ansible only auto-discovers ansible.cfg from the cwd. Applying
+# this playbook touches live VMs, so it is never wired into CI.
+ansible-lint-agent:
+	$(TOOLBOX_RUN) env ANSIBLE_CONFIG=$(AGENT_ANSIBLE_CONFIG) ansible-lint $(AGENT_ANSIBLE_ROOT)/site.yml
+
+ansible-check-agent:
+	$(TOOLBOX_RUN) env ANSIBLE_CONFIG=$(AGENT_ANSIBLE_CONFIG) ansible-playbook -i $(AGENT_ANSIBLE_INVENTORY) $(AGENT_ANSIBLE_ROOT)/site.yml --syntax-check
+
+ansible-apply-agent:
+	$(TOOLBOX_RUN) env ANSIBLE_CONFIG=$(AGENT_ANSIBLE_CONFIG) ansible-playbook -i $(AGENT_ANSIBLE_INVENTORY) $(AGENT_ANSIBLE_ROOT)/site.yml
+
 ansible-bootstrap-paths-test:
 	./scripts/tests/ansible-bootstrap-paths-fixture.sh
 
 terraform-apps-vm-lifecycle-test:
 	./scripts/tests/terraform-apps-vm-lifecycle-fixture.sh
 
+terraform-agent-runner-vm-lifecycle-test:
+	./scripts/tests/terraform-agent-runner-vm-lifecycle-fixture.sh
+
 toolbox-uid-test:
 	$(TOOLBOX_RUN) ./scripts/tests/toolbox-uid-fixture.sh
 
 cloud-init-test:
 	./scripts/tests/cloud-init-apps-vm-fixture.sh
+
+agent-vm-cloud-init-test:
+	./scripts/tests/agent-vm-cloud-init-fixture.sh
+
+runner-vm-cloud-init-test:
+	./scripts/tests/runner-vm-cloud-init-fixture.sh
+
+runner-privilege-fixture:
+	./scripts/tests/runner-privilege-fixture.sh
+
+runner-firewall-fixture:
+	./scripts/tests/runner-firewall-fixture.sh
+
+agent-runner-scope-fixture:
+	./scripts/tests/agent-runner-scope-fixture.sh
+
+agent-dnat-guard-fixture:
+	./scripts/tests/agent-dnat-guard-fixture.sh
+
+# WS5 Agent operations regression. These are static checks over the committed
+# role/templates; they never touch the Agent VM.
+.PHONY: agent-backup-fixture agent-healthcheck-fixture agent-restore-fixture agent-rebuild-fixture
+agent-backup-fixture:
+	./scripts/tests/agent-backup-fixture.sh
+
+agent-healthcheck-fixture:
+	./scripts/tests/agent-healthcheck-fixture.sh
+
+agent-restore-fixture:
+	./scripts/tests/agent-restore-fixture.sh
+
+agent-rebuild-fixture:
+	./scripts/tests/agent-rebuild-fixture.sh
 
 compose-config:
 	./scripts/compose-config.sh
@@ -230,5 +302,28 @@ secrets-decrypt-check:
 	test -f files/infrastructure/secrets/runtime.sops.yaml || { echo "missing files/infrastructure/secrets/runtime.sops.yaml" >&2; exit 1; }
 	$(TOOLBOX_RUN) env SOPS_AGE_KEY_FILE=/run/secrets/age-identity sops decrypt files/infrastructure/secrets/runtime.sops.yaml >/dev/null
 
+# Hermes Agent bundle. The plaintext runtime.yaml is gitignored; only the SOPS
+# bundle is committed. WS1 owns this protection path only; WS2 populates the
+# bundle contents.
+secrets-encrypt-agent:
+	test -n "$(AGE_RECIPIENT)" || { echo "AGE_RECIPIENT is required" >&2; exit 1; }
+	test -f files/infrastructure/secrets/agent/runtime.yaml || { echo "missing ignored plaintext input: files/infrastructure/secrets/agent/runtime.yaml" >&2; exit 1; }
+	test ! -e files/infrastructure/secrets/agent/runtime.sops.yaml || { echo "refusing to overwrite existing agent/runtime.sops.yaml" >&2; exit 1; }
+	$(TOOLBOX_RUN) sops encrypt --age "$(AGE_RECIPIENT)" --output files/infrastructure/secrets/agent/runtime.sops.yaml files/infrastructure/secrets/agent/runtime.yaml
+	chmod 0600 files/infrastructure/secrets/agent/runtime.sops.yaml
+
+secrets-decrypt-check-agent:
+	test -n "$(AGE_IDENTITY_FILE)" && test -r "$(AGE_IDENTITY_FILE)" || { echo "AGE_IDENTITY_FILE must be readable" >&2; exit 1; }
+	test -f files/infrastructure/secrets/agent/runtime.sops.yaml || { echo "missing files/infrastructure/secrets/agent/runtime.sops.yaml" >&2; exit 1; }
+	$(TOOLBOX_RUN) env SOPS_AGE_KEY_FILE=/run/secrets/age-identity sops decrypt files/infrastructure/secrets/agent/runtime.sops.yaml >/dev/null
+
 rollback-app:
 	./scripts/rollback-app.sh
+
+# Agent VM Compose project static validation. The project lives outside
+# files/services/compose/ on purpose, so scripts/compose-config.sh (and the Apps
+# reconcile path) never pick it up; this target reuses the same rollback-safe
+# rendering check the CI static job runs.
+.PHONY: agent-compose-config
+agent-compose-config:
+	./scripts/agent-compose-config.sh

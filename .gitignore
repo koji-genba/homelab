@@ -109,6 +109,9 @@ terraform-debug.log
 # Apps VM runtime bookkeeping and local deployment inputs
 /deployments.log
 files/infrastructure/secrets/runtime.yaml
+# Hermes Agent bundle plaintext. Only the SOPS-encrypted agent/runtime.sops.yaml
+# is committed; this guards the WS2 plaintext input before it is encrypted.
+files/infrastructure/secrets/agent/runtime.yaml
 files/services/compose/.env
 # Local live Tailscale ACL export; review outside Git before import.
 files/infrastructure/terraform/tailscale/acl-policy.live.json

@@ -1,0 +1,50 @@
+---
+# The Hermes execution account. It must never hold sudo or the docker group:
+# both are root-equivalent and would defeat the Runner isolation (PRD 4.2).
+# The common role also enforces DisableForwarding in a Match User block;
+# ordinary shell/exec sessions remain available for the terminal backend.
+- name: Ensure the runner execution account exists without privileged groups
+  ansible.builtin.user:
+    name: "{{ runner_user }}"
+    comment: Hermes Agent execution account (no sudo, no docker)
+    shell: /bin/bash
+    groups: []
+    append: false
+    create_home: true
+    password_lock: true
+
+- name: Read the runner account group membership
+  ansible.builtin.command:
+    argv:
+      - id
+      - -nG
+      - "{{ runner_user }}"
+  register: runner_account_groups
+  changed_when: false
+
+- name: Refuse a privileged runner account
+  ansible.builtin.assert:
+    that:
+      - "'sudo' not in (runner_account_groups.stdout | default('')).split()"
+      - "'docker' not in (runner_account_groups.stdout | default('')).split()"
+    fail_msg: >-
+      {{ runner_user }} must never hold the sudo or docker groups: both are
+      root-equivalent and would defeat the Runner isolation (PRD 4.2).
+
+- name: Install the Agent VM SSH key for the runner account
+  ansible.posix.authorized_key:
+    user: "{{ runner_user }}"
+    key: "{{ runner_terminal_ssh_public_key }}"
+    key_options: >-
+      from="{{ agent_management_ip }}",no-agent-forwarding,no-port-forwarding,no-X11-forwarding
+    state: present
+    manage_dir: true
+  when: runner_terminal_ssh_public_key | default('') | length > 0
+
+- name: Report that no Agent runner key is available yet
+  ansible.builtin.debug:
+    msg: >-
+      runner_terminal_ssh_public_key is empty, so no key was installed for
+      {{ runner_user }}. Re-apply this playbook after WS2's agent_stack generates
+      the key on the Agent VM.
+  when: runner_terminal_ssh_public_key | default('') | length == 0

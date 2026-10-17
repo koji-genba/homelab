@@ -1,0 +1,62 @@
+---
+# The Runner work disk (/srv/agent-work), owned by the execution account.
+- name: Create the runner work mount point
+  ansible.builtin.file:
+    path: "{{ runner_data_mount }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+
+- name: Inspect the runner work disk
+  ansible.builtin.stat:
+    path: "{{ runner_data_disk }}"
+  register: runner_data_disk_stat
+
+- name: Refuse to continue when the runner work disk is missing
+  ansible.builtin.assert:
+    that:
+      - runner_data_disk_stat.stat.exists
+    fail_msg: >-
+      The runner work disk {{ runner_data_disk }} was not found. Confirm the
+      Proxmox by-id path and set runner_data_disk in group_vars/runner.yml.
+
+- name: Read the current filesystem type on the runner work disk
+  ansible.builtin.command:
+    argv:
+      - blkid
+      - -s
+      - TYPE
+      - -o
+      - value
+      - "{{ runner_data_disk }}"
+  register: runner_data_blkid
+  changed_when: false
+  failed_when: false
+
+- name: Create the ext4 filesystem on the runner work disk
+  ansible.builtin.command:
+    argv:
+      - mkfs.ext4
+      - -F
+      - -L
+      - "{{ runner_data_disk_label }}"
+      - "{{ runner_data_disk }}"
+  when: runner_data_blkid.stdout | trim == ''
+  changed_when: true
+
+- name: Mount the runner work disk
+  ansible.posix.mount:
+    path: "{{ runner_data_mount }}"
+    src: "{{ runner_data_disk }}"
+    fstype: ext4
+    opts: defaults,noatime
+    state: mounted
+
+- name: Give the execution account ownership of the work tree
+  ansible.builtin.file:
+    path: "{{ runner_data_mount }}"
+    state: directory
+    owner: "{{ runner_user }}"
+    group: "{{ runner_user }}"
+    mode: '0750'

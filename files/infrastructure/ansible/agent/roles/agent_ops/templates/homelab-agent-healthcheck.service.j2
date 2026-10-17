@@ -1,0 +1,10 @@
+[Unit]
+Description=Agent VM health check (containers, memory stack, gateway, Runner)
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart={{ agent_ops_helpers_dir }}/homelab-agent-healthcheck
+TimeoutStartSec=300
+SuccessExitStatus=0

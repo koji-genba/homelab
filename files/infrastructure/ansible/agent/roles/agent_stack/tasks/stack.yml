@@ -1,0 +1,14 @@
+---
+- name: Start the Agent Compose stack
+  ansible.builtin.command:
+    argv:
+      - "{{ agent_stack_helpers_dir }}/homelab-agent-compose-up"
+  register: agent_stack_up
+  changed_when: >-
+    'Started' in agent_stack_up.stdout
+    or 'Created' in agent_stack_up.stdout
+    or 'Recreated' in agent_stack_up.stdout
+
+- name: Record that the Agent stack is running
+  ansible.builtin.set_fact:
+    agent_stack_running: true

@@ -25,7 +25,15 @@ for path in $(git -C "$repo_root" ls-files -co --exclude-standard '*runtime.sops
   }
 done
 
-if git -C "$repo_root" grep -nI -E 'BEGIN (RSA|OPENSSH|EC|PGP) PRIVATE KEY|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}' -- ':!*.example' ':!*.template' >/dev/null 2>&1; then
+# Hermes Agent bundle: the gitignored plaintext must never be tracked, even if
+# it was force-added. The encrypted agent/runtime.sops.yaml is the only
+# committable form.
+if git -C "$repo_root" ls-files --error-unmatch files/infrastructure/secrets/agent/runtime.yaml >/dev/null 2>&1; then
+  echo "forbidden tracked plaintext Hermes Agent bundle: files/infrastructure/secrets/agent/runtime.yaml" >&2
+  bad=1
+fi
+
+if git -C "$repo_root" grep -nI -E 'BEGIN (RSA|OPENSSH|EC|PGP) PRIVATE KEY|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|[MN][A-Za-z0-9_-]{23,27}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,40}' -- ':!*.example' ':!*.template' >/dev/null 2>&1; then
   echo "possible private key or access token found in tracked content" >&2
   bad=1
 fi

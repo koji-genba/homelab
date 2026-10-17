@@ -1,0 +1,14 @@
+[Unit]
+Description=Validate the Agent backup NFS mount and export marker
+Wants=network-online.target
+After=network-online.target remote-fs.target
+{% for mount in agent_backup_mounts %}RequiresMountsFor={{ mount.local_path }}
+{% endfor %}
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/homelab-agent-backup-guard
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

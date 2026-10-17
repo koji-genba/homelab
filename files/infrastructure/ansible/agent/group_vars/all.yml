@@ -1,0 +1,79 @@
+---
+# Non-secret desired state shared by the Hermes Agent VM and Runner VM.
+# Credentials never live here; the Agent SOPS bundle (owned by WS2) is the only
+# place runtime secrets are stored, and it is decrypted on the controller.
+deploy_user: deploy
+# Filled after the operator key is selected; an empty value does not prevent
+# bootstrap because cloud-init already owns the initial SSH key.
+deploy_public_key: ""
+
+common_packages:
+  - ca-certificates
+  - curl
+  - git
+  - iproute2
+  - iputils-ping
+  - jq
+  - nfs-common
+  - openssh-server
+  - procps
+  - python3
+  - sudo
+  - systemd-resolved
+  - unattended-upgrades
+
+# Extra sshd `AllowUsers` entries beyond `deploy_user`. The Runner adds its
+# dedicated execution and CDP-tunnel accounts here.
+common_ssh_extra_allow_users: []
+
+# Public resolvers. Both hosts are off-tailnet, so AdGuard's tailnet answers for
+# internal *.kojigenba-srv.com names are unreachable. WS2 maps the FQDNs it
+# needs to the Apps LAN address with Compose extra_hosts (PRD 4.1); the host
+# resolver deliberately stays on public upstreams.
+common_upstream_dns_servers:
+  - 1.1.1.1
+  - 8.8.8.8
+
+common_extra_directories: []
+
+# nftables policy defaults. Host-specific values are set in group_vars/agent.yml
+# and group_vars/runner.yml.
+#
+# Management SSH sources. These VMs are off-tailnet (VLAN 10), but an operator
+# outside the house reaches them through the gateway's Tailscale subnet route,
+# i.e. from 100.64.0.0/10, and from the Trusted VLAN 192.168.20.0/24. The legacy
+# 192.168.11.0/24 range is intentionally not listed. Widening the management
+# sources does not expose the Runner execution accounts: their authorized keys
+# carry from="192.168.10.104", so only the Agent VM can use hermes-runner /
+# hermes-cdp regardless of the firewall allow-list.
+firewall_ssh_allowed_networks:
+  - 192.168.10.0/24
+  - 192.168.20.0/24
+  - 100.64.0.0/10
+firewall_input_allowed_tcp_ports: []
+# When false the output chain is a plain default-accept policy. The Runner
+# enables this to enforce the PRD 4.2 egress restriction.
+firewall_egress_restrict: false
+# Resolvers exempted from the egress reject below. Only needed when a resolver
+# is inside one of the rejected ranges.
+firewall_egress_allowed_dns: []
+# Extra destinations that must stay reachable before the reject rules.
+firewall_egress_allowed_networks: []
+# PRD 4.2: block new Runner connections to the LAN, CGNAT/tailnet,
+# carrier-grade NAT and link-local ranges. The internet stays reachable through
+# the default-accept policy.
+firewall_egress_rejected_networks:
+  - 10.0.0.0/8
+  - 172.16.0.0/12
+  - 192.168.0.0/16
+  - 100.64.0.0/10
+  - 169.254.0.0/16
+
+# Sources allowed to reach a Docker-published (DNAT) port. Mirrors the Apps VM
+# guard: the Agent has no published ports today, so this is defence in depth if
+# a `ports:` entry is ever added by mistake. The Runner disables it (no Docker).
+firewall_dnat_guard: true
+firewall_trusted_networks:
+  - 192.168.10.0/24
+  - 192.168.20.0/24
+  - 100.64.0.0/10

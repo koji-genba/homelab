@@ -1,0 +1,292 @@
+#!/usr/bin/env bash
+# Daily Agent VM backup, installed by the Ansible role agent_ops at
+# {{ agent_ops_helpers_dir }}/homelab-agent-backup and run by
+# homelab-agent-backup.timer.
+#
+# It writes one completed set per run under {{ agent_ops_backup_mount }}/
+# <UTC timestamp>/. Every sensitive artifact is age-encrypted with the public
+# recipients in group_vars (the matching identities never exist on this VM), so
+# the NFS export only ever receives ciphertext plus a non-secret manifest:
+#   hermes-backup.zip.age        hermes backup (SQLite-consistent; includes the
+#                                agent's own .env/auth.json, hence encrypted)
+#   hindsight-postgres.dump.age  pg_dump -Fc of the Hindsight PostgreSQL DB
+#   agent-config.tar.gz.age      config.yaml, hindsight config.json, SOUL.md,
+#                                the non-secret compose.env (NOT secrets/*.env)
+#   runner-work.tar.gz.age       the Runner work tree (caches excluded)
+#   METADATA.txt, MANIFEST.txt, SHA256SUMS   non-secret set metadata
+#
+# A set is written as .incomplete-<ts> and renamed to <ts> only when complete,
+# so a partial run can never be mistaken for a good backup. Failures raise the
+# operator webhook; success pings the dead-man URL (both optional).
+set -Eeuo pipefail
+umask 077
+
+PROG=homelab-agent-backup
+BACKUP_WORK_DIR=''
+cleanup() { [ -z "$BACKUP_WORK_DIR" ] || rm -rf "$BACKUP_WORK_DIR"; }
+
+BACKUP_MOUNT={{ agent_ops_backup_mount | to_json }}
+BACKUP_SOURCE={{ agent_ops_backup_source | to_json }}
+BACKUP_MARKER={{ agent_ops_backup_marker | to_json }}
+BACKUP_MARKER_VALUE={{ agent_ops_backup_marker_value | to_json }}
+PROJECT_DIR={{ agent_ops_project_dir | to_json }}
+PROJECT_NAME={{ agent_ops_project_name | to_json }}
+ENV_FILE={{ agent_ops_env_file | to_json }}
+SECRET_ENV_FILE={{ agent_ops_secrets_dir | to_json }}/memory-db.env
+MONITORING_ENV={{ agent_ops_monitoring_env | to_json }}
+HERMES_DATA_DIR={{ agent_ops_hermes_data_dir | to_json }}
+SSH_KEY_DIR={{ agent_ops_ssh_key_dir | to_json }}
+RUNNER_HOST={{ agent_ops_runner_host | to_json }}
+RUNNER_USER={{ agent_ops_runner_user | to_json }}
+RUNNER_WORKSPACE={{ agent_ops_runner_workspace | to_json }}
+TMP_ROOT={{ agent_ops_tmp_dir | to_json }}
+BANK_ID={{ agent_ops_bank_id | to_json }}
+EMBEDDING_MODEL={{ agent_ops_embedding_model | to_json }}
+EMBEDDING_REVISION={{ agent_ops_embedding_revision | to_json }}
+RERANKER_MODEL={{ agent_ops_reranker_model | to_json }}
+RERANKER_REVISION={{ agent_ops_reranker_revision | to_json }}
+DAILY_KEEP={{ agent_ops_backup_daily_keep | int }}
+WEEKLY_KEEP={{ agent_ops_backup_weekly_keep | int }}
+WEEKLY_DOW={{ agent_ops_backup_weekly_dow | int }}
+AGE_RECIPIENTS=({% for recipient in agent_ops_backup_age_recipients %}{{ recipient | to_json }} {% endfor %})
+EXCLUDES=({% for pattern in agent_ops_runner_excludes %}{{ ('--exclude=' ~ pattern) | to_json }} {% endfor %})
+
+log() { printf '%s: %s\n' "$PROG" "$*" >&2; }
+fail() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
+json_str() { python3 -c 'import json,sys; sys.stdout.write(json.dumps(sys.argv[1]))' "$1"; }
+
+load_env_file() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+    set -a
+    # shellcheck disable=SC1090
+    . "$file"
+    set +a
+}
+
+# Never print the URL: curl output is discarded and only a generic message is
+# logged when delivery fails.
+notify_operator() {
+    local message="$1" url
+    load_env_file "$MONITORING_ENV"
+    url="${OPERATOR_WEBHOOK_URL:-}"
+    [ -n "$url" ] || return 0
+    curl -fsS --max-time 15 -X POST -H 'Content-Type: application/json' \
+        --data "$(printf '{"content": %s}' "$(json_str "$message")")" \
+        "$url" >/dev/null 2>&1 || log 'operator webhook delivery failed'
+}
+
+deadman_ping() {
+    local url
+    load_env_file "$MONITORING_ENV"
+    url="${DEADMAN_PING_URL:-}"
+    [ -n "$url" ] || return 0
+    curl -fsS --max-time 15 "$url" >/dev/null 2>&1 || log 'dead-man ping delivery failed'
+}
+
+on_exit() {
+    local rc=$?
+    trap - EXIT
+    if ! cleanup; then
+        log 'cleanup incomplete; inspect private work directories'
+        [ "$rc" -ne 0 ] || rc=1
+    fi
+    if [ "$rc" -ne 0 ]; then
+        notify_operator "$PROG failed (exit $rc) on $(hostname)"
+    fi
+    exit "$rc"
+}
+
+compose() {
+    docker compose \
+        --project-name "$PROJECT_NAME" \
+        --env-file "$ENV_FILE" \
+        --env-file "$SECRET_ENV_FILE" \
+        --file "$PROJECT_DIR/compose.yaml" \
+        "$@"
+}
+
+# Fail closed unless the NFS export is mounted with the expected source, fstype
+# and marker. A silent local-disk write is exactly the failure this prevents.
+require_backup_mount() {
+    if ! findmnt -rn -M "$BACKUP_MOUNT" >/dev/null 2>&1; then
+        fail "$BACKUP_MOUNT is not mounted; refusing to write a backup to local disk (provision the pve1 export)"
+    fi
+    local source fstype marker
+    source="$(findmnt -rn -M "$BACKUP_MOUNT" -o SOURCE)"
+    fstype="$(findmnt -rn -M "$BACKUP_MOUNT" -o FSTYPE)"
+    [ "$source" = "$BACKUP_SOURCE" ] || fail "$BACKUP_MOUNT source is '$source', expected '$BACKUP_SOURCE'"
+    [ "$fstype" = nfs4 ] || fail "$BACKUP_MOUNT is not nfs4 (found '$fstype')"
+    [ -e "$BACKUP_MOUNT/$BACKUP_MARKER" ] || fail "missing export marker $BACKUP_MOUNT/$BACKUP_MARKER"
+    marker="$(cat "$BACKUP_MOUNT/$BACKUP_MARKER")"
+    [ "$marker" = "$BACKUP_MARKER_VALUE" ] || fail "export marker content is '$marker', expected '$BACKUP_MARKER_VALUE'"
+}
+
+encrypt_artifact() {
+    local src="$1" dest="$2"
+    [ -n "${AGE_RECIPIENTS[0]:-}" ] || fail 'agent_backup_age_recipients is empty; refusing to write unencrypted backups'
+    local args=() recipient
+    for recipient in "${AGE_RECIPIENTS[@]}"; do
+        args+=(-r "$recipient")
+    done
+    age "${args[@]}" -o "$dest" "$src"
+}
+
+collect_metadata() {
+    local out="$1"
+    {
+        printf 'created_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        printf 'host=%s\n' "$(hostname)"
+        printf 'hermes_version=%s\n' "$(compose exec -T --user {{ agent_ops_uid }}:{{ agent_ops_gid }} hermes python3 -c 'import hermes_cli; print(hermes_cli.__version__)' 2>/dev/null || echo unknown)"
+        printf 'hindsight_version=%s\n' "$(compose exec -T hindsight python3 -c 'import importlib.metadata as m; print(m.version("hindsight-api"))' 2>/dev/null || echo unknown)"
+        printf 'embedding_model=%s\n' "$EMBEDDING_MODEL"
+        printf 'embedding_revision=%s\n' "$EMBEDDING_REVISION"
+        printf 'reranker_model=%s\n' "$RERANKER_MODEL"
+        printf 'reranker_revision=%s\n' "$RERANKER_REVISION"
+        printf 'bank_id=%s\n' "$BANK_ID"
+        printf '# image references (repo@digest) resolved by Compose:\n'
+        compose config --images 2>/dev/null | sed 's/^/image=/' || true
+    } > "$out"
+}
+
+# Remove stale incomplete sets and prune completed sets: keep the newest
+# DAILY_KEEP and additionally the newest WEEKLY_KEEP weekly (WEEKLY_DOW) sets.
+# Raw block: the bash array-length expansion below would otherwise be read as a
+# Jinja comment start.
+{% raw %}
+prune_sets() {
+    local stale
+    while IFS= read -r stale; do
+        [ -n "$stale" ] || continue
+        log "removing stale incomplete set $(basename "$stale")"
+        rm -rf "${stale:?}"
+    done < <(find "$BACKUP_MOUNT" -mindepth 1 -maxdepth 1 -type d -name '.incomplete-*' -mtime +1)
+
+    local sets=()
+    mapfile -t sets < <(find "$BACKUP_MOUNT" -mindepth 1 -maxdepth 1 -type d \
+        -regextype posix-extended -regex '.*/[0-9]{8}T[0-9]{6}Z' -printf '%f\n' | sort)
+    local total=${#sets[@]}
+    [ "$total" -gt 0 ] || return 0
+
+    declare -A keep=()
+    local i start=$((total - DAILY_KEEP))
+    [ "$start" -ge 0 ] || start=0
+    for ((i = start; i < total; i++)); do keep["${sets[i]}"]=1; done
+
+    local weeklies=() set day dow
+    for set in "${sets[@]}"; do
+        day="${set:0:4}-${set:4:2}-${set:6:2}"
+        dow="$(date -u -d "$day" +%u 2>/dev/null || echo 0)"
+        if [ "$dow" = "$WEEKLY_DOW" ]; then
+            weeklies+=("$set")
+        fi
+    done
+    local wtotal=${#weeklies[@]}
+    local wstart=$((wtotal - WEEKLY_KEEP))
+    [ "$wstart" -ge 0 ] || wstart=0
+    for ((i = wstart; i < wtotal; i++)); do keep["${weeklies[i]}"]=1; done
+
+    for set in "${sets[@]}"; do
+        if [ -z "${keep[$set]:-}" ]; then
+            log "pruning old backup set $set"
+            rm -rf "$BACKUP_MOUNT/${set:?}"
+        fi
+    done
+}
+{% endraw %}
+
+main() {
+    [ "$(id -u)" -eq 0 ] || fail 'must run as root'
+    mkdir -p {{ agent_ops_state_dir | to_json }}
+    exec 9>{{ (agent_ops_state_dir ~ '/ops.lock') | to_json }}
+    flock -n 9 || fail 'another backup/restore/export is running'
+    require_backup_mount
+
+    local ts staging final tmp
+    ts="$(date -u +%Y%m%dT%H%M%SZ)"
+    staging="$BACKUP_MOUNT/.incomplete-$ts"
+    final="$BACKUP_MOUNT/$ts"
+    if [ -e "$staging" ] || [ -e "$final" ]; then
+        fail "backup set $ts already exists"
+    fi
+
+    mkdir -p "$TMP_ROOT"
+    tmp="$(mktemp -d "$TMP_ROOT/backup.XXXXXX")"
+    # EXIT runs after main returns; its local tmp is then out of scope.
+    BACKUP_WORK_DIR="$tmp"
+    trap on_exit EXIT
+
+    mkdir -p "$staging"
+
+    log 'creating the Hermes backup archive'
+    compose exec -T --user {{ agent_ops_uid }}:{{ agent_ops_gid }} hermes mkdir -p /opt/data/backups
+    if ! compose exec -T --user {{ agent_ops_uid }}:{{ agent_ops_gid }} hermes hermes backup -o "/opt/data/backups/hermes-$ts.zip" >"$tmp/hermes.log" 2>&1; then
+        cat "$tmp/hermes.log" >&2 || true
+        fail 'hermes backup failed'
+    fi
+    local hermes_zip="$HERMES_DATA_DIR/backups/hermes-$ts.zip"
+    [ -s "$hermes_zip" ] || fail "hermes backup archive not found at $hermes_zip"
+    mv "$hermes_zip" "$tmp/hermes-backup.zip"
+    compose exec -T --user {{ agent_ops_uid }}:{{ agent_ops_gid }} hermes rm -f "/opt/data/backups/hermes-$ts.zip" >/dev/null 2>&1 || true
+
+    log 'dumping the Hindsight PostgreSQL database'
+    # The container already holds POSTGRES_* in its environment, so the password
+    # never has to pass through this host script or its logs. The single-quoted
+    # command is expanded by the container's shell, not this one.
+    # shellcheck disable=SC2016
+    compose exec -T memory-db sh -c \
+        'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -Fc -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+        >"$tmp/hindsight-postgres.dump" || fail 'pg_dump failed'
+    [ -s "$tmp/hindsight-postgres.dump" ] || fail 'pg_dump produced an empty dump'
+
+    log 'snapshotting the non-secret configuration'
+    mkdir -p "$tmp/config"
+    cp -p "$ENV_FILE" "$tmp/config/compose.env"
+    cp -p "$HERMES_DATA_DIR/config.yaml" "$tmp/config/config.yaml"
+    cp -p "$HERMES_DATA_DIR/hindsight/config.json" "$tmp/config/hindsight-config.json"
+    cp -p "$HERMES_DATA_DIR/SOUL.md" "$tmp/config/SOUL.md"
+    tar -C "$tmp/config" -czf "$tmp/agent-config.tar.gz" .
+    # Secrets are deliberately NOT copied: /etc/homelab/secrets/*.env, the SSH
+    # private keys under $SSH_KEY_DIR and any age identity. They are recovered
+    # from SOPS or regenerated by Ansible instead.
+
+    log 'streaming the Runner work tree over SSH'
+    ssh -i "$SSH_KEY_DIR/id_ed25519" \
+        -o UserKnownHostsFile="$SSH_KEY_DIR/known_hosts" \
+        -o StrictHostKeyChecking=yes \
+        -o BatchMode=yes -o ConnectTimeout=10 \
+        "$RUNNER_USER@$RUNNER_HOST" \
+        tar -C "$RUNNER_WORKSPACE" "${EXCLUDES[@]}" -czf - . >"$tmp/runner-work.tar.gz" \
+        || fail "could not stream $RUNNER_WORKSPACE from the Runner"
+    gzip -t "$tmp/runner-work.tar.gz" || fail 'Runner work tree archive is corrupt'
+
+    collect_metadata "$tmp/METADATA.txt"
+
+    log 'encrypting artifacts with age'
+    encrypt_artifact "$tmp/hermes-backup.zip" "$staging/hermes-backup.zip.age"
+    encrypt_artifact "$tmp/hindsight-postgres.dump" "$staging/hindsight-postgres.dump.age"
+    encrypt_artifact "$tmp/agent-config.tar.gz" "$staging/agent-config.tar.gz.age"
+    encrypt_artifact "$tmp/runner-work.tar.gz" "$staging/runner-work.tar.gz.age"
+    cp "$tmp/METADATA.txt" "$staging/METADATA.txt"
+
+    (cd "$staging" && sha256sum ./*.age >SHA256SUMS)
+    {
+        printf '# Agent backup set %s\n' "$ts"
+        printf '# Encrypted artifacts (.age). The manifest carries no secrets.\n'
+        cat "$tmp/METADATA.txt"
+        printf '\n# sha256  size  artifact\n'
+        (cd "$staging" && for artifact in ./*.age; do
+            printf '%s  %s  %s\n' "$(sha256sum "$artifact" | cut -d' ' -f1)" "$(stat -c %s "$artifact")" "${artifact#./}"
+        done)
+    } >"$staging/MANIFEST.txt"
+
+    mv "$staging" "$final"
+    log "backup set written to $final"
+
+    prune_sets
+    deadman_ping
+    log 'backup finished'
+}
+
+trap on_exit EXIT
+main "$@"

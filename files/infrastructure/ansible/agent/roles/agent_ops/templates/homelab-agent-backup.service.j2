@@ -1,0 +1,15 @@
+[Unit]
+Description=Agent VM daily backup (Hermes, Hindsight, config, Runner work tree)
+After=docker.service network-online.target remote-fs.target
+Wants=network-online.target
+# The mount is deliberately NOT a systemd unit condition: the helper validates
+# the export itself and raises the operator webhook when it is missing, whereas
+# a skipped/failed unit would stay silent.
+
+[Service]
+Type=oneshot
+ExecStart={{ agent_ops_helpers_dir }}/homelab-agent-backup
+TimeoutStartSec=1800
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6

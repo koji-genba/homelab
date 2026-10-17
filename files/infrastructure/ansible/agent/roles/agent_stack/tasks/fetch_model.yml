@@ -1,0 +1,35 @@
+---
+# Included serially for each missing completion marker. No inference server is
+# ever started here: snapshot_download only transfers files, with two workers.
+- name: Fetch the pinned model revision {{ item.item.name }}
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --memory
+      - "{{ agent_stack_model_fetch_memory }}"
+      - --memory-swap
+      - "{{ agent_stack_model_fetch_memory }}"
+      - --cpus
+      - "1"
+      - --dns
+      - "{{ agent_stack_model_fetch_dns }}"
+      - --env
+      - HF_HUB_DISABLE_XET=1
+      - --volume
+      - "{{ agent_stack_models_dir }}:/data"
+      - --volume
+      - "{{ agent_stack_helpers_dir }}/homelab-agent-fetch-model.py:/fetch-model.py:ro"
+      - --volume
+      - "{{ agent_stack_helpers_dir }}/homelab-agent-model-fetch-requirements.txt:/requirements.txt:ro"
+      - "{{ agent_stack_model_fetch_image }}"
+      - sh
+      - -ec
+      - >-
+        pip install --no-cache-dir --only-binary=:all: --require-hashes -r /requirements.txt
+        && python /fetch-model.py "$1" "$2"
+      - fetch-model
+      - "{{ item.item.model }}"
+      - "{{ item.item.revision }}"
+  changed_when: true

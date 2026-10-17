@@ -1,0 +1,38 @@
+---
+# The runtime TEI containers are pinned read-only (HF_HUB_OFFLINE=1) against
+# this cache. Fetching happens here, in a throwaway container, because the
+# homelab resolver NXDOMAINs the Hugging Face xet CDN; we push 1.1.1.1 into the
+# fetcher and disable xet so the classic CDN is used.
+
+- name: Install the download-only model fetcher
+  ansible.builtin.copy:
+    src: fetch-model.py
+    dest: "{{ agent_stack_helpers_dir }}/homelab-agent-fetch-model.py"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the hashed model fetch dependencies
+  ansible.builtin.copy:
+    src: model-fetch-requirements.txt
+    dest: "{{ agent_stack_helpers_dir }}/homelab-agent-model-fetch-requirements.txt"
+    owner: root
+    group: root
+    mode: "0644"
+
+# A snapshot directory can exist after an interrupted download. Only a marker
+# written AFTER snapshot_download returns proves the cache is complete.
+- name: Check which pinned model revisions are already cached
+  ansible.builtin.stat:
+    path: "{{ agent_stack_models_dir }}/models--{{ item.model | replace('/', '--') }}/snapshots/{{ item.revision }}/.homelab-complete"
+  loop: "{{ agent_stack_pinned_models }}"
+  register: agent_stack_model_cache
+  loop_control:
+    label: "{{ item.model }}"
+
+- name: Fetch any missing pinned model revision
+  ansible.builtin.include_tasks: fetch_model.yml
+  when: not (item.stat.exists | default(false))
+  loop: "{{ agent_stack_model_cache.results }}"
+  loop_control:
+    label: "{{ item.item.model }}"

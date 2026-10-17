@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the Agent VM daily backup
+
+[Timer]
+OnCalendar={{ agent_ops_backup_on_calendar }}
+Persistent=true
+AccuracySec=1min
+RandomizedDelaySec=300
+Unit=homelab-agent-backup.service
+
+[Install]
+WantedBy=timers.target

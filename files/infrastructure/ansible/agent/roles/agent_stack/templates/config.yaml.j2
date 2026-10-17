@@ -1,0 +1,173 @@
+# Managed by the homelab Ansible role agent_stack
+# (files/infrastructure/ansible/agent/roles/agent_stack). Every apply overwrites
+# this file, so local edits are lost. Configuration lives here; secrets are
+# injected as container environment from /etc/homelab/secrets/*.env, never here
+# except for the Discord channel IDs (which are not credentials but are kept out
+# of the public repo and sourced from the SOPS bundle at render time).
+#
+# Key names track Hermes Agent v2026.9.24 (config version 46).
+
+_config_version: 46
+
+model:
+  # Single self-hosted endpoint (DGX tensorfold serve, OpenAI-compatible). There
+  # is only one endpoint, so there is no fallback provider.
+  provider: custom:glm
+  default: {{ agent_stack_llm_model }}
+  api_mode: chat_completions
+  # The endpoint advertises a 1M window, but an unbounded per-turn budget is not
+  # useful. 131072 is the bounded working value.
+  context_length: {{ agent_stack_llm_context_length }}
+
+providers:
+  glm:
+    api: {{ agent_stack_llm_base_url }}
+    transport: chat_completions
+    default_model: {{ agent_stack_llm_model }}
+    context_length: {{ agent_stack_llm_context_length }}
+    request_timeout_seconds: 900
+    stale_timeout_seconds: 300
+    # Bound the response so one turn cannot run away on the shared endpoint.
+    extra_body:
+      max_tokens: {{ agent_stack_llm_max_output_tokens }}
+
+fallback_providers: []
+
+# Interactive chat only; keep the two Discord conversations from starving the
+# single endpoint.
+max_concurrent_sessions: 2
+
+# IANA timezone for cron schedules and logs.
+timezone: {{ agent_stack_timezone }}
+
+agent:
+  # Task-level turn cap (default is unlimited).
+  max_turns: 64
+  # Per-run wall-clock budget.
+  run_budget_seconds: 1800
+  gateway_timeout: 1800
+  api_max_retries: 2
+  auto_recovery_cycles: 1
+
+terminal:
+  # All command execution runs on the Runner VM over SSH, not in this container.
+  backend: ssh
+  cwd: {{ agent_stack_runner_workspace }}
+  ssh_host: {{ agent_stack_runner_host }}
+  ssh_user: {{ agent_stack_runner_user }}
+  ssh_port: 22
+  # Generated on this VM by the role and mounted read-only at /run/agent-ssh.
+  ssh_key: /run/agent-ssh/id_ed25519
+  persistent_shell: true
+  timeout: 180
+  env_passthrough: []
+  credential_files: []
+
+approvals:
+  # Dangerous operations need an explicit human approval; unattended and cron
+  # runs never auto-approve.
+  mode: manual
+  timeout: 300
+  cron_mode: deny
+  single_query_mode: deny
+  unattended_mode: deny
+
+group_sessions_per_user: true
+thread_sessions_per_user: true
+
+discord:
+  # Conversation channel(s) answer without a mention; the notification channel
+  # (DISCORD_HOME_CHANNEL) is where cron output is delivered. IDs are not in the
+  # public repo.
+  allowed_channels: "{{ agent_stack_discord_allowed_channels }}"
+  free_response_channels: "{{ agent_stack_discord_free_response_channels }}"
+  require_mention: true
+  auto_thread: true
+  free_response_auto_thread: true
+  thread_require_mention: false
+  max_attachment_bytes: 33554432
+
+browser:
+  # Built-in browser tools only; the Browser Use driver stays off.
+  backend: "off"
+  # The Runner's loopback Chromium, reached through the cdp-tunnel sidecar which
+  # shares this container's network namespace (started with the stack).
+  cdp_url: http://127.0.0.1:{{ agent_stack_cdp_port }}
+
+web:
+  search_backend: searxng
+  # Never fall back to keyless third-party search tiers.
+  keyless_fallback: false
+  # Page bodies come from the MCP SearXNG reader (web_url_read) below, not from a
+  # commercial extract vendor.
+
+mcp_servers:
+  searxng:
+    # MCP SearXNG on the Apps VM behind Caddy (HTTPS, public cert). The FQDN is
+    # pinned to the Apps LAN IP with extra_hosts in compose.yaml.
+    url: {{ agent_stack_mcp_searxng_url }}
+    enabled: true
+    timeout: 120
+    trust: full
+    tools:
+      # Search already goes through the searxng web backend; expose only the
+      # reader so page bodies can be fetched.
+      include:
+        - web_url_read
+
+memory:
+  provider: hindsight
+  memory_enabled: true
+  user_profile_enabled: true
+  # 2026-10-17 user decision: write built-in MEMORY.md/USER.md immediately.
+  # This gate does not cover Hindsight retain/auto-retain. Unattended
+  # background_review replace/remove still stage under a separate upstream gate.
+  write_approval: false
+
+skills:
+  # Stage every skill write for review.
+  write_approval: true
+
+auxiliary:
+  compression:
+    provider: custom:glm
+    model: {{ agent_stack_llm_model }}
+    timeout: 600
+    no_progress_timeout: 120
+    max_concurrency: 1
+  title_generation:
+    provider: auto
+  background_review:
+    enabled: true
+  # auxiliary.vision is intentionally unset: the GLM endpoint is text-only.
+
+delegation:
+  max_concurrent_children: 2
+  max_iterations: 64
+  max_spawn_depth: 1
+  child_timeout_seconds: 600
+
+cron:
+  # Serial cron execution (default is unbounded).
+  max_parallel_jobs: 1
+  output_retention: 50
+
+goals:
+  max_turns: 10
+
+loops:
+  max_ticks: 20
+
+kanban:
+  dispatch_in_gateway: false
+  auto_decompose: false
+
+curator:
+  enabled: true
+  consolidate: false
+  prune_builtins: false
+
+security:
+  redact_secrets: true
+  # Internal FQDNs are reached through extra_hosts, not by relaxing this.
+  allow_private_urls: false

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Agent VM health check
+
+[Timer]
+OnCalendar={{ agent_ops_health_on_calendar }}
+Persistent=true
+AccuracySec=30s
+Unit=homelab-agent-healthcheck.service
+
+[Install]
+WantedBy=timers.target

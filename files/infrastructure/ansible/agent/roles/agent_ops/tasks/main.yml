@@ -1,0 +1,70 @@
+---
+# WS5 operational layer: tooling, scripts, systemd units for the Agent VM.
+- name: Install the backup, restore and health tooling
+  ansible.builtin.apt:
+    name:
+      # age: the only way backup artifacts may be written to the NFS export.
+      - age
+      # sqlite3: verifies a restored Hermes state.db (PRAGMA integrity_check).
+      - sqlite3
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the operation state and work directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ agent_ops_state_dir }}", mode: '0750' }
+    - { path: "{{ agent_ops_exports_dir }}", mode: '0750' }
+    - { path: "{{ agent_ops_scratch_dir }}", mode: '0700' }
+    - { path: "{{ agent_ops_safety_dir }}", mode: '0700' }
+    - { path: "{{ agent_ops_rebuild_dir }}", mode: '0700' }
+    - { path: "{{ agent_ops_tmp_dir }}", mode: '0700' }
+
+- name: Install the Agent operation scripts
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ agent_ops_helpers_dir }}/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - { src: homelab-agent-backup.sh.j2, dest: homelab-agent-backup }
+    - { src: homelab-agent-restore.sh.j2, dest: homelab-agent-restore }
+    - { src: homelab-agent-export.sh.j2, dest: homelab-agent-export }
+    - { src: homelab-agent-rebuild-memory.sh.j2, dest: homelab-agent-rebuild-memory }
+    - { src: homelab-agent-rebuild-memory.py.j2, dest: homelab-agent-rebuild-memory.py }
+    - { src: homelab-agent-healthcheck.sh.j2, dest: homelab-agent-healthcheck }
+
+- name: Install the Agent operation systemd units
+  ansible.builtin.template:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item | regex_replace('\\.j2$', '') }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - homelab-agent-backup.service.j2
+    - homelab-agent-backup.timer.j2
+    - homelab-agent-healthcheck.service.j2
+    - homelab-agent-healthcheck.timer.j2
+  notify: Reload systemd
+
+- name: Enable the daily Agent backup timer
+  ansible.builtin.systemd:
+    name: homelab-agent-backup.timer
+    daemon_reload: true
+    enabled: true
+    state: started
+
+- name: Enable the Agent health check timer
+  ansible.builtin.systemd:
+    name: homelab-agent-healthcheck.timer
+    daemon_reload: true
+    enabled: true
+    state: started

@@ -1,0 +1,44 @@
+---
+# OS-level configuration for the Hermes Agent VM (group `agent`) and Runner VM
+# (group `runner`). The Compose stack, Hermes config and Hindsight wiring live
+# in WS2's `agent_stack` role, which this playbook only calls.
+#
+# Apply order matters: the Agent play runs first so that the dedicated Runner
+# SSH keys generated on the Agent VM exist as host facts before the Runner play
+# installs them into the runner accounts' authorized_keys.
+- name: Configure the Hermes Agent VM
+  hosts: agent
+  become: true
+  gather_facts: true
+  roles:
+    - common
+    # `docker` is reused from the Apps root through roles_path; it depends only
+    # on distribution facts, never on Apps-specific variables.
+    - docker
+    - firewall
+    - agent_storage
+    - agent_stack
+    # WS5 operational layer: daily backup, restore, export, memory rebuild and
+    # the five-minute health check. Runs after agent_stack so the Compose
+    # project, generated secrets and Runner SSH keys already exist.
+    - agent_ops
+
+- name: Configure the Hermes Runner VM
+  hosts: runner
+  become: true
+  gather_facts: true
+  pre_tasks:
+    - name: Adopt the Runner SSH keys generated on the Agent VM
+      ansible.builtin.set_fact:
+        # Contract with WS2: role `agent_stack` (running on the Agent host)
+        # generates the dedicated key pairs and publishes these facts. When the
+        # placeholder role has not run yet the values are empty and the Runner
+        # play installs no keys (re-apply after WS2 lands).
+        runner_terminal_ssh_public_key: >-
+          {{ hostvars[groups['agent'][0]]['agent_runner_ssh_public_key'] | default('') }}
+        runner_cdp_ssh_public_key: >-
+          {{ hostvars[groups['agent'][0]]['agent_cdp_tunnel_ssh_public_key'] | default('') }}
+  roles:
+    - common
+    - firewall
+    - runner

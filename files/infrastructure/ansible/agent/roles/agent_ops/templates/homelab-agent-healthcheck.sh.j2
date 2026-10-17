@@ -1,0 +1,329 @@
+#!/usr/bin/env bash
+# Agent VM health check, installed by the Ansible role agent_ops at
+# {{ agent_ops_helpers_dir }}/homelab-agent-healthcheck and run every five
+# minutes by homelab-agent-healthcheck.timer.
+#
+# It probes the whole stack (containers, Hindsight readiness and stats, the TEI
+# servers, the inference endpoint, the Runner over SSH, the CDP tunnel, the
+# Hermes gateway and cron). Notifications are only sent when a check changes
+# state: recovery is announced once, a still-failing check is re-notified every
+# {{ agent_ops_health_renotify_seconds }} seconds, and a fully healthy run pings the dead-man URL.
+# Exit status is non-zero if any check failed, so it is usable manually and from
+# the restore runbook.
+set -Eeuo pipefail
+umask 077
+
+PROG=homelab-agent-healthcheck
+
+PROJECT_DIR={{ agent_ops_project_dir | to_json }}
+PROJECT_NAME={{ agent_ops_project_name | to_json }}
+ENV_FILE={{ agent_ops_env_file | to_json }}
+SECRET_ENV_FILE={{ agent_ops_secrets_dir | to_json }}/memory-db.env
+MONITORING_ENV={{ agent_ops_monitoring_env | to_json }}
+HERMES_DATA_DIR={{ agent_ops_hermes_data_dir | to_json }}
+STATE_DIR={{ agent_ops_state_dir | to_json }}
+STATE_FILE={{ (agent_ops_state_dir ~ '/healthcheck.state') | to_json }}
+SSH_KEY_DIR={{ agent_ops_ssh_key_dir | to_json }}
+RUNNER_HOST={{ agent_ops_runner_host | to_json }}
+RUNNER_USER={{ agent_ops_runner_user | to_json }}
+CDP_PORT={{ agent_ops_cdp_port | to_json }}
+BANK_ID={{ agent_ops_bank_id | to_json }}
+INFERENCE_URL={{ agent_ops_health_inference_url | to_json }}
+PENDING_THRESHOLD={{ agent_ops_health_pending_ops_threshold | int }}
+RENOTIFY={{ agent_ops_health_renotify_seconds | int }}
+SERVICES=({% for service in agent_ops_health_services %}{{ service | to_json }} {% endfor %})
+
+log() { printf '%s: %s\n' "$PROG" "$*" >&2; }
+json_str() { python3 -c 'import json,sys; sys.stdout.write(json.dumps(sys.argv[1]))' "$1"; }
+
+load_env_file() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+    set -a
+    # shellcheck disable=SC1090
+    . "$file"
+    set +a
+}
+
+notify_operator() {
+    local message="$1" url
+    load_env_file "$MONITORING_ENV"
+    url="${OPERATOR_WEBHOOK_URL:-}"
+    [ -n "$url" ] || return 0
+    curl -fsS --max-time 15 -X POST -H 'Content-Type: application/json' \
+        --data "$(printf '{"content": %s}' "$(json_str "$message")")" \
+        "$url" >/dev/null 2>&1 || log 'operator webhook delivery failed'
+}
+
+deadman_ping() {
+    local url
+    load_env_file "$MONITORING_ENV"
+    url="${DEADMAN_PING_URL:-}"
+    [ -n "$url" ] || return 0
+    curl -fsS --max-time 15 "$url" >/dev/null 2>&1 || log 'dead-man ping delivery failed'
+}
+
+compose() {
+    docker compose \
+        --project-name "$PROJECT_NAME" \
+        --env-file "$ENV_FILE" \
+        --env-file "$SECRET_ENV_FILE" \
+        --file "$PROJECT_DIR/compose.yaml" \
+        "$@"
+}
+
+declare -A FAILURES=()
+
+record_failure() { FAILURES["$1"]="$2"; }
+
+check_containers() {
+    local service json state
+    json="$(compose ps --all --format json 2>/dev/null || true)"
+    for service in "${SERVICES[@]}"; do
+        state="$(printf '%s' "$json" | python3 -c '
+import json, sys
+service = sys.argv[1]
+raw = sys.stdin.read().strip()
+rows = []
+if raw:
+    try:
+        parsed = json.loads(raw)
+        rows = parsed if isinstance(parsed, list) else [parsed]
+    except json.JSONDecodeError:
+        for line in raw.splitlines():
+            line = line.strip()
+            if line:
+                rows.append(json.loads(line))
+for row in rows:
+    if row.get("Service") == service:
+        print(row.get("State", "") if row.get("Health", "") in ("", "healthy") else "unhealthy")
+        break
+' "$service" 2>/dev/null)" || state=invalid
+        if [ "$state" != "running" ]; then
+            record_failure "container:$service" "state=${state:-missing}"
+        fi
+    done
+}
+
+check_hindsight_ready() {
+    compose exec -T hindsight python3 -c 'import urllib.request,sys; sys.exit(0 if urllib.request.urlopen("http://127.0.0.1:8888/health/ready", timeout=10).status == 200 else 1)' >/dev/null 2>&1 \
+        || record_failure hindsight-ready 'not ready'
+}
+
+check_tei() {
+    # The TEI image ships curl (its own healthcheck uses it) but no python3.
+    local service
+    for service in embedding reranker; do
+        compose exec -T "$service" curl -fsS --max-time 10 http://localhost:8080/health >/dev/null 2>&1 \
+            || record_failure "$service" 'health endpoint failed'
+    done
+}
+
+check_inference() {
+    curl -fsS --max-time 10 "$INFERENCE_URL/models" >/dev/null 2>&1 \
+        || record_failure inference "unreachable at $INFERENCE_URL"
+}
+
+check_runner() {
+    ssh -i "$SSH_KEY_DIR/id_ed25519" \
+        -o UserKnownHostsFile="$SSH_KEY_DIR/known_hosts" \
+        -o StrictHostKeyChecking=yes \
+        -o BatchMode=yes -o ConnectTimeout=10 \
+        "$RUNNER_USER@$RUNNER_HOST" true >/dev/null 2>&1 \
+        || record_failure runner 'SSH check failed'
+}
+
+check_cdp() {
+    compose exec -T --user {{ agent_ops_uid }}:{{ agent_ops_gid }} hermes python3 -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:$CDP_PORT/json/version', timeout=10).status == 200 else 1)" >/dev/null 2>&1 \
+        || record_failure cdp 'CDP endpoint not reachable'
+}
+
+check_gateway() {
+    local file="$HERMES_DATA_DIR/gateway_state.json"
+    [ -f "$file" ] || { record_failure gateway 'gateway_state.json is missing'; return; }
+    local result
+    result="$(python3 -c '
+import json, sys
+path = sys.argv[1]
+try:
+    with open(path, encoding="utf-8") as handle:
+        state = json.load(handle)
+except Exception as exc:
+    print(f"unreadable: {exc}")
+    sys.exit(0)
+problems = []
+if state.get("gateway_state") != "running":
+    problems.append("gateway_state=" + str(state.get("gateway_state")))
+for name, platform in (state.get("platforms") or {}).items():
+    if platform.get("state") != "connected":
+        detail = platform.get("error_message") or platform.get("error_code") or platform.get("state")
+        problems.append(f"{name}={detail}")
+print("; ".join(problems))
+' "$file")"
+    [ -z "$result" ] || record_failure gateway "$result"
+}
+
+check_cron() {
+    # An open incident is either newly detected or already alerted; a resolved
+    # job is not a current failure, and closed incidents are history.
+    local state output
+    for state in detected alerted; do
+        output="$(compose exec -T --user {{ agent_ops_uid }}:{{ agent_ops_gid }} hermes hermes cron incidents --state "$state" 2>/dev/null || true)"
+        printf '%s' "$output" | grep -q 'No cron failure incidents recorded.' \
+            || record_failure cron "open cron failure incidents ($state)"
+    done
+}
+
+check_hindsight_stats() {
+    local result
+    if ! result="$(compose exec -T hindsight python3 - "$BANK_ID" "$PENDING_THRESHOLD" <<'PY' 2>/dev/null
+import json
+import sys
+import urllib.request
+
+bank, threshold = sys.argv[1], int(sys.argv[2])
+with urllib.request.urlopen(f"http://127.0.0.1:8888/v1/default/banks/{bank}/stats", timeout=10) as response:
+    stats = json.load(response)
+failed = stats["failed_operations"]
+pending = stats["pending_operations"]
+if any(type(value) is not int or value < 0 for value in (failed, pending)):
+    raise ValueError("invalid stats counts")
+problems = []
+if failed:
+    problems.append(f"failed_operations={failed}")
+if pending > threshold:
+    problems.append(f"pending_operations={pending}")
+print("; ".join(problems))
+PY
+)"; then
+        record_failure hindsight-stats 'stats API unavailable or invalid'
+        return
+    fi
+    [ -z "$result" ] || record_failure hindsight-stats "$result"
+}
+
+# State file: one TSV row per check -> name, status, last_change, last_notify.
+declare -A PREV_STATUS=() PREV_CHANGE=() PREV_NOTIFY=()
+read_state() {
+    local name status changed notified
+    [ -f "$STATE_FILE" ] || return 0
+    while IFS=$'\t' read -r name status changed notified; do
+        [ -n "$name" ] || continue
+        PREV_STATUS["$name"]="$status"
+        PREV_CHANGE["$name"]="$changed"
+        PREV_NOTIFY["$name"]="$notified"
+    done <"$STATE_FILE"
+}
+
+write_state() {
+    local now="$1" name status tmp
+    tmp="$STATE_FILE.tmp"
+    : >"$tmp"
+    for name in "${!CURRENT_STATUS[@]}"; do
+        status="${CURRENT_STATUS[$name]}"
+        if [ "${PREV_STATUS[$name]:-}" != "$status" ]; then
+            printf '%s\t%s\t%s\t%s\n' "$name" "$status" "$now" "$now" >>"$tmp"
+        else
+            printf '%s\t%s\t%s\t%s\n' "$name" "$status" \
+                "${PREV_CHANGE[$name]:-$now}" "${PREV_NOTIFY[$name]:-$now}" >>"$tmp"
+        fi
+    done
+    mv "$tmp" "$STATE_FILE"
+}
+
+main() {
+    [ "$(id -u)" -eq 0 ] || { log 'must run as root'; exit 1; }
+    local no_notify=0
+    case "${1:-}" in
+        '') [ "$#" -eq 0 ] || exit 2 ;;
+        --no-notify) [ "$#" -eq 1 ] || exit 2; no_notify=1 ;;
+        *) log 'usage: homelab-agent-healthcheck [--no-notify]'; exit 2 ;;
+    esac
+    mkdir -p "$STATE_DIR"
+    exec 9>"$STATE_DIR/healthcheck.lock"
+    flock -n 9 || { log 'health check already running'; exit 1; }
+    load_env_file "$MONITORING_ENV"
+
+    check_containers
+    check_hindsight_ready
+    check_tei
+    check_inference
+    check_runner
+    check_cdp
+    check_gateway
+    check_cron
+    check_hindsight_stats
+
+    # Restore readiness retries must not announce transient failures/recovery or
+    # rewrite the persistent notification state.
+    if [ "$no_notify" = 1 ]; then
+        [ -z "${FAILURES[*]:-}" ] && return 0
+        return 1
+    fi
+    read_state
+    local now
+    now="$(date +%s)"
+    local failures=0 name status
+    declare -A CURRENT_STATUS=()
+    for name in "${SERVICES[@]}"; do
+        CURRENT_STATUS["container:$name"]="ok"
+    done
+    CURRENT_STATUS[hindsight-ready]=ok
+    CURRENT_STATUS[embedding]=ok
+    CURRENT_STATUS[reranker]=ok
+    CURRENT_STATUS[inference]=ok
+    CURRENT_STATUS[runner]=ok
+    CURRENT_STATUS[cdp]=ok
+    CURRENT_STATUS[gateway]=ok
+    CURRENT_STATUS[cron]=ok
+    CURRENT_STATUS[hindsight-stats]=ok
+
+    for name in "${!FAILURES[@]}"; do
+        CURRENT_STATUS["$name"]="failed"
+    done
+
+    local new_failures='' recovered='' still_failing=''
+    for name in "${!CURRENT_STATUS[@]}"; do
+        status="${CURRENT_STATUS[$name]}"
+        if [ "$status" = failed ]; then
+            failures=$((failures + 1))
+            if [ "${PREV_STATUS[$name]:-ok}" != failed ]; then
+                new_failures="${new_failures}${new_failures:+, }$name (${FAILURES[$name]})"
+            else
+                local since="${PREV_CHANGE[$name]:-$now}"
+                if [ $((now - since)) -ge "$RENOTIFY" ] && [ $((now - ${PREV_NOTIFY[$name]:-$now})) -ge "$RENOTIFY" ]; then
+                    still_failing="${still_failing}${still_failing:+, }$name (${FAILURES[$name]})"
+                fi
+            fi
+        elif [ "${PREV_STATUS[$name]:-}" = failed ]; then
+            recovered="${recovered}${recovered:+, }$name"
+        fi
+    done
+
+    if [ -n "$new_failures$still_failing" ]; then
+        notify_operator "Agent health check FAILING on $(hostname): $new_failures${new_failures:+${still_failing:+, }}$still_failing"
+        for name in "${!CURRENT_STATUS[@]}"; do
+            if [ "${CURRENT_STATUS[$name]}" = failed ] && {
+                [ "${PREV_STATUS[$name]:-ok}" != failed ] ||
+                [ $((now - ${PREV_NOTIFY[$name]:-$now})) -ge "$RENOTIFY" ];
+            }; then
+                PREV_NOTIFY["$name"]="$now"
+            fi
+        done
+    fi
+    if [ -n "$recovered" ]; then
+        notify_operator "Agent health check RECOVERED on $(hostname): $recovered"
+    fi
+
+    write_state "$now"
+
+    if [ "$failures" -eq 0 ]; then
+        log 'all checks passed'
+        deadman_ping
+        exit 0
+    fi
+    log "$failures check(s) failed"
+    exit 1
+}
+
+main "$@"
