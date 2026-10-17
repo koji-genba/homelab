@@ -95,11 +95,11 @@ services:
 
   embedding:
     # HuggingFace Text Embeddings Inference (CPU), ghcr.io/huggingface/
-    # text-embeddings-inference pinned to the cpu-1.8.3 index digest.
-    image: ghcr.io/huggingface/text-embeddings-inference@sha256:8de25e75ce39617f17f2f6c77d60a4f75b65e779ed5005420eb1400072a15c1c
+    # text-embeddings-inference pinned to the cpu-1.9.4 index digest.
+    image: ghcr.io/huggingface/text-embeddings-inference@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
     restart: unless-stopped
-    # WS13/WS14: swap-free 4096-token warm-up peaks at ~5.8 GiB; 4g OOMs.
-    # Use 8g for startup headroom (steady 1.5-1.9 GiB, workload peak 2.74 GiB).
+    # WS16 cpu-1.9.4: swap-free 4096-token warm-up/workload peak ~5.38 GiB.
+    # Keep 8g (~2.62 GiB headroom); WS13 also confirmed startup OOM at 4g.
     # Throughput scales almost linearly from 1 to 2 to 4 CPUs. Background retain
     # can overlap rerank: embedding 4 + reranker 6 leaves 2 of the VM's 12 vCPUs.
     mem_limit: 8g
@@ -110,8 +110,10 @@ services:
       - "${TEI_EMBEDDING_MODEL:?set TEI_EMBEDDING_MODEL}"
       - --revision
       - "${TEI_EMBEDDING_REVISION:?set TEI_EMBEDDING_REVISION}"
+      # Two Hindsight requests x 32 inputs, plus 64 permits of headroom.
+      # TEI 1.9 acquires a permit immediately for every input, not per HTTP call.
       - --max-concurrent-requests
-      - "16"
+      - "128"
       # WS13b: retain embeds extracted facts augmented with dates/entities,
       # not chunk bodies (only retain_extraction_mode=chunks with LLM provider
       # none embeds those). Keep 4096 as headroom for long facts/observations
@@ -127,6 +129,9 @@ services:
       # MODELS_DIR with a one-shot container that had a working resolver for the
       # xet CDN. See docs in the role defaults.
       HF_HUB_OFFLINE: "1"
+      RAYON_NUM_THREADS: "${TEI_EMBEDDING_THREADS:?set TEI_EMBEDDING_THREADS}"
+      OMP_NUM_THREADS: "${TEI_EMBEDDING_THREADS:?set TEI_EMBEDDING_THREADS}"
+      MKL_NUM_THREADS: "${TEI_EMBEDDING_THREADS:?set TEI_EMBEDDING_THREADS}"
     volumes:
       - type: bind
         source: "${MODELS_DIR:?set MODELS_DIR}"
@@ -151,12 +156,12 @@ services:
       start_period: 60s
 
   reranker:
-    # Same TEI CPU image as embedding (cpu-1.8.3 index digest).
-    image: ghcr.io/huggingface/text-embeddings-inference@sha256:8de25e75ce39617f17f2f6c77d60a4f75b65e779ed5005420eb1400072a15c1c
+    # Same TEI CPU image as embedding (cpu-1.9.4 index digest).
+    image: ghcr.io/huggingface/text-embeddings-inference@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
     restart: unless-stopped
     # ruri-v3-reranker-310m (ModernBERT, Candle backend) is ~1.7 GiB resident on
-    # CPU. WS13c: swap-free warm-up peaks at ~2.8-2.9 GiB and hits the 3g
-    # cap with page cache; 4g leaves headroom. Keep 6 CPUs: Candle ModernBert's
+    # CPU. WS16 cpu-1.9.4: swap-free warm-up/workload peak ~2.79 GiB;
+    # 4g leaves ~1.21 GiB headroom. Keep 6 CPUs: Candle CPU's
     # batch-size-4 limit gives little benefit from 8/10 CPUs. Explicit thread pools
     # prevent oversubscription behind the CPU quota (WS7c local measurements).
     mem_limit: 4g
@@ -166,15 +171,16 @@ services:
       - "${TEI_RERANKER_MODEL:?set TEI_RERANKER_MODEL}"
       - --revision
       - "${TEI_RERANKER_REVISION:?set TEI_RERANKER_REVISION}"
+      # Hindsight globally serializes batches of up to 32 pairs; allow headroom.
       - --max-concurrent-requests
-      - "16"
+      - "64"
       # The token limit also caps each query/document pair under auto-truncate.
       # Keep it at 2048; shrinking it for throughput can discard evidence.
-      # Limit requests per batch instead, without changing candidate contents.
+      # Candle CPU forces runtime max_batch_requests=4 (router overrides the CLI).
+      # Omit --max-batch-requests: 1 never constrained runtime batching; CPU
+      # warm-up already uses one sequence in 1.9.4, so it is redundant there too.
       - --max-batch-tokens
       - "2048"
-      - --max-batch-requests
-      - "${TEI_RERANKER_MAX_BATCH_REQUESTS:?set TEI_RERANKER_MAX_BATCH_REQUESTS}"
       - --tokenization-workers
       - "${TEI_RERANKER_TOKENIZATION_WORKERS:?set TEI_RERANKER_TOKENIZATION_WORKERS}"
       - --auto-truncate
@@ -229,6 +235,14 @@ services:
       # Multilingual bank: keep the query analyzer broad for Japanese/English.
       HINDSIGHT_API_QUERY_ANALYZER_LANGUAGES: "en,ja"
       # --- Embeddings / reranking: the TEI sidecars above. ---
+      # One API process with its embedded async worker: the provider shares two
+      # HTTP slots across query/retain callers on the serving loop (32 texts each).
+      # Recalculate TEI permits if workers, replicas, batch or concurrency change.
+      HINDSIGHT_API_WORKERS: "1"
+      HINDSIGHT_API_EMBEDDINGS_TEI_BATCH_SIZE: "32"
+      # Bound CPU queueing: eight retain requests exceeded the client timeout
+      # in WS16. Two still keep Candle's four-input batches supplied.
+      HINDSIGHT_API_EMBEDDINGS_MAX_CONCURRENT_REQUESTS: "2"
       HINDSIGHT_API_EMBEDDINGS_PROVIDER: tei
       HINDSIGHT_API_EMBEDDINGS_TEI_URL: "http://embedding:8080"
       # ruri-v3 is asymmetric: Hindsight prepends these literally on the recall

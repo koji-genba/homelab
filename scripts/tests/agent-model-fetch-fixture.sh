@@ -86,7 +86,7 @@ compose = yaml.safe_load(pathlib.Path('files/services/agent/stack/compose.yaml')
 reranker = compose['services']['reranker']
 env_template = (role / 'templates/compose.env.j2').read_text()
 validator = pathlib.Path('scripts/agent-compose-config.sh').read_text()
-for suffix in ('cpus', 'threads', 'tokenization_workers', 'max_batch_requests'):
+for suffix in ('cpus', 'threads', 'tokenization_workers'):
     key = 'agent_stack_reranker_' + suffix
     variable = 'TEI_RERANKER_' + suffix.upper()
     assert limits[key] > 0
@@ -131,9 +131,29 @@ for key in ('RAYON_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS'):
     assert reranker['environment'][key] == '${TEI_RERANKER_THREADS:?set TEI_RERANKER_THREADS}'
 argv = reranker['command']
 assert argv[argv.index('--max-batch-tokens') + 1] == '2048'
-assert argv[argv.index('--max-batch-requests') + 1].startswith('${TEI_RERANKER_MAX_BATCH_REQUESTS:')
+assert '--max-batch-requests' not in argv
 assert argv[argv.index('--tokenization-workers') + 1].startswith('${TEI_RERANKER_TOKENIZATION_WORKERS:')
 assert limits['agent_stack_reranker_max_candidates_mid'] == 20
 assert limits['agent_stack_reranker_max_candidates_high'] == 30
+# WS16: the image and per-input permits must agree with the Hindsight fan-out.
+assert embedding['image'] == reranker['image'] == limits['agent_stack_tei_image']
+assert embedding['image'].endswith('@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d')
+hindsight_env = compose['services']['hindsight']['environment']
+assert hindsight_env['HINDSIGHT_API_WORKERS'] == '1'
+embed_batch = int(hindsight_env['HINDSIGHT_API_EMBEDDINGS_TEI_BATCH_SIZE'])
+embed_parallel = int(hindsight_env['HINDSIGHT_API_EMBEDDINGS_MAX_CONCURRENT_REQUESTS'])
+assert (embed_batch, embed_parallel) == (32, 2)
+assert int(embedding_argv[embedding_argv.index('--max-concurrent-requests') + 1]) == 128
+assert 128 >= embed_batch * embed_parallel + 32
+assert hindsight_env['HINDSIGHT_API_RERANKER_TEI_MAX_CONCURRENT'] == '1'
+assert hindsight_env['HINDSIGHT_API_RERANKER_TEI_BATCH_SIZE'] == '32'
+assert int(argv[argv.index('--max-concurrent-requests') + 1]) == 64
+assert 64 >= int(hindsight_env['HINDSIGHT_API_RERANKER_TEI_BATCH_SIZE']) * int(hindsight_env['HINDSIGHT_API_RERANKER_TEI_MAX_CONCURRENT']) + 32
+assert '--max-batch-requests' not in embedding_argv
+assert limits['agent_stack_embedding_threads'] == 4
+assert 'TEI_EMBEDDING_THREADS={{ agent_stack_embedding_threads }}' in env_template
+assert 'TEI_EMBEDDING_THREADS=4' in validator
+for key in ('RAYON_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS'):
+    assert embedding['environment'][key] == '${TEI_EMBEDDING_THREADS:?set TEI_EMBEDDING_THREADS}'
 PY
 printf '%s\n' 'Agent download-only model fetch fixture: ok'

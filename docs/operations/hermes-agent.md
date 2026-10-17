@@ -47,24 +47,51 @@ Runner VM 192.168.10.105 (VMID 105, VLAN 10, tailnet外)
 
 2026-10-17のユーザー決定（WS14）でAgent VMを**12 vCPU / 24 GiB**とする。swapはない前提で設計する。
 Agent stackの各サービスは`mem_limit`を持ち、rerankerは`TEI_RERANKER_CPUS=6`、embeddingは`TEI_EMBEDDING_CPUS=4`とする。
-rerankerはCPU推論プールを明示し、`RAYON/OMP/MKL`のthreadsとtokenization workersを各6、
-1 batchのrequestを1にする（`max-batch-tokens`は2048を維持し、候補本文を切らない）。
+両モデルのCPU推論プールを明示し、`RAYON/OMP/MKL` threadsはembedding 4 / reranker 6、rerankerのtokenization workersは6とする。
+`max-batch-tokens`はembedding 4096 / reranker 2048を維持する。Candle CPUの実行batch上限は4で、
+`--max-batch-requests 1`もrouterに4で上書きされていたため削除した（WS16）。
 検索queryのembeddingはrerankに先行するが、背景retainのembeddingは併走し得るため、両TEIの上限合計を
 10 CPUに抑え、OS・Hermes・Hindsight・memory-db・CDP用に2 CPU相当の余地を残す。
 これら他サービスにはCPU上限を設けず、固定CPUの予約や応答時間の保証とはしない。
 WS7cのF3再生はreranker 4 CPUで約6.23秒、6 CPUで約5.07秒だった。
 新配分の会話p95・同時稼働時の応答性は本番適用後に再計測する（未適用・未計測）。
+
+WS16では両TEIを**cpu-1.9.4**のindex digest `2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d`に更新する。
+旧cpu-1.8.3の内部QueueCommandキューが満杯になるpanic（WS13c、上流#726の対策は1.9.0以降）が理由で、速度改善を目的としない。
+1.9系は入力ごとにpermitを即時取得するため、従来C=16では単一の20/30候補rerankさえ429になる。
+embeddingの`--max-concurrent-requests`は**128**（2同時×32入力+64）、rerankerは**64**（1同時×最大32入力+32）とする。
+Hindsightは1 API worker、embedding batch=32・同時数=2（既定8から制限）を明示する。retainのCoalescingEmbedderは4枠だが、
+query・他のretain・consolidationとproviderの共通2枠を共有するため、4×2で計算しない。
+WS16の8同時負荷ではqueryの待ち時間がclient既定timeoutの30秒を超えたため、CPU backendへ積む量を2同時へ制限する。
+1HTTPで32入力あり、2HTTPでもCandleの実行batch 4を供給できる。Cだけ増やして長い待ち行列を作らない。
+rerankerは全recall共通の同時数1、client batch 32、候補LOW 8 / MID 20 / HIGH 30を維持する。
+workers・replica・batch・同時数を増やす際はpermit数も再計算する。Cは待機入力数を増やし得るが、実行batch 4とtoken上限は変えない。
+固定Hindsight imageのTEI clientは429/5xxを最大3回retry（計4試行）し、使い切ると例外になる。
+query embedding失敗もrerank失敗もrecallはエラーになり、429時にrerankを省略して成功を返す設定ではない。
+負荷上限に合わせた設定で429自体を避ける。既知panicへの対策を含む版だが、キュー送信の`expect`は残るため全負荷での無障害を保証しない。
+
 モデルの事前取得はdownload-onlyで1 GiBに制限し、TEI起動前に完了する。上限は固定モデル前提の値で、
 全6サービスの合計16.625 GiBに対し、OS・Docker・page cache用に7.375 GiBを残す。
 
 | サービス | メモリ上限 | 根拠 |
 | --- | --- | --- |
-| embedding | 8 GiB | WS13: swapなしの4096-token warm-upは約5.4〜5.8 GiBで4 GiBではOOM。定常1.5〜1.9 GiB、負荷時ピーク2.74 GiB |
-| reranker | 4 GiB | WS13c: warm-up約2.8〜2.9 GiB、3 GiBでは上限に張り付く。threads/workers各10ではOOM |
+| embedding | 8 GiB | WS16 cpu-1.9.4: swapなし・4 CPU・threads4のwarm-up/全負荷peak 5.383 GiB、余裕2.617 GiB。WS13の旧版は4 GiBで起動OOM |
+| reranker | 4 GiB | WS16 cpu-1.9.4: swapなし・6 CPUのwarm-up/全負荷peak 2.789 GiB、余裕1.211 GiB。旧版WS13cは3 GiB上限に張り付いた |
 | memory-db | 2 GiB | WS7a/WS7c statsの最大254.7 / 175.1 MiB（旧上限の12.44% / 8.55%）のため据え置き |
 | hindsight | 1 GiB | 同339.6 / 431.1 MiB（33.16% / 42.10%）のため据え置き |
 | hermes | 1.5 GiB | 同473.4 / 392.6 MiB（30.82% / 25.56%）のため据え置き |
 | cdp-tunnel | 128 MiB | メモリ計測記録が見つからないため据え置き |
+
+WS16のメモリはcgroup `memory.peak`（page cacheを含む）をhealth初回成功後と負荷後に取得した値。
+embeddingのthreads未設定→4は、同じWS13b入力でquery p50 0.198→0.106秒、32-fact retain p50 8.812→6.109秒となった。
+最終C=128では単発query p50/p95 0.100/0.147秒、32-fact retain 6.163/6.533秒。
+3分間、32件retainを2本並行しながら独立queryを0.5秒おきに送り、retain25回/query358回は全200、
+query p50/p95/max 11.917/15.216/16.255秒、retain p50/p95/max 15.143/16.349/16.695秒だった。
+queryも共通2枠を使う実clientより厳しいTEI直接負荷で、429・panic・OOMは無かった。
+8同時の予備試験は全200でもquery p95 54.989秒だったため採用していない。
+rerankerは20/30候補を直列で各60回、全200。20候補p50/p95 3.503/4.701秒は旧cpu-1.8.3の
+WS15 3.492/4.718秒と同等（WS13cは3.397/4.503秒、数%の試行差あり）。30候補は4.945/6.730秒。
+このローカルCPUでの結果であり、本番5900Xの速度・会話全体の待ち時間は未計測。token上限・候補数・モデルrevisionは維持した。
 
 メモリ記録はWS7aの`itest/logs/{stats,stats-all}.jsonl`、WS7cの`itest/r2/logs/stats.jsonl`を照合した
 サンプル最大であり、厳密なピークではない。上記の他サービスは70%を超えていない。
@@ -345,7 +372,7 @@ Agent VM側の値はrole `agent_stack`が`/etc/homelab/secrets/*.env`へroot 060
   入力長により数秒かかる。候補数はLOW 8 / MID 20 / HIGH 30、TEI client batchは32。
   MID 12への削減は採用しない。飲み物とかばんを一緒に尋ねると、かばんがprefilterで落ちることがある。
   単独の短い自然文で尋ねる回避は確認したが、SOULの分割指示だけでは1回目のF3再試験は失敗した
-  （2回目はF群4/4正答）。2回目は推論threads・tokenization workers・batch request数を絞って速度を
+  （2回目はF群4/4正答）。2回目は推論threads・tokenization workersを絞り、batch request 1も指定して速度を
   改善した（診断rerank p50 7.03→4.03秒、20候補p50 9.00→4.24秒）。20候補のp50 3秒以内は未達で、
   2026-10-17のユーザー決定で品質を優先して未達を受け入れ、MID 20 / HIGH 30を維持する。
   WS13では6 CPUを超えてもほぼ伸びず、12 vCPU / 24 GiBの新配分の会話応答性は本番適用後に再計測する。

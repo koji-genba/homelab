@@ -111,7 +111,7 @@ assistant由来語句の混入は0件だった。速度は候補の順位を変�
 改善し、品質ベンチはnDCG@10 0.923（rerank後）でWS4のベストペア値に一致した。
 
 - rerankerはCPU推論プールを明示する。`cpus: 4`、`RAYON/OMP/MKL` threads 4、tokenization workers 2、
-  1 batchのrequestを1、`max-batch-tokens` 2048（候補本文は切らない）。2スレッドは遅く、batch512は本文を
+  `--max-batch-requests 1`を指定（実際はCandle CPUの4で上書き。下記WS16で訂正）、`max-batch-tokens` 2048。2スレッドは遅く、batch512は本文を
   切るため、より小型のrerankerは品質または対応の面で採れなかった。この時点ではVMのvCPU増設は変更案だった。
   現在の資源配分は下記WS14補足に従い、applyはしていない。
 - 候補数はLOW 8 / MID 20 / HIGH 30。MID 12は一部の検索で根拠が落ちるため採用しない。
@@ -178,3 +178,29 @@ WS13のローカル計測要旨:
   本番との速度差の割合は未計測。品質優先のMID 20 / HIGH 30と、3秒目標未達の受け入れは継続する。
 - WS13bでretainがembeddingするのは日付・entity付きの抽出factと確認した。chunk本文は
   `retain_extraction_mode=chunks`（LLM providerがnoneのとき）だけである。4096は長いfact・observationの余裕として維持する。
+
+
+### 2026-10-17補足: WS16 TEIのキュー対策と入力同時数
+
+WS13cでcpu-1.8.3の`queue.rs`が`Full(..)`をpanicにして終了139となる既知問題を確認した。
+embeddingも同じキューを通るため、両モデルを上流#726の対策入り**cpu-1.9.4**へ更新する。
+registryで確認したindex digestは`sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d`。
+amd64 manifestの`8419f533…`と区別し、従来どおりindexを固定する。モデルrevision・Candle backend・token上限・候補数は維持する。
+
+新版は入力ごとのpermitを即時取得するため、旧C=16では20/30候補でも429になる。
+固定Hindsightのembeddingは32入力/HTTP、既定共通8枠（CoalescingEmbedderの4枠はこの内側）で、recall queryも同じ枠を通る。
+8同時のローカル負荷でqueryの待ち時間がclient既定timeoutの30秒を超えたため、
+1 API worker・batch 32・同時数**2**（既定8）をComposeで明示し、embeddingのCを**128=2×32+64**にする。
+2HTTPでも64入力ありCandleのbatch 4を供給でき、CPUの待ち行列を抑えられる。
+rerankerは全recall共通同時数1・client batch最大32に対し**C=64=32+32**とする。
+TEI clientは429/5xxを3回retryするが、使い切ればquery embeddingもrerankもrecallを失敗にし、rerankなしで続行しないため、
+通常の送り方でpermitを枯渇させない値に合わせる。worker/replica数やbatch・同時数を変える際は再計算する。
+Cを増やすとセマフォ・入力待ち行列とCommand用2Cバッファが増え、待機入力のメモリと待ち時間は増え得る。
+推論batch 4と4096/2048-token上限は変わらない。`try_send(...).expect(...)`は残るため、すべての負荷でpanicしないという保証ではない。
+
+`--max-batch-requests 1`はCandle CPUの4で上書きされ、batch 1という従来説明は誤りだった。
+1.9.4のCPU warm-upも1 sequenceに限られるため、この指定とAnsible/env knobを削除する。
+embeddingのthreadsは未設定と4をWS13bのquery/32-fact入力で比較し、4を採用する（Ansible knob）。
+WS16のswapなし・本番同等上限で、warm-up/負荷peakはembedding 5.383 GiB / reranker 2.789 GiB。
+最終embedding負荷（32件×2並列+query 0.5秒おき3分）とrerank20/30候補各60回は全200、429/panic/OOMなし。
+20候補p50/p95 3.503/4.701秒はWS15の旧版3.492/4.718秒と同等。詳細はrunbookに記載する。本番適用はしていない。

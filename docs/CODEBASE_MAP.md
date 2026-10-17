@@ -424,3 +424,11 @@ RAYON/OMP/MKL threads・tokenization workers各6、embeddingは4 CPU / 8 GiBと�
 rerankerはbatch 4制約で6 CPUを超えてもほぼ伸びず、新配分の会話応答性は本番適用後に再計測する。
 `memory.write_approval: false`、`skills.write_approval: true`も決定済み。前者は組み込みMEMORY.md/USER.mdのゲートで、
 Hindsight自動retainには適用されない。Hindsight側はcustom抽出とSOULで方針を与える。本番適用は未実施。
+
+
+WS16 (2026-10-17): both TEI services pin the cpu-1.9.4 OCI index digest (`2538ea1c…`) for the known queue-panic mitigation.
+Per-input permits are embedding C=128 (2 HTTP slots × 32 inputs + 64) and reranker C=64 (one global HTTP slot × 32 + 32).
+Hindsight explicitly runs one API worker with embedding batch 32 / concurrency 2 (default 8 queued queries beyond the client timeout in WS16); query and retain share those provider slots.
+Candle CPU forces runtime batch 4, so the ineffective `max-batch-requests=1` flag and knob were removed.
+Embedding uses the new `agent_stack_embedding_threads=4` → `TEI_EMBEDDING_THREADS` knob for Rayon/OMP/MKL; reranker remains at 6.
+TEI 429 retries are bounded; exhausted embedding/rerank retries fail recall. See [runbook](operations/hermes-agent.md) and the dated ADR-0008 supplement.

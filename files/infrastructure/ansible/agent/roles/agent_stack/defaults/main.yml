@@ -75,17 +75,18 @@ agent_stack_embedding_revision: 18b60fb8c2b9df296fb4212bb7d23ef94e579cd3
 agent_stack_reranker_model: cl-nagoya/ruri-v3-reranker-310m
 agent_stack_reranker_revision: bb46934ee9ed09f850b9fcff17501b3ef7ddb2b3
 # WS7c: bound the CPU inference pools explicitly instead of letting Rayon see
-# all host cores behind a Docker CPU quota. Single-pair batches bound batch
-# work without shortening candidates; retain the 2048-token pair limit.
+# all host cores behind a Docker CPU quota. Candle CPU forces runtime batch 4;
+# retain the 2048-token pair limit without shortening candidates.
 # WS14 (2026-10-17 user decision, WS13 measurements): 12-vCPU VM;
 # reranker 6 + embedding 4 leave 2 CPUs for OS/Hermes/Hindsight/DB.
 # Embedding scales with CPU; reranker barely improves above 6 (batch-size-4
 # backend limit). Caps are not reservations; full-stack latency is unmeasured.
 agent_stack_embedding_cpus: 4
+# WS16: explicit threads=4 improved both query and 32-fact retain vs unset.
+agent_stack_embedding_threads: 4
 agent_stack_reranker_cpus: 6
 agent_stack_reranker_threads: 6
 agent_stack_reranker_tokenization_workers: 6
-agent_stack_reranker_max_batch_requests: 1
 # ruri-v3 is an asymmetric retriever: it expects a task prefix on both sides.
 # Hindsight's TEI provider prepends these literally (Embeddings._encode_prefixed
 # via encode_query/encode_documents in engine/embeddings.py) and none of the
@@ -154,7 +155,7 @@ agent_stack_discord_home_channel: ""
 # --- Pinned images -----------------------------------------------------------
 # Provenance references; the running services use the pins in Compose/Dockerfiles.
 # Model fetching uses the lightweight Python image configured above.
-agent_stack_tei_image: ghcr.io/huggingface/text-embeddings-inference@sha256:8de25e75ce39617f17f2f6c77d60a4f75b65e779ed5005420eb1400072a15c1c
+agent_stack_tei_image: ghcr.io/huggingface/text-embeddings-inference@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
 agent_stack_hindsight_image: ghcr.io/vectorize-io/hindsight@sha256:f284d0d63e92e993686e18c15f6e4a221cd80fdfd47625a7c5f6cd8568078440
 agent_stack_hermes_image: docker.io/nousresearch/hermes-agent@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7
 agent_stack_hindsight_integration_revision: d952b6e655fccab4581ee0722b51c5f103873d12
