@@ -17,13 +17,16 @@
     mode: '0600'
   notify: Restart the Agent stack
 
+# 0640 matches the Hermes image: docker/stage2-hook.sh runs `chmod 640` on
+# config.yaml at every start, so 0600 here made every apply after a restart
+# report a change and, with the recreate handler, restart Hermes again.
 - name: Render the Hermes configuration
   ansible.builtin.template:
     src: config.yaml.j2
     dest: "{{ agent_stack_hermes_data_dir }}/config.yaml"
     owner: "{{ agent_stack_uid }}"
     group: "{{ agent_stack_gid }}"
-    mode: '0600'
+    mode: '0640'
   notify: Recreate Hermes and the CDP tunnel
 
 - name: Render the Hindsight plugin configuration

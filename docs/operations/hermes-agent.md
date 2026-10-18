@@ -409,7 +409,7 @@ Hermesの`config.yaml`、`SOUL.md`（初回のみ`force: false`）、Hindsight `
 ため、VM上で直接編集しない。同じ内容・属性ならtemplate taskは`ok`となる。Hermesにも設定を保存する経路があり、
 runtime側で変わった内容は次回applyで戻る。`config.yaml` / `hindsight/config.json`の変更時はhandler
 `Recreate Hermes and the CDP tunnel`が`up -d --no-deps --force-recreate --wait`で両サービスを再作成する。
-待機上限は起動helperと同じ`agent_stack_compose_wait_timeout`（既定600秒）。`cdp-tunnel`はHermesの
+Hermesのimageは起動のたびに`config.yaml`を`chmod 640`するため、Ansibleも0640で置く（0600だと再起動のたびに差分になる）。待機上限は起動helperと同じ`agent_stack_compose_wait_timeout`（既定600秒）。`cdp-tunnel`はHermesの
 network namespaceを共有するため、必ず一緒に再作成する。SSH鍵の生成・Runnerのknown_hostsの変更と、
 `SOUL.md` / 同梱skillsの不足分をseedした場合も同じhandlerへ通知する。SSHは新規接続時に鍵とknown_hostsを
 読むが、CDP tunnelは認証済み接続を保持するため、変更時に接続を張り直す。
