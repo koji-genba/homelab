@@ -96,7 +96,7 @@ services:
   embedding:
     # HuggingFace Text Embeddings Inference (CPU), ghcr.io/huggingface/
     # text-embeddings-inference pinned to the cpu-1.9.4 index digest.
-    image: ghcr.io/huggingface/text-embeddings-inference@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
     restart: unless-stopped
     # WS16 cpu-1.9.4: swap-free 4096-token warm-up/workload peak ~5.38 GiB.
     # Keep 8g (~2.62 GiB headroom); WS13 also confirmed startup OOM at 4g.
@@ -206,7 +206,7 @@ services:
   hindsight:
     # ghcr.io/vectorize-io/hindsight slim (API v1.0.0): external embeddings and
     # reranking, no baked-in models. Pinned to the 1.0.0-slim index digest.
-    image: ghcr.io/vectorize-io/hindsight@sha256:f284d0d63e92e993686e18c15f6e4a221cd80fdfd47625a7c5f6cd8568078440
+    image: ghcr.io/vectorize-io/hindsight:1.0.0-slim@sha256:f284d0d63e92e993686e18c15f6e4a221cd80fdfd47625a7c5f6cd8568078440
     restart: unless-stopped
     # API server only: PostgreSQL and the models are external, so 1 GiB is ample.
     mem_limit: 1g
