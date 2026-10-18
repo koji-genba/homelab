@@ -5,6 +5,7 @@ python3 <<'PY'
 import pathlib
 import re
 
+import jinja2
 import yaml
 
 repo = pathlib.Path(".")
@@ -142,6 +143,68 @@ pin = task("agent_stack", "Pin the Runner host key for the Hermes terminal backe
 assert "ansible.builtin.copy" not in pin
 assert pin["ansible.builtin.known_hosts"]["state"] == "present"
 assert pin["ansible.builtin.known_hosts"]["name"] == "{{ agent_stack_runner_host }}"
+assert pin["ansible.builtin.known_hosts"]["key"] == "{{ agent_stack_runner_host_key_line }}"
+cdp_pin = task("agent_stack", "Pin the Runner host key for the CDP tunnel", "ssh_keys.yml")
+assert cdp_pin["ansible.builtin.copy"]["content"] == "{{ agent_stack_runner_host_key_line }}\n"
+
+# keyscan banners must never become part of either pinned key. Validate before
+# indexing or writing, while preserving the original scan retry conditions.
+scan = task("agent_stack", "Scan the Runner SSH host key", "ssh_keys.yml")
+assert scan["register"] == "agent_stack_runner_host_key"
+assert scan["until"] == (
+    "agent_stack_runner_host_key.rc == 0 "
+    "and 'ssh-ed25519' in agent_stack_runner_host_key.stdout")
+assert (scan["retries"], scan["delay"], scan["changed_when"]) == (30, 10, False)
+filtered = task("agent_stack", "Filter the Runner host key scan output", "ssh_keys.yml")
+expression = filtered["ansible.builtin.set_fact"]["agent_stack_runner_host_key_lines"]
+for fragment in ("stdout.splitlines()", "map('trim')", "reject('equalto', '')",
+                 "reject('match', '^#')", "| list"):
+    assert fragment in expression
+validate = task("agent_stack", "Validate the Runner host key scan output", "ssh_keys.yml")
+checks = validate["ansible.builtin.assert"]["that"]
+assert checks[0] == "agent_stack_runner_host_key_lines | length == 1"
+assert "agent_stack_runner_host | regex_escape" in checks[1]
+assert "ssh-ed25519 [A-Za-z0-9+/]+={0,2}$" in checks[1]
+assert "exactly one non-comment key line" in validate["ansible.builtin.assert"]["fail_msg"]
+line = task("agent_stack", "Set the validated Runner host key line", "ssh_keys.yml")
+assert line["ansible.builtin.set_fact"]["agent_stack_runner_host_key_line"] == (
+    "{{ agent_stack_runner_host_key_lines | first }}")
+ordered = tasks("agent_stack", "ssh_keys.yml")
+assert [ordered.index(t) for t in (scan, filtered, validate, line, cdp_pin, pin)] == sorted(
+    ordered.index(t) for t in (scan, filtered, validate, line, cdp_pin, pin))
+
+# Evaluate the actual task expressions, including malformed scan results.
+env = jinja2.Environment(undefined=jinja2.StrictUndefined, keep_trailing_newline=True)
+env.tests["match"] = lambda value, pattern: re.match(pattern, value) is not None
+env.filters["regex_escape"] = re.escape
+filter_scan = env.compile_expression(expression.strip()[2:-2])
+validators = [env.compile_expression(check) for check in checks]
+host = "192.168.10.105"
+key = host + " ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureKey1234567890abcd="
+banner = "# " + host + ":22 SSH-2.0-OpenSSH_fixture\n"
+for stdout, accepted in (
+    (banner + key + "\n", True),
+    ("\n  " + banner + "\n  " + key + "  \n\t\n", True),
+    (key, True),
+    ("", False),
+    (banner, False),
+    (banner + key + "\n" + key, False),
+    (key.replace(host, "192.168.10.106"), False),
+    (key.replace(host, "192x168x10x105"), False),
+    (key.replace("ssh-ed25519", "ssh-rsa"), False),
+    (host + " ssh-ed25519 !!!", False),
+    (key + " unexpected-comment", False),
+):
+    lines = filter_scan(agent_stack_runner_host_key={"stdout": stdout})
+    context = {"agent_stack_runner_host_key_lines": lines, "agent_stack_runner_host": host}
+    assert all(check(**context) for check in validators) == accepted, stdout
+    if accepted:
+        assert lines == [key], lines
+        fact = env.from_string(line["ansible.builtin.set_fact"]["agent_stack_runner_host_key_line"]).render(**context)
+        assert env.from_string(cdp_pin["ansible.builtin.copy"]["content"]).render(
+            agent_stack_runner_host_key_line=fact) == key + "\n"
+        assert env.from_string(pin["ansible.builtin.known_hosts"]["key"]).render(
+            agent_stack_runner_host_key_line=fact) == key
 
 # Ops owns only the root work dirs. Hindsight checkpoints and scratch PGDATA
 # are child paths owned by their containers; Ansible must not traverse them.

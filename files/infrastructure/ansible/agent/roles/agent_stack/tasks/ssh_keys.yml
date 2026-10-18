@@ -93,9 +93,30 @@
   delay: 10
   changed_when: false
 
+- name: Filter the Runner host key scan output
+  ansible.builtin.set_fact:
+    agent_stack_runner_host_key_lines: >-
+      {{ agent_stack_runner_host_key.stdout.splitlines()
+         | map('trim') | reject('equalto', '') | reject('match', '^#') | list }}
+
+- name: Validate the Runner host key scan output
+  ansible.builtin.assert:
+    that:
+      - agent_stack_runner_host_key_lines | length == 1
+      - >-
+        (agent_stack_runner_host_key_lines | first | default('')) is match(
+          '^' ~ (agent_stack_runner_host | regex_escape) ~ ' ssh-ed25519 [A-Za-z0-9+/]+={0,2}$')
+    fail_msg: >-
+      Runner ssh-keyscan must return exactly one non-comment key line in the
+      format '<Runner host> ssh-ed25519 <base64>' for {{ agent_stack_runner_host }}.
+
+- name: Set the validated Runner host key line
+  ansible.builtin.set_fact:
+    agent_stack_runner_host_key_line: "{{ agent_stack_runner_host_key_lines | first }}"
+
 - name: Pin the Runner host key for the CDP tunnel
   ansible.builtin.copy:
-    content: "{{ agent_stack_runner_host_key.stdout | trim }}\n"
+    content: "{{ agent_stack_runner_host_key_line }}\n"
     dest: "{{ agent_stack_ssh_key_dir }}/known_hosts"
     owner: "{{ agent_stack_uid }}"
     group: "{{ agent_stack_gid }}"
@@ -106,7 +127,7 @@
   # pinned Ed25519 entry without removing those entries on every apply.
   ansible.builtin.known_hosts:
     name: "{{ agent_stack_runner_host }}"
-    key: "{{ agent_stack_runner_host_key.stdout | trim }}"
+    key: "{{ agent_stack_runner_host_key_line }}"
     path: "{{ agent_stack_hermes_data_dir }}/.ssh/known_hosts"
     state: present
 
