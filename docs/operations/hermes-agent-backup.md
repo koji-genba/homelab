@@ -232,6 +232,7 @@ failed数は履歴も含むため、原因解消だけでは回復しない場�
 | WS8（現行helper） | タイムゾーン/JST日付境界、tool-callだけの未完了ターン、pending operationのresume、bank方針適用順、明示失敗時の通知と平文掃除、tar exit 1/2で破壊処理前に停止、stats異常・unhealthy検知、6時間後の通知間隔をfixtureで再検証 |
 
 現行helperの実Hindsight/LLMを含む通し再試験は行っていない。本番VM初回構築・OS reboot・systemd hardening・
-実NFSの容量/障害・実運用age/SSH鍵・公開image digest・Discord/通知先・SearXNG/MCP・本番DRは未検証。
+実NFSの容量/障害・実運用age/SSH鍵・公開imageの実pull/起動（digestは2026-10-18に`compose.yaml`へ固定済み）・
+Discord/通知先・SearXNG/MCP・本番DRは未検証。
 Runnerのコンテナ試験はsystemdの制限を再現していない。特に`RestrictNamespaces`の制限下でChromium sandboxが
 動くかは実VM受入に残す。helperはroot専用平文作業領域をumask 077で作り、backup/restore/exportを排他制御する。

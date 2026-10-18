@@ -28,21 +28,19 @@
 # capped at 1 GiB, and finishes before the inference servers start.
 #
 # All images are pinned by digest, the repo convention. The two self-built
-# images still carry the ALL-ZERO placeholder until the image workflows
-# (.github/workflows/hermes-agent-image.yml, memory-db-image.yml) publish a
-# first digest; copy that digest from the workflow step summary into this file in
-# a follow-up change. The role's helper (installed as
-# /usr/local/sbin/homelab-agent-compose-up from
-# roles/agent_stack/templates/homelab-agent-compose-up.sh.j2) refuses to start
-# while the placeholder is present.
+# images are pinned to the digests published by the image workflows
+# (.github/workflows/hermes-agent-image.yml, memory-db-image.yml) on 2026-10-18.
+# The role's helper (installed as /usr/local/sbin/homelab-agent-compose-up from
+# roles/agent_stack/templates/homelab-agent-compose-up.sh.j2) still refuses to
+# start on the ALL-ZERO placeholder or any unpinned image as a safety net.
 name: agent
 
 services:
   memory-db:
     # Built by .github/workflows/memory-db-image.yml (PostgreSQL 17 + pgvector +
-    # PGroonga). PLACEHOLDER — transcribe the published digest after the first
-    # workflow run.
-    image: ghcr.io/koji-genba/homelab-memory-db@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    # PGroonga). Pinned to the digest published by the first workflow run
+    # (tag pg17, 2026-10-18).
+    image: ghcr.io/koji-genba/homelab-memory-db@sha256:1d9dbb48bd8cfef3cfea74b94079c3c82e243c7f071ed9231c20cd69330df7b6
     restart: unless-stopped
     # PostgreSQL with a small shared buffer: 2 GiB covers connections, index
     # builds and pgroonga maintenance without letting a runaway query take the VM.
@@ -326,8 +324,9 @@ services:
   hermes:
     # Built by .github/workflows/hermes-agent-image.yml (nousresearch/hermes-agent
     # v2026.9.24 base + the Hindsight Hermes integration pinned at d952b6e).
-    # PLACEHOLDER — transcribe the published digest after the first workflow run.
-    image: ghcr.io/koji-genba/homelab-hermes-agent@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    # Pinned to the digest published by the first workflow run (tag 0.21.5,
+    # 2026-10-18).
+    image: ghcr.io/koji-genba/homelab-hermes-agent@sha256:c9635a4088e324134582cba1d722cf4f7d6bd975b1a95e602b70769d5241751a
     # The pinned upstream image has no CMD: without this it starts an
     # interactive CLI, hits EOF under Compose and restarts continuously.
     # Keep the s6 entrypoint and explicitly select its gateway service.
@@ -402,7 +401,7 @@ services:
     # Reuses the self-built Hermes image: it already ships the OpenSSH client and
     # is digest-pinned, so no separate (and unpinnable-by-digest-content) apk
     # install is needed.
-    image: ghcr.io/koji-genba/homelab-hermes-agent@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    image: ghcr.io/koji-genba/homelab-hermes-agent@sha256:c9635a4088e324134582cba1d722cf4f7d6bd975b1a95e602b70769d5241751a
     restart: unless-stopped
     # Tiny: one ssh process holding a port forward.
     mem_limit: 128m
