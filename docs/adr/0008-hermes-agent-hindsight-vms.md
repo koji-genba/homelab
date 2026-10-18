@@ -49,7 +49,9 @@ ruri-v3は非対称retrieverのため、query側とpassage側のtask prefix（`�
 (a) 明示と推測の区別、(b) 週次振り返り（Hermes cron + Skill）、(c) エクスポート/再構築を用意する。
 
 LLMはDGXの単一エンドポイント`http://192.168.10.51:8000/v1`（モデル`glm-5.3-flash`）を共用する。
-fallback providerは置かず、テキスト専用として扱う。tensorfoldに優先度機構が無い前提に立ち、
+fallback providerは置かない。当初はテキスト専用として扱ったが、2026-10-18に画像を送って同じGLMの
+vision動作を確認したため、その前提を訂正する。Hermesの画像入力とvision補助も同じDGXへ固定する。
+tensorfoldに優先度機構が無い前提に立ち、
 背景処理（記憶抽出・統合・振り返り）の同時実行数を1へ絞り、会話ターンを塞がないよう
 `context_length`と出力上限を実用値でpinする。
 

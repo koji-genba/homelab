@@ -15,6 +15,8 @@ model:
   provider: custom:glm
   default: {{ agent_stack_llm_model }}
   api_mode: chat_completions
+  # The DGX endpoint accepts images (verified 2026-10-18).
+  supports_vision: true
   # The endpoint advertises a 1M window, but an unbounded per-turn budget is not
   # useful. 131072 is the bounded working value.
   context_length: {{ agent_stack_llm_context_length }}
@@ -41,6 +43,12 @@ max_concurrent_sessions: 2
 timezone: {{ agent_stack_timezone }}
 
 agent:
+  # Send attached images directly to GLM; keep the local auxiliary for tool use.
+  image_input_mode: native
+  # Unused content-upload tools must not be exposed to the model.
+  disabled_toolsets:
+    - tts
+    - image_gen
   # Task-level turn cap (default is unlimited).
   max_turns: 64
   # Per-run wall-clock budget.
@@ -87,6 +95,21 @@ discord:
   thread_require_mention: false
   max_attachment_bytes: 33554432
 
+voice:
+  auto_tts: false
+
+tts:
+  # No master off switch in 0.21.5. Fail locally even for saved /voice modes;
+  # requirement probes resolve this command without lazy-installing Edge TTS.
+  provider: blocked
+  providers:
+    blocked:
+      type: command
+      command: /bin/false
+
+stt:
+  enabled: false
+
 browser:
   # Built-in browser tools only; the Browser Use driver stays off.
   backend: "off"
@@ -96,6 +119,8 @@ browser:
 
 web:
   search_backend: searxng
+  # SearXNG is search-only: extract fails without probing external vendors.
+  extract_backend: searxng
   # Never fall back to keyless third-party search tiers.
   keyless_fallback: false
   # Page bodies come from the MCP SearXNG reader (web_url_read) below, not from a
@@ -139,7 +164,34 @@ auxiliary:
     provider: auto
   background_review:
     enabled: true
-  # auxiliary.vision is intentionally unset: the GLM endpoint is text-only.
+  vision:
+    # Explicit endpoint bypasses the OpenRouter/Nous/DeepInfra auto ladder.
+    provider: custom:glm
+    model: {{ agent_stack_llm_model }}
+    base_url: {{ agent_stack_llm_base_url }}
+
+# Keep unused hosted features and external monitoring exports off explicitly.
+telemetry:
+  shared_metrics:
+    enabled: false
+    send: false
+
+sync:
+  enabled: false
+
+nous:
+  guest: false
+
+tools:
+  connectors:
+    enabled: false
+
+monitoring:
+  gateway_health_export:
+    enabled: false
+  export:
+    otlp:
+      enabled: false
 
 delegation:
   max_concurrent_children: 2
