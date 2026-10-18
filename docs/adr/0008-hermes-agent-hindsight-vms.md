@@ -37,9 +37,9 @@ VM定義はTerraform root `files/infrastructure/terraform/{agent-vm,runner-vm}/`
 Agent系の反映は**Ansibleの手動適用**（`make ansible-apply-agent`）とする。mainマージでは自動反映しない。
 Composeは5サービス（`memory-db` / `embedding` / `reranker` / `hindsight` / `hermes`）に加え、
 ChromiumのCDPをSSHで転送する`cdp-tunnel`を既定で起動する。全イメージはdigestで固定し、
-自前の`homelab-hermes-agent` / `homelab-memory-db`はCI → GHCRでbuild・公開する（2026-10-18に初回公開し、
-digestは`compose.yaml`へ転記済み）。起動helper（`homelab-agent-compose-up`）はALL-ZERO placeholderや
-未固定imageを検出すると起動を拒否する（安全策）。
+自前の`homelab-hermes-agent` / `homelab-memory-db` / `homelab-tei-reranker-onnx`はCI → GHCRでbuild・公開する
+（2026-10-18に初回公開し、digestは`compose.yaml`へ転記済み）。起動helper（`homelab-agent-compose-up`）は
+ALL-ZERO placeholderや未固定imageを検出すると起動を拒否する（安全策）。
 
 記憶はHindsightの`local_external`モード、固定bank`personal`で持つ。全文検索にPostgreSQL 17 + PGroonga、
 embeddingに`cl-nagoya/ruri-v3-310m`、rerankerに`cl-nagoya/ruri-v3-reranker-310m`をTEI CPUで自前配信する。
@@ -235,8 +235,8 @@ VMの12コアへ広がる前提でenvだけを設定する方法は採らない�
 `tei-reranker-onnx-image.yml`はPRでbuildと一致検査のみ、mainでは同じ検証済みimageをGHCRへ公開する。
 固定の架空入力24件×20候補について同じTEIの元safetensors/Candleと比較し、全順位一致かつsigmoidスコアの
 最大絶対差1e-4以下を必須にする。CIは2 CPUで逐次起動し、同じscriptをローカル6 CPUの20/30候補試験にも使う。
-2026-10-18時点でreranker ONNX imageは未公開で、digestはall-zero placeholderのまま。
-Hermes・memory-dbは同日に公開・digest転記済み。rerankerの公開後のdigest転記は別変更で行う。既存の汎用gateはplaceholderを拒否し、
+2026-10-18時点で3つの自前image（Hermes・memory-db・reranker ONNX）は公開・digest転記済み。
+既存の汎用gateはplaceholderを拒否し、
 fixtureは新imageだけがplaceholderの場合にも拒否することを実行検査する。
 Ansibleの事前取得はembeddingだけとし、rerankerのhost cache mount・model/revision envを削除する。
 
