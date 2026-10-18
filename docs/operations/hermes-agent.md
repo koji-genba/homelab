@@ -290,7 +290,7 @@ Proxmoxのuser/role/token/ACLはTerraform管理外で、apply前に人が用意�
    advertiseされていない場合は安全にskipする。
    実測: dataset・`/etc/exports`・markerを作成し`exportfs -v`で確認済み。2026-10-18のAnsible適用でAgent VM側のnfs4 mountも確認した。
 7. **Ansible適用** `[2026-10-18 実施]`
-   実測: 16:49–16:58に初回適用（failed=0）、6サービス起動、ext4/nfs4 mount、17:00健康確認成功。約17:27の再適用でPGDATA所有権障害が発生し、運用者が復旧した（末尾の記録参照）。
+   実測: 16:49–16:58に初回適用（failed=0）、6サービス起動、ext4/nfs4 mount、17:00健康確認成功。約17:27の再適用でPGDATA所有権障害が発生し、運用者が復旧した。その後PR #107・#108の修正と一度限りの調整を経て、6回目はagent-vm / runner-vmともchanged=0、PGDATA 999:999 0700・export root 0700を維持し、健康確認all checks passed（末尾の記録参照）。
    SSH agentとage identityを用意して手動適用する。Agent playが先に走り、Agent VM上で生成したRunner SSH鍵を
    factとしてRunner playが受け取るため、この順序は`site.yml`が保証する。
 
@@ -537,6 +537,12 @@ secret bundleの復号確認は別枠で`make secrets-decrypt-check-agent`（ide
 | 2026-10-18 16:49–16:58 JST | 運用者 | main `8e4bbbc`から初回`make ansible-apply-agent` | agent-vm ok=93 changed=58、runner-vm ok=54 changed=35、failed=0。6サービス起動、embedding/reranker/memory-db/hindsight healthy、`/srv/agent` ext4・`/mnt/agent-backups` nfs4。17:00健康確認all checks passed（gateway・Discord connected・Runner含む）。HindsightはDB準備待ちで3回失敗後restart policyで復帰 |
 | 2026-10-18 17:06 JST以降 | 運用者 | 初回手動backup失敗をPR #106で修正（Runner tarの`./lost+found`除外、`sops set`でwebhookを数値IDからURLへ修正） | webhookのGETはVMから200。URL・IDは記録しない |
 | 2026-10-18 約17:27 JST | 運用者 | main `f12d054`から2回目`make ansible-apply-agent` | agent-vm ok=80 changed=10、runner-vm ok=46 changed=2。PGDATAとmount rootの属性を再設定する不具合が判明 |
-| 2026-10-18 約17:27–17:30 JST | 運用者 | `/srv/agent/postgres`がroot:root 0700へ戻り、運用者が`chown 999:999 /srv/agent/postgres`で復旧 | 新規DB接続は`global/pg_filenode.map` Permission denied（08:27:49–08:29:49 UTCに20件）、pg_dump失敗。既存pool接続は継続、Hindsight operations completed=20 / failed=0 / pending=0、記憶損失なし。復旧後健康確認成功。WS26で再適用時の所有権競合とmount root属性変更を修正（本番再適用は未実施） |
+| 2026-10-18 約17:27–17:30 JST | 運用者 | `/srv/agent/postgres`がroot:root 0700へ戻り、運用者が`chown 999:999 /srv/agent/postgres`で復旧 | 新規DB接続は`global/pg_filenode.map` Permission denied（08:27:49–08:29:49 UTCに20件）、pg_dump失敗。既存pool接続は継続、Hindsight operations completed=20 / failed=0 / pending=0、記憶損失なし。復旧後健康確認成功。WS26で再適用時の所有権競合とmount root属性変更を修正（後続の3〜6回目の記録参照） |
 | 2026-10-18 17:30 JST | 運用者 | 手動backup set `20261018T083023Z`作成 | Hermes約24 MB、PostgreSQL約120 KB、agent-config、runner-workをage暗号化。`sha256sum -c SHA256SUMS`全件OK。`hindsight_version=unknown`は軽微な残件 |
 | 2026-10-18 17:30 JST | 運用者 | `homelab-agent-restore 20261018T083023Z --identity <tmpfs file> --scratch` | total_nodes=5、recall 5 results、Hermes archive 667 entries、state.db integrity_check ok（2 DB）。scratch project削除、本番無変更。復旧identityはSSH stdinから`/run` tmpfsへ0600で一時配置し、EXIT trapでshred、終了後不在を確認 |
+| 2026-10-18 JST | 運用者 | PR #107（`204f0f5`）反映後のmainから3回目`make ansible-apply-agent` | agent-vm changed=2、runner-vm changed=1。一度限りのRunner host-key pin形式とRunner `/etc/homelab/secrets`の0750→0700を反映。PGDATA 999:999 0700、`/srv/agent`・`/mnt/agent-backups`・secrets・SSH鍵directoryの属性は前後で不変。健康確認all checks passed |
+| 2026-10-18 JST | 運用者 | Agent VMのrootから`chmod 0700 /mnt/agent-backups`でexport rootのmodeを復旧（`no_root_squash`） | export rootは契約値のroot:root 0700へ復旧。復旧待ちを解消 |
+| 2026-10-18 JST | 運用者 | mainから4回目`make ansible-apply-agent` | runner-vm changed=0、agent-vm changed=1。ssh-keyscanのbanner commentを鍵に含めたためHermesのknown_hosts pinが毎回追記される不具合が判明。PR #108（`1d8b89c`）で単一の`<runner> ssh-ed25519 <base64>`行だけをpinするよう修正 |
+| 2026-10-18 JST | 運用者 | Agent VMの`/srv/agent/hermes/.ssh/known_hosts`を一度限りの手動整理 | 5行（banner comment 2行、同じRunner鍵3行、うち1行はbannerが鍵に連結した不正形式）を正しい鍵1行へ整理。鍵は`qm guest exec`でout-of-band取得したものと一致、owner 10000:10000・0600 |
+| 2026-10-18 JST | 運用者 | PR #108反映後のmainから5回目`make ansible-apply-agent` | agent-vm changed=1。bannerを除いたCDP known_hostsのcopyを一度限りで反映 |
+| 2026-10-18 JST | 運用者 | mainから6回目`make ansible-apply-agent` | agent-vm changed=0、runner-vm changed=0。PGDATA 999:999 0700、export root 0700を維持。健康確認all checks passed、再適用の冪等性を確認 |

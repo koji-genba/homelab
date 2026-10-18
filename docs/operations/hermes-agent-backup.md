@@ -224,7 +224,9 @@ clientは `192.168.10.104/32` へ限定し、`fsid` は指定しない。
 変更後の `/etc/exports` のSHA-256は
 `5639f51953049d980b62faa7745546f9a6364e8eaeb8ffebe306327369f118fe`。
 Agent VMの `/mnt/agent-backups` へのnfs4 mountとbackupは2026-10-18に確認済み。
-同日の再適用でexport rootが`0750`へ変わったため、運用者がpve1側で`0700`へ戻す作業が残る（[NFS export契約](nfs-export.md#agentバックアップ用export2026-10-18作成)）。
+同日の再適用でexport rootが`0750`へ変わったが、運用者がAgent VMのrootから
+`chmod 0700 /mnt/agent-backups`を実行し、`no_root_squash`経由で`root:root 0700`へ復旧済み。
+6回目のAnsible適用はagent-vm / runner-vmともchanged=0、export root 0700を維持し、健康確認all checks passed（[NFS export契約](nfs-export.md#agentバックアップ用export2026-10-18作成)）。
 本リポジトリは NFS server 設定を変更しない。
 
 ## 8. セキュリティ

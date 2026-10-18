@@ -1,6 +1,6 @@
 # NFS export契約
 
-- 状態: marker・`ai` export反映済み。旧4 exportは2026-09-23にApps VM `/32`へ制限済み。`agent-backups` exportは2026-10-18に作成済み（client mount未検証）
+- 状態: marker・`ai` export反映済み。旧4 exportは2026-09-23にApps VM `/32`へ制限済み。`agent-backups` exportは2026-10-18に作成済み（client mount・backup確認済み）
 - サーバー: Proxmox/NFS host `192.168.10.11`
 - データ復旧: このリポジトリの対象外
 - 関連設計: [目標ストレージ契約](../architecture/target-state.md#storage-contract)
@@ -100,7 +100,9 @@ Agent VM専用の暗号化バックアップ置き場。pve1側の作成と`expo
 
 2026-10-18の再適用で、Ansibleのmount-point作成taskがmount済みのexport rootを`0750`へ変更した
 （`no_root_squash`）。WS26ではmount済みなら作成taskをskipし、server側のowner/modeに触れないよう修正した。
-**pve1側で運用者が`0700`へ戻す作業は未実施**。上表のmodeは契約値であり、復旧済みとはしない。
+同日、運用者がAgent VMのrootから`chmod 0700 /mnt/agent-backups`を実行し、
+`no_root_squash`経由でexport rootを`root:root 0700`へ復旧済み。6回目のAnsible適用では
+agent-vm / runner-vmともchanged=0、export root 0700を維持し、健康確認all checks passed。
 
 設定は既存exportと同じ`/etc/exports`に追加した。変更後のSHA-256（2026-10-18）は
 `5639f51953049d980b62faa7745546f9a6364e8eaeb8ffebe306327369f118fe`。
