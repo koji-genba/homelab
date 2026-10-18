@@ -185,7 +185,23 @@ VM側はNFSv4、`hard,_netdev`を使用する。systemd mount unit、`RequiresMo
 ## ライフサイクルと更新
 
 - 全imageをdigestで宣言する。
-- Dependabotが週次でCompose、Dockerfile、GitHub Actionsの更新PRを作る。
+- Dependabotが週次でCompose（`docker-compose`）、Dockerfile（`docker`）、Terraform
+  （apps-vm / agent-vm / runner-vm / tailscale）、GitHub Actionsを確認する。
+  Proxmox providerの更新は3 VM rootを同じversionに揃えてレビューする。
+  Compose directoryを`docker`で指定した旧設定の`dependency_file_not_found`は、
+  `compose.yaml`を検出する専用ecosystemへの切り替えで対処する。
+- `compose.yaml`のdigest-only参照はDependabotの更新先が元のtagではなく`latest`のdigestになるため、
+  Appsの上流imageはtag+digestへ移行するフォローアップPRまでignoreで除外し、移行後に削除する。
+  Appsの自前・promotion管理imageは`koji-genba/*`で恒久的に除外し、検証済みdigestの手動反映と
+  stashPad staging専用の`edge`追跡を維持する（directoryの監視は将来の上流image用に残す）。
+  Agent stackの自前`koji-genba/homelab-*`は各workflowの検証済みdigestへ手動で再pinするため除外する。
+  上流TEIとHindsightは`cpu-1.9.4@sha256:…` / `1.0.0-slim@sha256:…`のtag+digestで追跡し、
+  version更新時もCPU/slim variantの維持を確認する。
+  embedding TEIとreranker imageのTEI baseは別々のPRになるため、同じTEI versionに揃えて一緒にレビューする。
+  reranker DockerfileのPythonはcp312・hash固定wheelに合わせminor/major更新を除外し、
+  `3.12-slim`のdigest更新とTEI base更新は継続する。
+  対応根拠: [GitHub Docs](https://docs.github.com/en/code-security/reference/supply-chain-security/supported-ecosystems-and-repositories#docker-compose)、
+  [digest-onlyの更新先](https://github.com/dependabot/dependabot-core/blob/main/docker/lib/dependabot/docker/update_checker.rb)。
 - stashPad stagingは定期workflowが`edge`の新digestを検出し、staging定義だけを
   mainへcommitして自動反映する。branch protectionで直接pushを禁止する場合はPR方式へ変更する。
 - prodは明示的にversion/digestをpromotionしてmainへmergeする。

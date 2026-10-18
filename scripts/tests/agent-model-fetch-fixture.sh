@@ -136,7 +136,9 @@ assert argv[argv.index('--tokenization-workers') + 1].startswith('${TEI_RERANKER
 assert limits['agent_stack_reranker_max_candidates_mid'] == 20
 assert limits['agent_stack_reranker_max_candidates_high'] == 30
 # WS16: the image and per-input permits must agree with the Hindsight fan-out.
-assert embedding['image'] == limits['agent_stack_tei_image']
+# Compose names the CPU tag for Dependabot; provenance defaults keep the digest.
+assert embedding['image'].startswith('ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4@')
+assert embedding['image'].replace(':cpu-1.9.4@', '@') == limits['agent_stack_tei_image']
 assert embedding['image'].endswith('@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d')
 # WS18: only embedding is fetched on the VM. ORT is selected by an image-
 # bundled ONNX graph; no cache mount or mutable model/revision argument remains.
@@ -173,6 +175,8 @@ with tempfile.TemporaryDirectory() as directory:
         agent_stack_project_dir=str(root), agent_stack_project_name='fixture',
         agent_stack_env_file=str(env_file), agent_stack_secrets_dir=str(root),
         agent_stack_compose_wait_timeout=600))
+    subprocess.run(['sh', '-n', str(helper)], check=True)
+    print('Rendered start helper: sh -n passed')
     marker = root / 'docker-called'
     docker = root / 'docker'
     docker.write_text('#!/bin/sh\ntouch "' + str(marker) + '"\n')
@@ -184,6 +188,19 @@ with tempfile.TemporaryDirectory() as directory:
     compose_file.write_text(source.replace('@sha256:' + '0' * 64, '@sha256:' + 'b' * 64))
     result = subprocess.run(['sh', str(helper), 'config'], env=environment, capture_output=True, text=True)
     assert result.returncode == 0 and marker.exists(), result.stderr
+    print('Rendered start helper: digest-only and tag+digest accepted')
+    marker.unlink()
+    tagged_image = re.sub(r'@sha256:[0-9a-f]{64}$', '@sha256:' + 'a' * 64, embedding['image'])
+    for replacement, message in (
+        (re.sub(r'@sha256:[0-9a-f]{64}$', '@sha256:' + '0' * 64, tagged_image), 'ALL-ZERO placeholder'),
+        (tagged_image.split('@')[0], 'images are not digest-pinned'),
+    ):
+        compose_file.write_text(source.replace('@sha256:' + '0' * 64, '@sha256:' + 'b' * 64)
+                                .replace(tagged_image, replacement))
+        result = subprocess.run(['sh', str(helper), 'config'], env=environment, capture_output=True, text=True)
+        assert result.returncode != 0 and message in result.stderr, result.stderr
+        assert not marker.exists()
+    print('Rendered start helper: digest-only/tag+digest ALL-ZERO and unpinned tag refused')
 
 image_dir = pathlib.Path('files/services/images/tei-reranker-onnx')
 # Keep the existing backup provenance accurate without executing the exporter.

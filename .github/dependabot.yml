@@ -1,41 +1,73 @@
 version: 2
 updates:
-  - package-ecosystem: docker
+  # Compose files need the dedicated ecosystem (including digest-only images).
+  # Apps koji-genba/* use reviewed digests or staging's edge workflow.
+  # Keep their entries for future upstream images; ignore only our repositories.
+  # Apps upstream images are pinned digest-only, which Dependabot resolves
+  # to `latest`; they are ignored until their Compose lines are migrated to
+  # tag+digest, then remove these ignores.
+  - package-ecosystem: docker-compose
     directory: /files/services/compose/edge
     schedule: {interval: weekly}
-  - package-ecosystem: docker
+    ignore:
+      - dependency-name: "koji-genba/*"
+  - package-ecosystem: docker-compose
     directory: /files/services/compose/dns
     schedule: {interval: weekly}
-  - package-ecosystem: docker
+    ignore:
+      - dependency-name: "adguard/adguardhome"
+  - package-ecosystem: docker-compose
     directory: /files/services/compose/samba
     schedule: {interval: weekly}
-  - package-ecosystem: docker
+    ignore:
+      - dependency-name: "koji-genba/*"
+  - package-ecosystem: docker-compose
     directory: /files/services/compose/stashpad-prod
     schedule: {interval: weekly}
-  - package-ecosystem: docker
+    ignore:
+      - dependency-name: "koji-genba/*"
+  - package-ecosystem: docker-compose
     directory: /files/services/compose/stashpad-staging
     schedule: {interval: weekly}
-  - package-ecosystem: docker
+    ignore:
+      - dependency-name: "koji-genba/*"
+  - package-ecosystem: docker-compose
     directory: /files/services/compose/sillytavern
     schedule: {interval: weekly}
-  - package-ecosystem: docker
+    ignore:
+      - dependency-name: "sillytavern/sillytavern"
+  - package-ecosystem: docker-compose
     directory: /files/services/compose/open-webui
     schedule: {interval: weekly}
-  - package-ecosystem: docker
+    ignore:
+      - dependency-name: "open-webui/open-webui"
+  - package-ecosystem: docker-compose
     directory: /files/services/compose/searxng
     schedule: {interval: weekly}
-  - package-ecosystem: docker
+    ignore:
+      - dependency-name: "searxng/searxng"
+      - dependency-name: "isokoliuk/mcp-searxng"
+  - package-ecosystem: docker-compose
     directory: /files/services/compose/sparkdash
     schedule: {interval: weekly}
-  - package-ecosystem: docker
+    ignore:
+      - dependency-name: "koji-genba/*"
+  - package-ecosystem: docker-compose
     directory: /files/services/compose/homepage
     schedule: {interval: weekly}
-  - package-ecosystem: docker
+    ignore:
+      - dependency-name: "gethomepage/homepage"
+  - package-ecosystem: docker-compose
     directory: /files/services/compose/monitoring
     schedule: {interval: weekly}
-  - package-ecosystem: docker
+    ignore:
+      - dependency-name: "twinproduction/gatus"
+  - package-ecosystem: docker-compose
     directory: /files/services/agent/stack
     schedule: {interval: weekly}
+    ignore:
+      # Own workflows publish these; manually re-pin the tested digests.
+      - dependency-name: "koji-genba/homelab-*"
   - package-ecosystem: docker
     directory: /files/services/images/caddy-cloudflare
     schedule: {interval: weekly}
@@ -48,6 +80,13 @@ updates:
   - package-ecosystem: docker
     directory: /files/services/images/tei-reranker-onnx
     schedule: {interval: weekly}
+    ignore:
+      # Export wheels are cp312 and hash-pinned; keep Python 3.12-slim.
+      # Digest refreshes and TEI base image updates remain enabled.
+      - dependency-name: python
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
   - package-ecosystem: docker
     directory: /files/services/images/memory-db
     schedule: {interval: weekly}
@@ -56,6 +95,13 @@ updates:
     schedule: {interval: weekly}
   - package-ecosystem: terraform
     directory: /files/infrastructure/terraform/apps-vm
+    schedule: {interval: weekly}
+  # Review provider bumps together across apps-vm, agent-vm and runner-vm.
+  - package-ecosystem: terraform
+    directory: /files/infrastructure/terraform/agent-vm
+    schedule: {interval: weekly}
+  - package-ecosystem: terraform
+    directory: /files/infrastructure/terraform/runner-vm
     schedule: {interval: weekly}
   - package-ecosystem: terraform
     directory: /files/infrastructure/terraform/tailscale
