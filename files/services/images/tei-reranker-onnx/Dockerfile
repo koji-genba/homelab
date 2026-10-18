@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Export tools never enter the serving image. Locks target Linux amd64 / CPython 3.12.
-FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS export
+FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS export
 ENV HF_HUB_DISABLE_XET=1 HF_HUB_DISABLE_TELEMETRY=1 DO_NOT_TRACK=1
 WORKDIR /build
 COPY requirements.txt ./
