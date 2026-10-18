@@ -192,6 +192,7 @@ for filename, names in (
 ):
     for name in names:
         assert task("agent_stack", name, filename)["notify"] == recreate_name, name
+assert task("agent_stack", "Render the Hermes configuration", "config.yml")["ansible.builtin.template"]["mode"] == "0640"
 for name in ("Install the Agent Compose project definition", "Render the non-secret Compose environment"):
     assert task("agent_stack", name, "config.yml")["notify"] == "Restart the Agent stack"
 for name, module in (("Seed the Hermes persona when absent", "ansible.builtin.template"),
