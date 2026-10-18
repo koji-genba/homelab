@@ -34,10 +34,19 @@ updates:
     directory: /files/services/compose/monitoring
     schedule: {interval: weekly}
   - package-ecosystem: docker
+    directory: /files/services/agent/stack
+    schedule: {interval: weekly}
+  - package-ecosystem: docker
     directory: /files/services/images/caddy-cloudflare
     schedule: {interval: weekly}
   - package-ecosystem: docker
     directory: /files/services/images/sparkdash
+    schedule: {interval: weekly}
+  - package-ecosystem: docker
+    directory: /files/services/images/hermes-agent
+    schedule: {interval: weekly}
+  - package-ecosystem: docker
+    directory: /files/services/images/memory-db
     schedule: {interval: weekly}
   - package-ecosystem: docker
     directory: /files/tools/homelab-toolbox

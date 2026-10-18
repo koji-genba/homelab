@@ -1,0 +1,22 @@
+{
+  "mode": "local_external",
+  "api_url": "http://hindsight:8888",
+  "timeout": 120,
+  "bank_id": {{ agent_stack_bank_id | to_json }},
+  "trusted_project_dirs": [],
+  "memory_mode": "hybrid",
+  "auto_recall": true,
+  "recall_sync": true,
+  "recall_prefetch_method": "recall",
+  "recall_budget": "mid",
+  "recall_types": "observation,world,experience",
+  "recall_min_scores": { "reranker": {{ agent_stack_recall_min_reranker_score | float | to_json }} },
+  "auto_retain": true,
+  "retain_async": true,
+  "retain_every_n_turns": 1,
+  "retain_cron": false,
+  "retain_source": "hermes",
+  "observation_scopes": "shared",
+  "recall_indicator": false,
+  "retain_indicator": false
+}

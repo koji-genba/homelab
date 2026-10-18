@@ -42,6 +42,8 @@ ZFSスナップショット、レプリケーション、NFSサーバー自体�
 | Tailscale gateway（102） | できる。template 9000からcloneし、手動で`tailscale up`とroute承認を行う。templateの作成が固定されていない点は穴 | nodeのidentity（再登録が必要） | 取らない |
 | ElastiFlow（103） | サービスは作り直せるが、`install.sh`の実行・dashboardの取り込みに手作業が残り、dashboardの取得元も固定されていない（[詳細](../../files/infrastructure/terraform/elastiflow/README.md#再構築性とbackup)） | 過去のフローデータ、Kibanaのdashboardへの変更 | 取らない（過去のフローは不要。VMを作り直し、空のindexから取り込み直す） |
 | stashPadDev（111） | できない。開発環境がrepoに宣言されていない（[詳細](../../files/infrastructure/terraform/stashpad-dev/README.md#再構築性とbackup)） | VMの中にしか無い作業、手作業で入れた開発環境 | 取らない（重要ではないUbuntuの開発用VM。VM内だけの作業は運用者が別途pushする） |
+| Hermes Agent VM（104） | 実装上は可能（実機未検証）。Terraform → Ansible。記憶DBとHermesデータはVM内の専用データディスクにあり、[日次バックアップ](../operations/hermes-agent-backup.md)から戻せる | 直近バックアップ以降の記憶の更新 | 取らない（Proxmox VM backupは取らず、アプリケーションレベルの日次バックアップをpve1のNFS exportへage暗号化して保存する。復号identityはVMに置かない） |
+| Hermes Runner VM（105） | 実装上は可能（実機未検証）。Terraform → Ansible。実行accountとChromiumは宣言から再作成する | VM内だけの作業ツリー（キャッシュを除きAgentのバックアップに含める） | 取らない（実行・ブラウザ専用。Discord token・記憶DB・管理鍵を置かない設計） |
 | template 9000 | 作成例はあるが固定されていない（[ホスト復旧](../operations/proxmox-host-recovery.md#template-vm-9000)） | — | 取らない（作成の固定は#87で追跡） |
 
 Apps VMのproject定義は`files/services/compose/*/compose.yaml`を正とする。
@@ -49,6 +51,9 @@ Apps VMのproject定義は`files/services/compose/*/compose.yaml`を正とする
 2026-10-12のpve1確認ではProxmoxのbackup jobもVM backupも無い
 （[確認記録とnamed volumeの復旧範囲](../operations/apps-vm-recovery.md#vm内named-volumeの復旧範囲)）。
 この方針はVMの再構築を対象とし、pve1のZFS pool上のデータ（NFSでmountするアプリのデータ・共有）の保護は別に扱う。
+Hermes Agent VM（104）の記憶・セッション・Runner作業ツリーはrepoから再生成できないため、VM backupの代わりに
+日次のアプリケーションレベルbackupをpve1のNFS exportへage暗号化して取る（[Hermes Agentバックアップ運用](../operations/hermes-agent-backup.md)）。
+設計判断は[ADR-0008](../adr/0008-hermes-agent-hindsight-vms.md)を参照する。
 
 ## 実行環境の構成
 
@@ -66,6 +71,8 @@ Proxmox pve1 192.168.10.11
 │   ├── sparkDash                   内部Docker network -> DGX (SSH/HTTP)
 │   ├── Homepage                    内部Docker network
 │   └── Gatus                       内部Docker network
+├── Hermes Agent VM (Debian 13)     192.168.10.104。Hermes + Hindsight + 記憶DB + TEI（tailnet外）
+├── Hermes Runner VM (Debian 13)    192.168.10.105。実行とヘッドレスChromium（tailnet外、Dockerなし）
 ├── Tailscale gateway               VM定義はTerraform、node登録・route広告は手動
 ├── ElastiFlow                      維持
 └── stashPadDev                     一時VM、対象外
@@ -198,3 +205,17 @@ VM側はNFSv4、`hard,_netdev`を使用する。systemd mount unit、`RequiresMo
 | ProxmoxとTailscaleのcredential | KeePassXC、デプロイ時に注入 |
 | NFS上のアプリケーションデータ | 外部で復旧したNFS/ZFS（Apps VM内のlocal volumeは含まない） |
 | sparkDash config | 自動backupなし。再deployとUIで2台を再登録（約5分）、token・SSH鍵はSOPSから再配置 |
+
+### Hermes Agentの確認範囲（2026-10-17）
+
+Agent/Runner VMの初回構築は未実施。ローカルでは会話・export・暗号化scratch restoreとDB復元を確認したが、
+新規sessionの想起等の品質閾値と会話p95目標は達成したが、創作1件と20候補rerank速度目標の未達が残る。
+Runnerは模擬コンテナの部分試験までで、実VMの復旧・systemd制限・NFS/Discordは未検証。
+2026-10-17のユーザー決定（WS14）でAgent VMを12 vCPU / 24 GiBとし、reranker 6 CPU / 4 GiB・embedding 4 CPU / 8 GiBとする。
+TEIのCPU上限合計10に対して他サービスとOSに2 CPU相当の余地を残す（予約ではない）。全サービスのメモリ上限合計は
+16.625 GiBで、OS・Docker・page cacheに7.375 GiBの余裕がある。swapなしのwarm-upピークを踏まえた値とする。
+品質優先でrerank候補MID 20 / HIGH 30を維持し、3秒目標は未達のまま受け入れる。WS13ではbatch 4制約により
+rerankerは6 CPUを超えてもほぼ伸びず、新配分の会話応答性は本番適用後に再計測する。
+`memory.write_approval: false`で組み込み記憶は即時書き込み、`skills.write_approval: true`は維持する。
+Hindsightの自動retainは承認ゲートの対象外で、custom抽出とSOULによる方針を継続する。これらの本番適用は未実施。
+計測値と制約は[Hermes Agent運用](../operations/hermes-agent.md#サービスの資源上限)を参照する。

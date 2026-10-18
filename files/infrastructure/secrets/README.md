@@ -8,6 +8,14 @@ Apps VM用のsecretは、このdirectoryの`runtime.sops.yaml`としてSOPS/age�
 `make ansible-apply`でAnsibleがApps VM上に生成し、以後は上書きしない。backupは不要で、Apps VMを
 作り直せば再生成される。
 
+## Agent VM用bundle
+
+Agent VMのsecretは`agent/runtime.sops.yaml`として同じSOPS/ageで暗号化し、
+[agent/runtime.yaml.example](agent/runtime.yaml.example)のkey一覧に従う。暗号化・復号確認は
+`make secrets-encrypt-agent` / `make secrets-decrypt-check-agent`を使う。Discordのbot tokenと
+channel ID、監視用webhookが対象で、PostgreSQL passwordとSSH鍵はVM上で生成するためbundleへ
+含めない。
+
 ## 初回作成
 
 1. 管理端末で`age-keygen`を実行し、identityをmode `0600`で保存する。host上で実行する場合はhost版ageが

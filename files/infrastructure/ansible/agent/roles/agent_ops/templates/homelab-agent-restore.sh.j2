@@ -1,0 +1,436 @@
+#!/usr/bin/env bash
+# Restore an Agent backup set, installed by the Ansible role agent_ops at
+# {{ agent_ops_helpers_dir }}/homelab-agent-restore.
+#
+# Usage:
+#   homelab-agent-restore <set> --identity <age-identity-file> [--scratch] [--yes]
+#
+# <set> is a completed set name (the UTC timestamp directory, or its full path)
+# produced by homelab-agent-backup. The age identity file must be supplied
+# explicitly; it never lives on this VM. The set is verified against
+# SHA256SUMS before anything is touched.
+#
+# Two modes:
+#   (default) production restore: stop hermes/hindsight, safety snapshot,
+#             recreate the Hindsight DB, pg_restore, hermes import, bring the
+#             stack back up and run the health check. Destructive: needs --yes.
+#   --scratch  isolated restore: starts a throwaway Compose project
+#             ({{ agent_ops_project_name }}-restore-<ts>) that reuses the live
+#             stateless TEI servers over the project network, restores into a
+#             scratch DB, verifies stats + a recall, then removes itself. The
+#             production stack is left untouched and must already be up.
+set -Eeuo pipefail
+umask 077
+
+PROG=homelab-agent-restore
+
+POSTGRES_USER={{ agent_ops_postgres_user | to_json }}
+POSTGRES_DB={{ agent_ops_postgres_db | to_json }}
+BACKUP_MOUNT={{ agent_ops_backup_mount | to_json }}
+PROJECT_DIR={{ agent_ops_project_dir | to_json }}
+PROJECT_NAME={{ agent_ops_project_name | to_json }}
+ENV_FILE={{ agent_ops_env_file | to_json }}
+SECRET_ENV_FILE={{ agent_ops_secrets_dir | to_json }}/memory-db.env
+MONITORING_ENV={{ agent_ops_monitoring_env | to_json }}
+HERMES_DATA_DIR={{ agent_ops_hermes_data_dir | to_json }}
+SCRATCH_DIR={{ agent_ops_scratch_dir | to_json }}
+SAFETY_DIR={{ agent_ops_safety_dir | to_json }}
+PRODUCTION_NETWORK={{ agent_ops_production_network | to_json }}
+BANK_ID={{ agent_ops_bank_id | to_json }}
+RECALL_QUERY={{ agent_ops_health_recall_query | to_json }}
+HEALTHCHECK={{ (agent_ops_helpers_dir ~ '/homelab-agent-healthcheck') | to_json }}
+COMPOSE_UP={{ (agent_ops_helpers_dir ~ '/homelab-agent-compose-up') | to_json }}
+
+log() { printf '%s: %s\n' "$PROG" "$*" >&2; }
+fail() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
+json_str() { python3 -c 'import json,sys; sys.stdout.write(json.dumps(sys.argv[1]))' "$1"; }
+
+load_env_file() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+    set -a
+    # shellcheck disable=SC1090
+    . "$file"
+    set +a
+}
+
+notify_operator() {
+    local message="$1" url
+    load_env_file "$MONITORING_ENV"
+    url="${OPERATOR_WEBHOOK_URL:-}"
+    [ -n "$url" ] || return 0
+    curl -fsS --max-time 15 -X POST -H 'Content-Type: application/json' \
+        --data "$(printf '{"content": %s}' "$(json_str "$message")")" \
+        "$url" >/dev/null 2>&1 || log 'operator webhook delivery failed'
+}
+
+on_exit() {
+    local rc=$?
+    trap - EXIT
+    if ! cleanup; then
+        log 'cleanup incomplete; inspect private work directories'
+        [ "$rc" -ne 0 ] || rc=1
+    fi
+    if [ "$rc" -ne 0 ]; then
+        notify_operator "$PROG failed (exit $rc) on $(hostname)"
+    fi
+    exit "$rc"
+}
+
+compose() {
+    docker compose \
+        --project-name "$PROJECT_NAME" \
+        --env-file "$ENV_FILE" \
+        --env-file "$SECRET_ENV_FILE" \
+        --file "$PROJECT_DIR/compose.yaml" \
+        "$@"
+}
+
+usage() {
+    cat >&2 <<EOF
+usage: $PROG <set> --identity <identity-file> [--scratch] [--yes]
+
+  <set>        completed backup set name (e.g. 20260101T033000Z) or full path
+  --identity   age identity (private key) file used to decrypt the set
+  --scratch    restore into an isolated throwaway project and verify, then drop
+  --yes        required for a destructive production restore
+EOF
+    exit 2
+}
+
+decrypt_set() {
+    local src="$1" dest="$2" artifact
+    for artifact in hermes-backup.zip hindsight-postgres.dump agent-config.tar.gz runner-work.tar.gz; do
+        [ -f "$src/$artifact.age" ] || fail "set is missing $artifact.age"
+        age --decrypt -i "$IDENTITY" -o "$dest/$artifact" "$src/$artifact.age" \
+            || fail "could not decrypt $artifact (wrong identity?)"
+    done
+}
+
+verify_hermes_archive() {
+    local zip="$1"
+    python3 - "$zip" <<'PY'
+import sqlite3
+import sys
+import tempfile
+import zipfile
+
+path = sys.argv[1]
+with zipfile.ZipFile(path) as archive:
+    bad = archive.testzip()
+    if bad is not None:
+        raise SystemExit(f"corrupt entry in Hermes archive: {bad}")
+    names = archive.namelist()
+    print(f"Hermes archive OK: {len(names)} entries", file=sys.stderr)
+    db_names = [n for n in names if n.endswith("state.db")]
+    if not db_names:
+        print("no state.db in Hermes archive (skipping integrity check)", file=sys.stderr)
+        sys.exit(0)
+    with tempfile.TemporaryDirectory() as tmp:
+        for name in db_names:
+            archive.extract(name, tmp)
+            db = f"{tmp}/{name}"
+            with sqlite3.connect(db) as conn:
+                row = conn.execute("PRAGMA integrity_check").fetchone()
+            if row[0] != "ok":
+                raise SystemExit(f"state.db integrity_check failed: {row[0]}")
+        print(f"state.db integrity_check ok ({len(db_names)} db)", file=sys.stderr)
+PY
+}
+
+restore_production() {
+    local work="$1" ts
+    ts="$(date -u +%Y%m%dT%H%M%SZ)"
+    [ "${ASSUME_YES:-}" = 1 ] || fail 'production restore is destructive; re-run with --yes'
+
+    # Quiesce both writers BEFORE copying SQLite/WAL and the database. A tar
+    # exit 1 on a live tree is not a usable safety snapshot.
+    log 'stopping hermes and hindsight before the safety snapshot'
+    compose stop hermes hindsight
+    log "taking a safety snapshot under $SAFETY_DIR/$ts"
+    mkdir -p "$SAFETY_DIR"
+    mkdir "$SAFETY_DIR/$ts"
+    # Resolve PostgreSQL settings inside the DB container, as in backup/restore.
+    # shellcheck disable=SC2016
+    compose exec -T memory-db sh -c \
+        'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -Fc -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+        >"$SAFETY_DIR/$ts/hindsight-postgres.dump" || fail 'safety pg_dump failed'
+    tar -C "$HERMES_DATA_DIR" --exclude=./backups \
+        -czf "$SAFETY_DIR/$ts/hermes-data.tar.gz" . \
+        || fail 'safety Hermes snapshot failed'
+
+    local restore_dir="$HERMES_DATA_DIR/.restore"
+    # The CLI (including the upstream root-exec shim) imports as the data UID.
+    # A root-owned 0600 decrypted archive would be unreadable to it.
+    install -d -m 0700 -o {{ agent_ops_uid }} -g {{ agent_ops_gid }} "$restore_dir"
+    install -m 0600 -o {{ agent_ops_uid }} -g {{ agent_ops_gid }} \
+        "$work/hermes-backup.zip" "$restore_dir/restore.zip"
+    RESTORE_ARCHIVE="$restore_dir/restore.zip"
+
+    log 'recreating the Hindsight database'
+    # shellcheck disable=SC2016
+    compose exec -T memory-db sh -c \
+        'PGPASSWORD="$POSTGRES_PASSWORD" psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres \
+            -c "DROP DATABASE IF EXISTS $POSTGRES_DB WITH (FORCE)" \
+            -c "CREATE DATABASE $POSTGRES_DB OWNER $POSTGRES_USER"' \
+        || fail 'could not recreate the Hindsight database'
+
+    log 'restoring the Hindsight database'
+    # shellcheck disable=SC2016
+    compose exec -T memory-db sh -c \
+        'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore --exit-on-error -U "$POSTGRES_USER" --no-owner --role "$POSTGRES_USER" \
+            -d "$POSTGRES_DB" --clean --if-exists' <"$work/hindsight-postgres.dump" \
+        || fail 'pg_restore failed'
+
+    log 'importing the Hermes archive'
+    compose run --rm --no-deps -T --user {{ agent_ops_uid }}:{{ agent_ops_gid }} --entrypoint hermes hermes \
+        import --force /opt/data/.restore/restore.zip \
+        || fail 'hermes import failed'
+    rm -f "$restore_dir/restore.zip"
+
+    log 'bringing the stack back up'
+    if [ -x "$COMPOSE_UP" ]; then
+        "$COMPOSE_UP"
+    else
+        compose up -d
+    fi
+
+    # The Hermes gateway publishes its state (and connects the api_server) a few
+    # seconds after the container starts, and the service has no healthcheck, so
+    # up -d --wait can return before the gateway check would pass. Retry briefly
+    # instead of failing a restore that actually succeeded.
+    log 'running the health check'
+    if [ -x "$HEALTHCHECK" ]; then
+        local attempt
+        for attempt in 1 2 3 4 5 6; do
+            "$HEALTHCHECK" --no-notify && break
+            if [ "$attempt" -eq 6 ]; then
+                "$HEALTHCHECK" || true
+                fail 'post-restore health check failed'
+            fi
+            log "health check not clean yet (attempt $attempt); retrying in 10s"
+            sleep 10
+        done
+        "$HEALTHCHECK"
+    fi
+    log "production restore from $(basename "$SET_SRC") complete"
+}
+
+write_scratch_override() {
+    local file="$1" data_dir="$2"
+    cat >"$file" <<EOF
+# Generated by $PROG for an isolated restore test. Never commit.
+services:
+  scratch-memory-db:
+    extends:
+      file: "$PROJECT_DIR/compose.yaml"
+      service: memory-db
+    ports: !reset []
+    volumes: !override
+      - $data_dir:/var/lib/postgresql/data
+    networks: !override
+      scratch_internal:
+        aliases: [scratch-memory-db]
+  scratch-hindsight:
+    extends:
+      file: "$PROJECT_DIR/compose.yaml"
+      service: hindsight
+    # Distinct service names prevent BOTH database and Hindsight aliases from
+    # shadowing the live services on the shared TEI network. The database name
+    # exists only on scratch_internal.
+    environment:
+      HINDSIGHT_API_DATABASE_URL: "postgresql://$POSTGRES_USER:\${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@scratch-memory-db:5432/$POSTGRES_DB"
+    depends_on: !reset {}
+    networks: !override
+      - scratch_internal
+      - production_internal
+networks:
+  scratch_internal: {}
+  production_internal:
+    external: true
+    name: $PRODUCTION_NETWORK
+EOF
+}
+
+scratch_compose() {
+    docker compose \
+        --project-name "$1" \
+        --env-file "$ENV_FILE" \
+        --env-file "$SECRET_ENV_FILE" \
+        --file "$PROJECT_DIR/compose.yaml" \
+        --file "$2" \
+        "${@:3}"
+}
+
+wait_for_hindsight() {
+    local project="$1" override="$2" deadline=$((SECONDS + 150))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        if scratch_compose "$project" "$override" exec -T scratch-hindsight \
+            python3 -c 'import urllib.request,sys; sys.exit(0 if urllib.request.urlopen("http://127.0.0.1:8888/health/ready", timeout=5).status == 200 else 1)' >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 5
+    done
+    return 1
+}
+
+restore_scratch() {
+    local work="$1" ts project override data_dir
+    ts="$(date -u +%Y%m%dT%H%M%SZ)"
+    project="{{ agent_ops_project_name }}-restore-${ts,,}"
+    mkdir -p "$SCRATCH_DIR"
+    override="$SCRATCH_DIR/override-$ts.yaml"
+    data_dir="$SCRATCH_DIR/data-$ts"
+
+    docker network inspect "$PRODUCTION_NETWORK" >/dev/null 2>&1 \
+        || fail "production network $PRODUCTION_NETWORK not found; start the production stack first"
+
+    SCRATCH_PROJECT="$project"
+    SCRATCH_OVERRIDE="$override"
+    SCRATCH_DATA_DIR="$data_dir"
+
+    mkdir -p "$data_dir"
+    # PostgreSQL's entrypoint owns this directory; Hermes' UID is unrelated.
+    write_scratch_override "$override" "$data_dir"
+
+    log "creating scratch database in $project"
+    scratch_compose "$project" "$override" up -d --no-deps --wait scratch-memory-db
+    # shellcheck disable=SC2016
+    scratch_compose "$project" "$override" exec -T scratch-memory-db sh -c \
+        'PGPASSWORD="$POSTGRES_PASSWORD" psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres \
+            -c "DROP DATABASE IF EXISTS $POSTGRES_DB WITH (FORCE)" \
+            -c "CREATE DATABASE $POSTGRES_DB OWNER $POSTGRES_USER"' \
+        || fail 'could not create the scratch database'
+
+    log 'restoring the set into the scratch database'
+    # shellcheck disable=SC2016
+    scratch_compose "$project" "$override" exec -T scratch-memory-db sh -c \
+        'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore --exit-on-error -U "$POSTGRES_USER" --no-owner --role "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+        <"$work/hindsight-postgres.dump" || fail 'scratch pg_restore failed'
+
+    log 'starting scratch hindsight (sharing the production TEI servers)'
+    scratch_compose "$project" "$override" up -d --no-deps --wait scratch-hindsight
+    wait_for_hindsight "$project" "$override" || fail 'scratch hindsight did not become ready'
+
+    log 'verifying restored stats and recall'
+    scratch_compose "$project" "$override" exec -T scratch-hindsight python3 - "$BANK_ID" "$RECALL_QUERY" <<'PY' \
+        || fail 'scratch verification failed'
+import json
+import sys
+import urllib.request
+
+bank, query = sys.argv[1], sys.argv[2]
+base = "http://127.0.0.1:8888"
+
+
+def get(path):
+    with urllib.request.urlopen(base + path, timeout=10) as response:
+        return json.load(response)
+
+
+stats = get(f"/v1/default/banks/{bank}/stats")
+nodes = stats.get("total_nodes") or stats.get("nodes") or 0
+if nodes <= 0:
+    raise SystemExit(f"restored bank {bank} has no memories (stats={stats})")
+print(f"stats ok: total_nodes={nodes}", file=sys.stderr)
+
+payload = json.dumps({"query": query, "budget": "low"}).encode()
+request = urllib.request.Request(
+    f"{base}/v1/default/banks/{bank}/memories/recall",
+    data=payload,
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+with urllib.request.urlopen(request, timeout=30) as response:
+    recall = json.load(response)
+results = recall.get("results") or recall.get("memories") or []
+if not isinstance(results, list) or not results:
+    raise SystemExit(f"unexpected recall response: {recall}")
+print(f"recall ok: {len(results)} result(s)", file=sys.stderr)
+PY
+
+    verify_hermes_archive "$work/hermes-backup.zip" \
+        || fail 'Hermes archive verification failed'
+    log 'scratch restore verification complete (production stack untouched)'
+}
+
+# EXIT runs after main/restore_scratch return. Keep cleanup paths outside their
+# local scopes, and use one trap so scratch cleanup cannot replace work cleanup.
+RESTORE_WORK_DIR=''
+SCRATCH_PROJECT=''
+SCRATCH_OVERRIDE=''
+SCRATCH_DATA_DIR=''
+cleanup() {
+    local cleanup_rc=0
+    if [ -n "$SCRATCH_PROJECT" ]; then
+        log "removing scratch project $SCRATCH_PROJECT"
+        if scratch_compose "$SCRATCH_PROJECT" "$SCRATCH_OVERRIDE" down -v --remove-orphans >/dev/null 2>&1; then
+            rm -rf "$SCRATCH_DATA_DIR" "$SCRATCH_OVERRIDE" || cleanup_rc=1
+        else
+            log 'scratch shutdown failed; preserving its data and override for manual cleanup'
+            cleanup_rc=1
+        fi
+    fi
+    [ -z "${RESTORE_ARCHIVE:-}" ] || rm -f "$RESTORE_ARCHIVE" || cleanup_rc=1
+    [ -z "$RESTORE_WORK_DIR" ] || rm -rf "$RESTORE_WORK_DIR" || cleanup_rc=1
+    return "$cleanup_rc"
+}
+
+main() {
+    [ "$(id -u)" -eq 0 ] || fail 'must run as root'
+    mkdir -p {{ agent_ops_state_dir | to_json }}
+    exec 9>{{ (agent_ops_state_dir ~ '/ops.lock') | to_json }}
+    flock -n 9 || fail 'another backup/restore/export is running'
+    [ "$#" -ge 1 ] || usage
+    SET_ARG="$1"
+    shift
+    IDENTITY=''
+    SCRATCH=0
+    ASSUME_YES=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --identity) [ "$#" -ge 2 ] || usage; IDENTITY="$2"; shift 2 ;;
+            --scratch) SCRATCH=1; shift ;;
+            --yes|-y) ASSUME_YES=1; shift ;;
+            -h|--help) usage ;;
+            *) fail "unknown argument: $1" ;;
+        esac
+    done
+    [ -n "$IDENTITY" ] || fail '--identity is required'
+    [ -f "$IDENTITY" ] || fail "identity file not found: $IDENTITY"
+    if [ "$SCRATCH" != 1 ]; then
+        [ "$ASSUME_YES" = 1 ] || fail 'production restore is destructive; re-run with --yes'
+        [ -x "$HEALTHCHECK" ] || fail 'health check helper is missing'
+        [ -x "$COMPOSE_UP" ] || fail 'digest-checked start helper is missing'
+    fi
+
+    local set_src
+    case "$SET_ARG" in
+        */*) set_src="$SET_ARG" ;;
+        *) set_src="$BACKUP_MOUNT/$SET_ARG" ;;
+    esac
+    SET_SRC="$set_src"
+    [ -d "$set_src" ] || fail "backup set not found: $set_src"
+    [ -f "$set_src/SHA256SUMS" ] || fail "$set_src is not a completed set (no SHA256SUMS)"
+
+    log "verifying checksums in $(basename "$set_src")"
+    (cd "$set_src" && sha256sum -c SHA256SUMS >/dev/null) || fail 'checksum verification failed'
+
+    local work
+    work="$(mktemp -d)"
+    RESTORE_WORK_DIR="$work"
+    trap on_exit EXIT
+
+    log 'decrypting the set'
+    decrypt_set "$set_src" "$work"
+    verify_hermes_archive "$work/hermes-backup.zip" || fail 'Hermes archive verification failed'
+
+    if [ "$SCRATCH" = 1 ]; then
+        restore_scratch "$work"
+    else
+        restore_production "$work"
+    fi
+}
+
+trap on_exit EXIT
+main "$@"

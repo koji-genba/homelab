@@ -1,0 +1,73 @@
+---
+- name: Install the Agent Compose project definition
+  ansible.builtin.copy:
+    src: "{{ agent_stack_compose_src }}"
+    dest: "{{ agent_stack_project_dir }}/compose.yaml"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart the Agent stack
+
+- name: Render the non-secret Compose environment
+  ansible.builtin.template:
+    src: compose.env.j2
+    dest: "{{ agent_stack_env_file }}"
+    owner: root
+    group: root
+    mode: '0600'
+  notify: Restart the Agent stack
+
+- name: Render the Hermes configuration
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: "{{ agent_stack_hermes_data_dir }}/config.yaml"
+    owner: "{{ agent_stack_uid }}"
+    group: "{{ agent_stack_gid }}"
+    mode: '0600'
+  notify: Restart the Agent stack
+
+- name: Render the Hindsight plugin configuration
+  ansible.builtin.template:
+    src: hindsight-config.json.j2
+    dest: "{{ agent_stack_hermes_data_dir }}/hindsight/config.json"
+    owner: "{{ agent_stack_uid }}"
+    group: "{{ agent_stack_gid }}"
+    mode: '0600'
+  notify: Restart the Agent stack
+
+# force=false: the persona is seeded once and afterwards owned by the agent's
+# own curation, so an apply must not clobber edits made in the running service.
+- name: Seed the Hermes persona when absent
+  ansible.builtin.template:
+    src: SOUL.md.j2
+    dest: "{{ agent_stack_hermes_data_dir }}/SOUL.md"
+    owner: "{{ agent_stack_uid }}"
+    group: "{{ agent_stack_gid }}"
+    mode: '0640'
+    force: false
+
+- name: Seed the shipped skills when absent
+  ansible.builtin.copy:
+    src: "{{ agent_stack_skills_src }}/"
+    dest: "{{ agent_stack_hermes_data_dir }}/skills/"
+    owner: "{{ agent_stack_uid }}"
+    group: "{{ agent_stack_gid }}"
+    mode: '0644'
+    directory_mode: '0750'
+    force: false
+
+- name: Install the Compose wrapper helper
+  ansible.builtin.template:
+    src: homelab-agent-compose-up.sh.j2
+    dest: "{{ agent_stack_helpers_dir }}/homelab-agent-compose-up"
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install the Hindsight bank policy helper
+  ansible.builtin.template:
+    src: homelab-agent-bank-config.py.j2
+    dest: "{{ agent_stack_helpers_dir }}/homelab-agent-bank-config.py"
+    owner: root
+    group: root
+    mode: '0755'

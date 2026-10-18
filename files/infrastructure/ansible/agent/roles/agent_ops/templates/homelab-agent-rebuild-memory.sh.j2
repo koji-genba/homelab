@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# Rebuild Hindsight memory from a Hermes session export, installed by the
+# Ansible role agent_ops at {{ agent_ops_helpers_dir }}/homelab-agent-rebuild-memory.
+#
+# Usage:
+#   homelab-agent-rebuild-memory --from <sessions.jsonl> [--bank <id>]
+#                                [--rate-limit <seconds>] [--dry-run] [--fresh]
+#
+# The heavy lifting runs in the hindsight container via the helper
+# {{ agent_ops_helpers_dir }}/homelab-agent-rebuild-memory.py so it shares the
+# container's Python and network namespace. Re-running is safe: each session is
+# posted whole, in one request, as document_id=session id with update_mode
+# replace, so a repeated retain rewrites the same document instead of
+# duplicating it.
+#
+# Progress lives in $REBUILD_DIR/<bank>-<sha16>, where <sha16> is the first 16
+# hex digits of the input file's SHA-256. The same bank and input therefore
+# resume from the same checkpoint, while a different input gets its own
+# directory. --fresh discards the saved checkpoint and starts from line 0
+# (each session replace is idempotent, so re-posting does not duplicate it).
+#
+# The helper runs as root, but the worker runs as the non-root hindsight user and
+# may not be able to read the export (the export is owned by the Hermes uid with
+# an umask-dependent mode). So the helper stages a private copy of the input
+# inside the progress directory and hands only that to the worker; the staged
+# copy is removed on both successful and failed exits.
+set -Eeuo pipefail
+umask 077
+
+PROG=homelab-agent-rebuild-memory
+
+PROJECT_DIR={{ agent_ops_project_dir | to_json }}
+PROJECT_NAME={{ agent_ops_project_name | to_json }}
+ENV_FILE={{ agent_ops_env_file | to_json }}
+SECRET_ENV_FILE={{ agent_ops_secrets_dir | to_json }}/memory-db.env
+MONITORING_ENV={{ agent_ops_monitoring_env | to_json }}
+REBUILD_DIR={{ agent_ops_rebuild_dir | to_json }}
+HELPER={{ (agent_ops_helpers_dir ~ '/homelab-agent-rebuild-memory.py') | to_json }}
+BANK_HELPER={{ (agent_ops_helpers_dir ~ '/homelab-agent-bank-config.py') | to_json }}
+BANK_ID={{ agent_ops_bank_id | to_json }}
+RATE_LIMIT={{ agent_ops_rebuild_rate_limit | to_json }}
+EVENT_TIMEZONE={{ agent_stack_timezone | default('Asia/Tokyo') | to_json }}
+
+log() { printf '%s: %s\n' "$PROG" "$*" >&2; }
+fail() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
+json_str() { python3 -c 'import json,sys; sys.stdout.write(json.dumps(sys.argv[1]))' "$1"; }
+
+load_env_file() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+    set -a
+    # shellcheck disable=SC1090
+    . "$file"
+    set +a
+}
+
+notify_operator() {
+    local message="$1" url
+    load_env_file "$MONITORING_ENV"
+    url="${OPERATOR_WEBHOOK_URL:-}"
+    [ -n "$url" ] || return 0
+    curl -fsS --max-time 15 -X POST -H 'Content-Type: application/json' \
+        --data "$(printf '{"content": %s}' "$(json_str "$message")")" \
+        "$url" >/dev/null 2>&1 || log 'operator webhook delivery failed'
+}
+
+on_exit() {
+    local rc=$?
+    trap - EXIT
+    if ! cleanup; then
+        log 'cleanup incomplete; inspect private work directories'
+        [ "$rc" -ne 0 ] || rc=1
+    fi
+    if [ "$rc" -ne 0 ]; then
+        notify_operator "$PROG failed (exit $rc) on $(hostname)"
+    fi
+    exit "$rc"
+}
+
+compose() {
+    docker compose \
+        --project-name "$PROJECT_NAME" \
+        --env-file "$ENV_FILE" \
+        --env-file "$SECRET_ENV_FILE" \
+        --file "$PROJECT_DIR/compose.yaml" \
+        "$@"
+}
+
+usage() {
+    cat >&2 <<EOF
+usage: $PROG --from <sessions.jsonl> [--bank <id>] [--rate-limit <seconds>] [--dry-run] [--fresh]
+       [--timeout <seconds>] [--poll-interval <seconds>] [--allow-missing-timestamp]
+EOF
+    exit 2
+}
+
+REBUILD_STAGED=''
+cleanup() { [ -z "$REBUILD_STAGED" ] || rm -f "$REBUILD_STAGED"; }
+
+main() {
+    [ "$(id -u)" -eq 0 ] || fail 'must run as root'
+    [ -f "$HELPER" ] || fail "$HELPER is not installed (run the agent_ops role)"
+
+    local input='' bank="$BANK_ID" rate="$RATE_LIMIT" dry_run='' fresh=''
+    local worker_args=()
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --from) [ "$#" -ge 2 ] || usage; input="$2"; shift 2 ;;
+            --bank) [ "$#" -ge 2 ] || usage; bank="$2"; shift 2 ;;
+            --rate-limit) [ "$#" -ge 2 ] || usage; rate="$2"; shift 2 ;;
+            --dry-run) dry_run=1; shift ;;
+            --fresh) fresh=1; shift ;;
+            --timeout|--poll-interval) [ "$#" -ge 2 ] || usage; worker_args+=("$1" "$2"); shift 2 ;;
+            --allow-missing-timestamp) worker_args+=("$1"); shift ;;
+            -h|--help) usage ;;
+            *) fail "unknown argument: $1" ;;
+        esac
+    done
+    [ -n "$input" ] || usage
+    [ -f "$input" ] || fail "input file not found: $input"
+    [[ "$bank" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]] || fail 'invalid bank id'
+    # Serialize even different inputs: they may replace the same bank documents.
+    mkdir -p "$REBUILD_DIR"
+    exec 9>"$REBUILD_DIR/.lock"
+    flock -n 9 || fail 'another rebuild is running'
+
+    # The checkpoint is keyed by the bank and the input contents, never by the
+    # wall clock, so an interrupted run resumes from the same place.
+    local input_sha sha16 progress_dir staged
+    input_sha="$(sha256sum "$input" | cut -d ' ' -f1)"
+    sha16="${input_sha:0:16}"
+    progress_dir="$REBUILD_DIR/${bank}-${sha16}"
+    mkdir -p "$progress_dir"
+    chmod 0700 "$progress_dir"
+    # The worker runs as the non-root hindsight container user, so the host-side
+    # progress dir must be owned by it or its very first checkpoint write fails.
+    local run_uid run_gid
+    run_uid="$(compose exec -T hindsight id -u 2>/dev/null | tr -d '\r')"
+    run_gid="$(compose exec -T hindsight id -g 2>/dev/null | tr -d '\r')"
+    { [ -n "$run_uid" ] && [ -n "$run_gid" ]; } \
+        || fail 'hindsight service is not running (needed to own the progress dir)'
+    chown "$run_uid:$run_gid" "$progress_dir"
+
+    if [ -n "$fresh" ] && [ -z "$dry_run" ]; then
+        # An operation may still be writing after the wrapper was interrupted.
+        # Require normal resume to settle it before discarding the checkpoint.
+        if [ -f "$progress_dir/progress.json" ]; then
+            python3 - "$progress_dir/progress.json" <<'PY' || fail 'pending operation exists; resume without --fresh first'
+import json, sys
+with open(sys.argv[1]) as handle:
+    state = json.load(handle)
+sys.exit(1 if state.get("pending") else 0)
+PY
+        fi
+        rm -f "$progress_dir/progress.json" "$progress_dir/progress.json.tmp"
+        log "discarding saved progress in $progress_dir (--fresh)"
+    fi
+
+    # Stage a private copy the worker can read regardless of how the export was
+    # created (owner and mode), then confirm the copy is byte-identical.
+    staged="$progress_dir/input.jsonl"
+    REBUILD_STAGED="$staged"
+    install -m 0600 -o "$run_uid" -g "$run_gid" "$input" "$staged"
+    [ "$(sha256sum "$staged" | cut -d ' ' -f1)" = "$input_sha" ] \
+        || fail 'staged input copy does not match the source (checksum mismatch)'
+
+    local args=(
+        run --rm --no-deps -T
+        --entrypoint python3
+        -v "$progress_dir:/progress"
+        -v "$HELPER:/rebuild.py:ro"
+        hindsight
+        /rebuild.py
+        --input /progress/input.jsonl
+        --bank "$bank"
+        --timezone "$EVENT_TIMEZONE"
+        --api http://hindsight:8888
+        --state-dir /progress
+        --rate-limit "$rate"
+    )
+    args+=("${worker_args[@]}")
+    if [ -n "$dry_run" ]; then
+        args+=(--dry-run)
+    else
+        # A newly auto-created bank has no custom extraction policy and would
+        # learn assistant guesses as user facts. Apply the same managed policy
+        # as the live bank before the very first retain into the target bank.
+        [ -f "$BANK_HELPER" ] || fail 'bank policy helper is missing'
+        compose exec -T hindsight python3 - "$bank" <"$BANK_HELPER"
+    fi
+
+    log "rebuilding memory for bank '$bank' from $input"
+    compose "${args[@]}"
+    # EXIT also removes this staged conversation copy on failure.
+    rm -f "$staged"
+    log "rebuild finished; progress state in $progress_dir"
+}
+
+trap on_exit EXIT
+main "$@"

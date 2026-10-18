@@ -26,10 +26,21 @@ Proxmox VE 192.168.10.11
 │   ├── Homepage (サービスリンク集)
 │   └── Gatus + Healthchecks.io dead-man
 ├── Tailscale gateway                 192.168.10.102
-└── ElastiFlow                        192.168.10.103
+├── ElastiFlow                        192.168.10.103
+├── Hermes Agent VM                   192.168.10.104 (Hermes + Hindsight記憶、repo定義・未構築)
+└── Hermes Runner VM                  192.168.10.105 (実行・隔離ブラウザ、repo定義・未構築)
 ```
 
 Compose定義は11 projects / 12 servicesです。sparkDashの初回反映は[運用手順](docs/operations/sparkdash.md)に従います。
+
+Hermesの常駐エージェントはApps VMとは別の2台（Agent VM / Runner VM）で動かします。両VMともtailnetには参加せず、
+Apps VMの15分reconcileの対象外で、`make ansible-apply-agent`で手動反映します。初回構築と運用は
+[Hermes Agent運用](docs/operations/hermes-agent.md)を参照してください。
+2026-10-17時点で両VMの初回構築は未実施です。ローカルでは新規sessionの想起・訂正・未知属性・再起動後の品質閾値と会話p95目標を満たしました。
+会話の創作1件が残ります。2026-10-17のユーザー決定（WS14）でAgent VMは12 vCPU / 24 GiB、embedding 4 CPU / 8 GiB、
+reranker 6 CPU / 4 GiBとします。rerank候補は品質優先でMID 20 / HIGH 30を維持し、3秒目標は未達のまま受け入れます。
+WS13のローカル計測ではrerankerは6 CPUを超えてもほぼ伸びず、新配分の会話応答性は本番適用後に再計測します。
+`memory.write_approval: false`、`skills.write_approval: true`も決定済みです。本番未適用で、Runnerは模擬コンテナでの部分確認、本番DRは未検証です。
 
 Caddy、DNS、SMBはLAN IPに加え、Apps VMのtailnet IP `100.86.147.127`でも公開します。
 内部FQDNはこのtailnet IPを返します。登録・DNS切替の詳細は[Apps VMのtailnet参加](docs/operations/apps-vm-tailnet.md)を参照してください。
@@ -52,6 +63,8 @@ VLAN 10はServer、20はTrusted、30はIoT、40はGuestです。VLAN 11と63は�
 - [Open WebUI運用](docs/operations/open-webui.md)
 - [SearXNG / MCP運用](docs/operations/searxng.md)
 - [sparkDash運用](docs/operations/sparkdash.md)
+- [Hermes Agent運用](docs/operations/hermes-agent.md)
+- [Hermes Agentバックアップ運用](docs/operations/hermes-agent-backup.md)
 - [Homepage運用](docs/operations/homepage.md)
 - [過去の監査・移行・実施記録](docs/archive/README.md)
 
@@ -71,12 +84,16 @@ docs/
 files/
 ├── infrastructure/
 │   ├── terraform/apps-vm/       # Apps VM
+│   ├── terraform/agent-vm/      # Hermes Agent VM
+│   ├── terraform/runner-vm/     # Hermes Runner VM
 │   ├── terraform/tailscale/     # Tailscale設定
 │   ├── ansible/apps/            # OS、NFS、firewall、Compose lifecycle
+│   ├── ansible/agent/           # Agent/Runner VMのOS・サービス
 │   ├── network/                 # IX2215の設定と手動変更記録
-│   └── secrets/                 # SOPS暗号化済みruntime secrets
+│   └── secrets/                 # SOPS暗号化済みruntime secrets（agent/を含む）
 ├── services/
 │   ├── compose/                 # サービス単位のCompose project
+│   ├── agent/                   # Hermes AgentのCompose stack（reconcile対象外）
 │   └── images/                  # カスタムイメージ
 scripts/                         # preflight、rollback、state backup/restore
 ```
@@ -85,6 +102,9 @@ scripts/                         # preflight、rollback、state backup/restore
 [sparkdash-image.yml](.github/workflows/sparkdash-image.yml) でGHCRへ公開します。
 sparkDashはDGXのremote monitorとしてComposeに登録し、公開imageのdigestを固定します。
 上流更新とComposeのdigest更新は別の変更で行います。
+Hermesの自前イメージ（`homelab-hermes-agent` / `homelab-memory-db`）は
+[hermes-agent-image.yml](.github/workflows/hermes-agent-image.yml) と
+[memory-db-image.yml](.github/workflows/memory-db-image.yml) で公開し、同じくdigestを固定します。
 
 ## 操作方針
 

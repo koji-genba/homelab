@@ -1,0 +1,36 @@
+---
+# The dedicated CDP tunnel account: no shell, and an authorized key restricted
+# to a single loopback forward target. OpenSSH's `restrict` disables every
+# permission including port forwarding. `port-forwarding` re-enables TCP
+# forwarding in BOTH directions; `permitopen` only limits local destinations.
+# The common role's Match User policy MUST also be installed: it allows local
+# TCP forwarding to this CDP port only, denies remote/Unix socket forwarding,
+# and uses MaxSessions 0 to deny shell/exec/subsystem channels. nologin is an
+# additional shell guard. The Agent uses ssh -N -L (PRD 4.2).
+- name: Ensure the CDP tunnel account exists
+  ansible.builtin.user:
+    name: "{{ cdp_user }}"
+    comment: Hermes CDP SSH tunnel account (forwarding only, no shell)
+    shell: /usr/sbin/nologin
+    home: "{{ cdp_home }}"
+    create_home: true
+    system: true
+    password_lock: true
+
+- name: Install the Agent VM CDP tunnel key restricted to the CDP port
+  ansible.posix.authorized_key:
+    user: "{{ cdp_user }}"
+    key: "{{ runner_cdp_ssh_public_key }}"
+    key_options: >-
+      from="{{ agent_management_ip }}",restrict,port-forwarding,permitopen="127.0.0.1:{{ cdp_port }}"
+    state: present
+    manage_dir: true
+  when: runner_cdp_ssh_public_key | default('') | length > 0
+
+- name: Report that no CDP tunnel key is available yet
+  ansible.builtin.debug:
+    msg: >-
+      runner_cdp_ssh_public_key is empty, so no key was installed for
+      {{ cdp_user }}. Re-apply this playbook after WS2's agent_stack generates
+      the key on the Agent VM.
+  when: runner_cdp_ssh_public_key | default('') | length == 0

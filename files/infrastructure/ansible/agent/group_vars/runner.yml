@@ -1,0 +1,54 @@
+---
+# Runner VM (group `runner`) desired state. No Discord token, memory DB, or
+# homelab management credential is ever placed on this host (PRD 4.2).
+common_hostname: runner
+runner_management_ip: 192.168.10.105
+# Agent VM address used as the SSH `from=` restriction on the Runner keys.
+agent_management_ip: 192.168.10.104
+agent_data_mount: /srv/agent
+
+runner_data_disk: /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
+runner_data_disk_label: runner-work
+runner_data_mount: /srv/agent-work
+
+# Unprivileged execution account (no sudo, no docker group) and the dedicated
+# CDP tunnel account (forwarding-only, no shell).
+runner_user: hermes-runner
+cdp_user: hermes-cdp
+cdp_home: /var/lib/hermes-cdp
+cdp_port: 9222
+
+# Headless Chromium runs as its own system user; the CDP endpoint is bound to
+# 127.0.0.1 and reached from the Agent through the permitopen=... tunnel.
+browser_user: hermes-browser
+browser_home: /var/lib/hermes-browser
+chromium_binary: /usr/bin/chromium
+
+# Node.js LTS is pinned by major through the NodeSource apt repository. The
+# upstream Debian nodejs package does not track current LTS, and a pinned major
+# keeps toolchain rebuilds reproducible while still receiving security updates.
+runner_node_major: 24
+# uv is pinned to an exact PyPI release so the toolchain is reproducible.
+runner_uv_version: "0.13.1"
+
+common_ssh_extra_allow_users:
+  - hermes-runner
+  - hermes-cdp
+
+# Input: SSH from the shared management sources (server VLAN, Trusted VLAN and
+# the tailnet CGNAT range via the gateway subnet route). Widening management SSH
+# does not expose the execution accounts: hermes-runner / hermes-cdp keys carry
+# from="192.168.10.104", so only the Agent VM can use them.
+firewall_ssh_allowed_networks:
+  - 192.168.10.104/32
+  - 192.168.10.0/24
+  - 192.168.20.0/24
+  - 100.64.0.0/10
+firewall_input_allowed_tcp_ports: []
+# Egress: internet only; reject new connections to the LAN/CGNAT/link-local
+# ranges. Explicit exceptions go here (variable-driven, PRD 4.2).
+firewall_egress_restrict: true
+firewall_egress_allowed_dns: []
+firewall_egress_allowed_networks: []
+# The Runner never runs Docker, so the DNAT guard is unnecessary here.
+firewall_dnat_guard: false

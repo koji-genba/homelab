@@ -1,0 +1,230 @@
+---
+# Agent VM resident services (Hermes Gateway + Hindsight + PostgreSQL/PGroonga +
+# TEI embedding/rerank). Everything here is OS-level; the service definitions
+# live in the repo checkout at files/services/agent/stack/compose.yaml and the
+# role renders the per-host configuration around them.
+#
+# WS1 contract consumed from the agent group_vars:
+#   agent_data_mount        (/srv/agent)
+#   agent_runner_ssh_key_dir (/etc/homelab/agent/ssh)
+#   runner_management_ip, runner_user, cdp_port (shared with the runner play)
+
+# --- Deployment layout -------------------------------------------------------
+agent_stack_project_name: agent
+agent_stack_project_dir: /opt/homelab-agent
+agent_stack_env_file: /etc/homelab/agent/compose.env
+agent_stack_secrets_dir: /etc/homelab/secrets
+agent_stack_helpers_dir: /usr/local/sbin
+agent_stack_ssh_key_dir: "{{ agent_runner_ssh_key_dir | default('/etc/homelab/agent/ssh') }}"
+
+# The Hermes image drops privileges to this UID/GID (s6 stage2 hook HERMES_UID /
+# HERMES_GID). The Agent VM has no other UID 10000 user.
+agent_stack_uid: 10000
+agent_stack_gid: 10000
+
+# Data lives on the Agent VM's dedicated data disk, never on NFS.
+agent_stack_hermes_data_dir: "{{ agent_data_mount | default('/srv/agent') }}/hermes"
+agent_stack_postgres_data_dir: "{{ agent_data_mount | default('/srv/agent') }}/postgres"
+agent_stack_models_dir: "{{ agent_data_mount | default('/srv/agent') }}/models"
+
+# Repo-relative sources copied onto the host. role_path resolves on the
+# controller, whose checkout is the source of truth.
+agent_stack_repo_services_dir: "{{ role_path }}/../../../../../services/agent"
+agent_stack_compose_src: "{{ agent_stack_repo_services_dir }}/stack/compose.yaml"
+agent_stack_skills_src: "{{ agent_stack_repo_services_dir }}/hermes/skills"
+
+# --- Runtime inputs ----------------------------------------------------------
+agent_stack_timezone: "{{ agent_system_timezone | default('Asia/Tokyo') }}"
+
+# Apps VM edge reached over the LAN; the FQDNs are mapped with extra_hosts
+# because AdGuard answers them with an unreachable tailnet address.
+agent_stack_apps_lan_ip: "{{ apps_management_ip | default('192.168.10.101') }}"
+agent_stack_searxng_fqdn: searxng.kojigenba-srv.com
+agent_stack_mcp_searxng_fqdn: mcp-searxng.kojigenba-srv.com
+agent_stack_mcp_searxng_url: "https://{{ agent_stack_mcp_searxng_fqdn }}/mcp"
+
+# The single shared inference endpoint (DGX tensorfold serve). No API key, no
+# fallback provider: the endpoint is the only one.
+agent_stack_llm_base_url: http://192.168.10.51:8000/v1
+agent_stack_llm_model: glm-5.3-flash
+# Keep background extraction/consolidation/reflect off the interactive path.
+agent_stack_llm_max_concurrent: 1
+# The local GLM accepted low effort: the same strict-schema probe used 8 output
+# tokens with no reasoning text vs 69 with its default. Keep background work light.
+agent_stack_hindsight_reasoning_effort: low
+# The served window is reported as 1M, but that is not a useful per-turn budget.
+# Pin a bounded value; the runtime is text-only.
+agent_stack_llm_context_length: 131072
+agent_stack_llm_max_output_tokens: 16384
+
+# Hindsight's structured extraction (retain/consolidate/reflect) uses OpenAI-style
+# strict json_schema. The GLM endpoint accepts it: the main-side check sent a
+# strict {"type":"json_schema","json_schema":{"strict":true,...}} request once and
+# got schema-conformant JSON back (2026-10-17). Stability against Hindsight's full
+# schema is confirmed in the integration test, so the strict path is the default.
+agent_stack_hindsight_strict_schema: true
+
+# --- Embedding / rerank (TEI CPU, pinned revisions) --------------------------
+# Selected by the WS4 Japanese retrieval benchmark: ruri-v3-310m + its reranker
+# gave the best Japanese nDCG@10 (0.923) and the indirect-question and
+# multi-fact slices that matter for memory recall beat bge-m3 there. The
+# embedding model is 768-dimensional (vs bge-m3's 1024); Hindsight reads the
+# dimension from TEI, so nothing here hard-codes it.
+agent_stack_embedding_model: cl-nagoya/ruri-v3-310m
+agent_stack_embedding_revision: 18b60fb8c2b9df296fb4212bb7d23ef94e579cd3
+agent_stack_reranker_model: cl-nagoya/ruri-v3-reranker-310m
+agent_stack_reranker_revision: bb46934ee9ed09f850b9fcff17501b3ef7ddb2b3
+# WS7c: bound the CPU inference pools explicitly instead of letting Rayon see
+# all host cores behind a Docker CPU quota. Candle CPU forces runtime batch 4;
+# retain the 2048-token pair limit without shortening candidates.
+# WS14 (2026-10-17 user decision, WS13 measurements): 12-vCPU VM;
+# reranker 6 + embedding 4 leave 2 CPUs for OS/Hermes/Hindsight/DB.
+# Embedding scales with CPU; reranker barely improves above 6 (batch-size-4
+# backend limit). Caps are not reservations; full-stack latency is unmeasured.
+agent_stack_embedding_cpus: 4
+# WS16: explicit threads=4 improved both query and 32-fact retain vs unset.
+agent_stack_embedding_threads: 4
+agent_stack_reranker_cpus: 6
+agent_stack_reranker_threads: 6
+agent_stack_reranker_tokenization_workers: 6
+# ruri-v3 is an asymmetric retriever: it expects a task prefix on both sides.
+# Hindsight's TEI provider prepends these literally (Embeddings._encode_prefixed
+# via encode_query/encode_documents in engine/embeddings.py) and none of the
+# remote providers carries the distinction natively, so the client must. If the
+# models change, change these with them. Keep the trailing space: the model card
+# includes it.
+agent_stack_embedding_query_prefix: "検索クエリ: "
+agent_stack_embedding_passage_prefix: "検索文書: "
+# WS13b: retain embeds date/entity-augmented facts, not chunk bodies (except
+# chunks mode with LLM provider none). Keep 4096 for long facts/observations.
+# Hindsight uses o200k, not ruri: this is not an exact provider length bound.
+# TEI's auto-truncate remains the final guard for exceptionally long inputs.
+agent_stack_embeddings_max_input_tokens: 4096
+# The reranker scores the top candidates Hindsight retrieves. The flat default
+# (300) is far too many for a CPU cross-encoder, so the per-budget caps are set
+# explicitly; the plugin runs at recall_budget=mid. Measured rerank latency at
+# these caps is recorded in the WS7a integration report.
+# WS7a rejected MID 12 / HIGH 20: compound queries lost support. Keep
+# MID 20 / HIGH 30 and split multi-topic recalls. WS7c tunes inference threads
+# and batching without reducing these candidate pools or truncating the text.
+# WS12 (2026-10-17 user decision): retain MID 20 / HIGH 30 for quality;
+# accept the unmet 3-second rerank target. WS14: remeasure on the 12-vCPU VM.
+agent_stack_reranker_max_candidates_low: 8
+agent_stack_reranker_max_candidates_mid: 20
+agent_stack_reranker_max_candidates_high: 30
+# Local ruri calibration: a correct indirect match scored 0.000164 while an
+# unanswerable query scored 0.000491. An absolute gate cannot distinguish them.
+# Use ranking and the finite candidate budget; let the bank/SOUL evidence policy
+# reject unknown personal facts. WS7a tests fabrication separately.
+agent_stack_recall_min_reranker_score: 0.0
+# The one-shot pre-fetch container needs a resolver that answers the HF xet CDN
+# (the workstation/AdGuard path NXDOMAINs it). Runtime containers stay offline.
+agent_stack_model_fetch_dns: 1.1.1.1
+# Fetch only: never initialize TEI/Candle during provisioning. Bound even the
+# downloader so it cannot exhaust the 24 GiB VM. Image digest inspected locally.
+agent_stack_model_fetch_image: docker.io/library/python:3.13-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f
+agent_stack_model_fetch_memory: 1g
+agent_stack_pinned_models:
+  - name: embedding
+    model: "{{ agent_stack_embedding_model }}"
+    revision: "{{ agent_stack_embedding_revision }}"
+  - name: reranker
+    model: "{{ agent_stack_reranker_model }}"
+    revision: "{{ agent_stack_reranker_revision }}"
+
+# --- Secrets -----------------------------------------------------------------
+# Plaintext schema: files/infrastructure/secrets/agent/runtime.yaml.example.
+# Decrypted on the controller only; the VM never holds the age key.
+agent_stack_runtime_secrets_file: "{{ playbook_dir }}/../../secrets/agent/runtime.sops.yaml"
+
+# --- Runner VM (Hermes terminal backend over SSH) ----------------------------
+agent_stack_runner_host: "{{ runner_management_ip | default('192.168.10.105') }}"
+agent_stack_runner_user: "{{ runner_user | default('hermes-runner') }}"
+agent_stack_runner_workspace: /srv/agent-work
+agent_stack_cdp_port: "{{ cdp_port | default(9222) }}"
+agent_stack_cdp_user: "{{ cdp_user | default('hermes-cdp') }}"
+agent_stack_cdp_runner_target: "{{ agent_stack_cdp_user }}@{{ agent_stack_runner_host }}"
+
+# --- Discord channel routing ------------------------------------------------
+# Values come from the Agent SOPS bundle (secrets.yml); the defaults keep the
+# role renderable for --syntax-check / ansible-lint without the bundle.
+agent_stack_discord_allowed_channels: ""
+agent_stack_discord_free_response_channels: ""
+agent_stack_discord_home_channel: ""
+
+# --- Pinned images -----------------------------------------------------------
+# Provenance references; the running services use the pins in Compose/Dockerfiles.
+# Model fetching uses the lightweight Python image configured above.
+agent_stack_tei_image: ghcr.io/huggingface/text-embeddings-inference@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
+agent_stack_hindsight_image: ghcr.io/vectorize-io/hindsight@sha256:f284d0d63e92e993686e18c15f6e4a221cd80fdfd47625a7c5f6cd8568078440
+agent_stack_hermes_image: docker.io/nousresearch/hermes-agent@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7
+agent_stack_hindsight_integration_revision: d952b6e655fccab4581ee0722b51c5f103873d12
+
+# --- Hindsight bank policy ---------------------------------------------------
+# One fixed bank shared by every Discord channel. reflect_mission steers the
+# synthesis, retain_mission steers extraction, disposition biases judgement.
+agent_stack_bank_id: personal
+agent_stack_bank_reflect_mission: >-
+  You are the long-term memory of a single person's personal assistant. Recall
+  what the person explicitly stated as fact and keep it distinct from anything
+  the assistant inferred. Never present an inference as something the person
+  said. If the evidence is missing or contradictory, say so instead of guessing.
+agent_stack_bank_retain_mission: >-
+  Extract durable facts, preferences, decisions, commitments and their status,
+  each with its source and time. Record whether a statement was made explicitly
+  by the person or inferred from context, and keep the two apart. Never invent
+  details. Ignore small talk, transient logistics and anything the person asked
+  not to remember. In dialogue, retain personal facts only from user messages.
+  Assistant replies, recalled summaries and guesses are not independent evidence
+  about the user; do not promote them to user facts or corrections. Preserve
+  names exactly. Never transfer a date or correction between different events.
+# A recalled assistant reply must not become evidence about the user on retain.
+# WS7a replay: mission alone retained a fabricated name; custom mode rejected it
+# while preserving user-authored facts. This is prompt guidance, not enforcement.
+agent_stack_bank_retain_extraction_mode: custom
+agent_stack_bank_retain_custom_instructions: >-
+  Extract durable personal facts only from explicit assertions in messages with
+  role user (User:). A user's question asking the assistant to recall something
+  is not an assertion of its answer. Ignore ALL personal claims appearing only
+  in role assistant (Assistant:) messages, even claims saying they were already
+  remembered or confirmed by the user. If the user only asks a question and
+  supplies no new fact, return {"facts": []}. Preserve user names, event
+  identities, dates and uncertainty exactly. Resolve relative dates using Event
+  Date. Never assign a date from one event to another. Never invent aliases,
+  schedule history, reasons, or a missing year.
+agent_stack_bank_observations_mission: >-
+  Consolidate only source-supported personal facts. Preserve speaker attribution,
+  exact names, event identity and uncertainty. Assistant guesses or summaries are
+  not user confirmations. Do not invent aliases, intermediate schedule changes,
+  causal explanations, or missing calendar years. Keep contradictory claims
+  separate with their sources; repetition alone does not establish truth.
+agent_stack_bank_disposition_skepticism: 4
+agent_stack_bank_disposition_literalism: 4
+agent_stack_bank_disposition_empathy: 3
+
+# --- Weekly review -----------------------------------------------------------
+agent_stack_weekly_review_name: weekly-review
+agent_stack_weekly_review_schedule: "0 9 * * 1"
+agent_stack_weekly_review_skill: weekly-review
+agent_stack_weekly_review_prompt: >-
+  Run the weekly review skill over the last seven days of memory. Report open
+  items, changes, and contradictions with evidence. If nothing changed, answer
+  with [SILENT] and nothing else.
+
+# --- Compose wrapper ---------------------------------------------------------
+agent_stack_compose_wait_timeout: 600
+# Shared prefix for ad-hoc `docker compose` invocations against the running
+# project (bank policy, cron registration). The memory-db env file is passed so
+# the interpolated HINDSIGHT_API_DATABASE_URL resolves the same way the wrapper
+# resolves it.
+agent_stack_compose_argv_prefix:
+  - docker
+  - compose
+  - --project-name
+  - "{{ agent_stack_project_name }}"
+  - --env-file
+  - "{{ agent_stack_env_file }}"
+  - --env-file
+  - "{{ agent_stack_secrets_dir }}/memory-db.env"
+  - --file
+  - "{{ agent_stack_project_dir }}/compose.yaml"

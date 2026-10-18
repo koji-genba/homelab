@@ -1,0 +1,86 @@
+---
+# Headless Chromium with a loopback-only CDP endpoint, run by systemd as a
+# dedicated system user (PRD 4.2).
+- name: Ensure the headless browser system account exists
+  ansible.builtin.user:
+    name: "{{ browser_user }}"
+    comment: Headless Chromium account
+    home: "{{ browser_home }}"
+    create_home: true
+    system: true
+    shell: /usr/sbin/nologin
+    password_lock: true
+
+- name: Install Chromium
+  ansible.builtin.apt:
+    name: chromium
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# Chromium's own sandbox creates user/pid/net namespaces, which requires
+# unprivileged user namespaces. Debian exposes a sysctl toggle for this; some
+# hardening baselines turn it off. We deliberately ENABLE it rather than fail,
+# so a single apply leaves the sandbox working; the task is a no-op when the
+# value is already 1, and is skipped on kernels without the toggle (mainline
+# kernels allow unprivileged user namespaces by default).
+- name: Check for the Debian unprivileged user namespace sysctl
+  ansible.builtin.stat:
+    path: /proc/sys/kernel/unprivileged_userns_clone
+  register: runner_userns_sysctl
+
+- name: Enable unprivileged user namespaces for the Chromium sandbox
+  ansible.posix.sysctl:
+    name: kernel.unprivileged_userns_clone
+    value: '1'
+    sysctl_file: /etc/sysctl.d/99-homelab-chromium-sandbox.conf
+    sysctl_set: true
+    state: present
+    reload: true
+  when: runner_userns_sysctl.stat.exists
+
+- name: Read the effective unprivileged user namespace setting
+  ansible.builtin.slurp:
+    src: /proc/sys/kernel/unprivileged_userns_clone
+  register: runner_userns_effective
+  when: runner_userns_sysctl.stat.exists
+
+- name: Fail when the Chromium sandbox cannot use user namespaces
+  ansible.builtin.assert:
+    that:
+      - (runner_userns_effective.content | b64decode | trim) == '1'
+    fail_msg: >-
+      kernel.unprivileged_userns_clone is not 1 after the sysctl task, so
+      Chromium's namespace sandbox cannot start (it needs unprivileged user
+      namespaces). Investigate a newer LSM/kernel lockdown policy on the Runner.
+  when: runner_userns_sysctl.stat.exists
+
+- name: Install the headless Chromium service
+  ansible.builtin.template:
+    src: hermes-chromium.service.j2
+    dest: /etc/systemd/system/hermes-chromium.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload systemd
+
+- name: Enable and start the headless Chromium service
+  ansible.builtin.systemd:
+    name: hermes-chromium.service
+    daemon_reload: true
+    enabled: true
+    state: started
+
+# Surface a broken sandbox/CDP binding at apply time instead of leaving a
+# silently dead service for WS2 to discover. /json/version is the standard CDP
+# readiness endpoint; it is only reachable on the Runner's own loopback.
+- name: Wait for the Chromium CDP endpoint to answer on loopback
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ cdp_port }}/json/version"
+    status_code: 200
+    return_content: false
+  register: runner_cdp_probe
+  until: (runner_cdp_probe.status | default(0)) == 200
+  retries: 30
+  delay: 2
+  changed_when: false

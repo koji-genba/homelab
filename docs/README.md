@@ -25,6 +25,8 @@
 - [SearXNG / MCP運用](operations/searxng.md): 検索とMCPの構成、利用側設定、反映と検証。
 - [sparkDash運用](operations/sparkdash.md): DGX remote monitorのsecret、unit登録、永続化と更新。
 - [DGX Sparkストレージ運用](operations/dgx-storage.md): モデル・学習データ用NFSのpve1、Apps VM、DGX側手順と反映記録。
+- [Hermes Agent運用](operations/hermes-agent.md): Agent VM / Runner VMの構成、初回構築、設定・image・secretの更新、ローカル計測・模擬Runner試験と残る品質/速度の制約。
+- [Hermes Agentバックアップ運用](operations/hermes-agent-backup.md): 日次バックアップ、リストア、エクスポート、記憶再構築、健康確認とpve1側の準備。
 
 ## ストレージ・性能
 

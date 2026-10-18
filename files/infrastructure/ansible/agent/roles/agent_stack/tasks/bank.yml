@@ -1,0 +1,14 @@
+---
+# The Hindsight plugin reads bank_mission / bank_retain_mission but never applies
+# them to the bank, so the policy is pushed through the bank API instead.
+- name: Read the rendered bank policy helper
+  ansible.builtin.slurp:
+    src: "{{ agent_stack_helpers_dir }}/homelab-agent-bank-config.py"
+  register: agent_stack_bank_helper
+
+- name: Apply the Hindsight bank policy
+  ansible.builtin.command:
+    argv: "{{ agent_stack_compose_argv_prefix + ['exec', '-T', 'hindsight', 'python3', '-'] }}"
+    stdin: "{{ agent_stack_bank_helper.content | b64decode }}"
+  register: agent_stack_bank
+  changed_when: "'bank-config: changed' in agent_stack_bank.stdout"

@@ -1,0 +1,56 @@
+name: Build memory DB image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - files/services/images/memory-db/**
+      - .github/workflows/memory-db-image.yml
+  pull_request:
+    paths:
+      - files/services/images/memory-db/**
+      - .github/workflows/memory-db-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build memory DB image without publishing
+        run: |
+          set -eu
+          docker buildx build --platform linux/amd64 \
+            --file files/services/images/memory-db/Dockerfile \
+            files/services/images/memory-db
+  build:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build and publish memory DB image
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker buildx build --platform linux/amd64 --push \
+            --tag ghcr.io/koji-genba/homelab-memory-db:pg17 \
+            --file files/services/images/memory-db/Dockerfile \
+            files/services/images/memory-db
+          digest="$(docker buildx imagetools inspect ghcr.io/koji-genba/homelab-memory-db:pg17 | awk '/^Digest:/ {print $2; exit}')"
+          printf '%s\n' "$digest" | grep -Eq '^sha256:[0-9a-fA-F]{64}$'
+          {
+            echo '## memory DB image'
+            echo
+            echo 'The Agent Compose file must use this immutable digest:'
+            echo
+            echo "\`ghcr.io/koji-genba/homelab-memory-db@$digest\`"
+          } >> "$GITHUB_STEP_SUMMARY"

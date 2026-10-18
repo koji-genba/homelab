@@ -1,0 +1,60 @@
+#!/bin/sh
+# Start the Agent VM Compose project with the digest discipline the Apps VM
+# helper enforces: refuse to run while a self-built image still carries the
+# ALL-ZERO placeholder, and require every image to be pinned to a 64-hex digest.
+#
+# Installed by the Ansible role agent_stack at
+# {{ agent_stack_helpers_dir }}/homelab-agent-compose-up.
+#
+# Usage:
+#   homelab-agent-compose-up                # up -d --wait (includes cdp-tunnel)
+#   homelab-agent-compose-up config         # docker compose config --quiet
+set -eu
+
+COMPOSE_FILE={{ agent_stack_project_dir }}/compose.yaml
+PROJECT_NAME={{ agent_stack_project_name }}
+ENV_FILE={{ agent_stack_env_file }}
+SECRET_ENV_FILE={{ agent_stack_secrets_dir }}/memory-db.env
+WAIT_TIMEOUT={{ agent_stack_compose_wait_timeout }}
+
+test -f "$COMPOSE_FILE" || {
+    echo "homelab-agent-compose-up: missing $COMPOSE_FILE" >&2
+    exit 1
+}
+test -f "$ENV_FILE" || {
+    echo "homelab-agent-compose-up: missing $ENV_FILE" >&2
+    exit 1
+}
+test -f "$SECRET_ENV_FILE" || {
+    echo "homelab-agent-compose-up: missing $SECRET_ENV_FILE" >&2
+    exit 1
+}
+
+if grep -Eq '@sha256:0{64}([[:space:]]|$)' "$COMPOSE_FILE"; then
+    echo "homelab-agent-compose-up: $COMPOSE_FILE still pins a self-built image to the ALL-ZERO placeholder." >&2
+    echo "Publish the image workflow, copy the digest from the job summary, and retry." >&2
+    exit 1
+fi
+
+unpinned=$(grep -E '^[[:space:]]*image:' "$COMPOSE_FILE" | grep -vE '@sha256:[0-9a-f]{64}[[:space:]]*$' || true)
+if [ -n "$unpinned" ]; then
+    echo "homelab-agent-compose-up: images are not digest-pinned:" >&2
+    printf '%s\n' "$unpinned" >&2
+    exit 1
+fi
+
+compose() {
+    docker compose \
+        --project-name "$PROJECT_NAME" \
+        --env-file "$ENV_FILE" \
+        --env-file "$SECRET_ENV_FILE" \
+        --file "$COMPOSE_FILE" \
+        "$@"
+}
+
+if [ "${1:-}" = "config" ]; then
+    shift
+    compose config --quiet "$@"
+else
+    compose "$@" up -d --wait --wait-timeout "$WAIT_TIMEOUT"
+fi

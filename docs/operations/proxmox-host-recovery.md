@@ -359,6 +359,8 @@ VMごとの再構築性とbackupの方針は[現行アーキテクチャ](../arc
 | Apps VM | 101 | `192.168.10.101` | DNS、SMB、HTTPSとComposeアプリ | `files/infrastructure/terraform/apps-vm/` / [Apps VM復旧](apps-vm-recovery.md) | Debian 13 cloud imageを直接import |
 | Tailscale gateway | 102 | `192.168.10.102` | 宅外からLAN機器へ入る経路、exit node | [files/infrastructure/terraform/tailscale-gateway/](../../files/infrastructure/terraform/tailscale-gateway/README.md) | template 9000のfull clone |
 | ElastiFlow | 103 | `192.168.10.103` | フロー収集・保存・可視化 | [files/infrastructure/terraform/elastiflow/](../../files/infrastructure/terraform/elastiflow/README.md) | template 9000のfull clone |
+| Hermes Agent VM | 104 | `192.168.10.104` | Hermes常駐エージェント、Hindsight記憶、記憶DB、TEI（tailnet外） | [files/infrastructure/terraform/agent-vm/](../../files/infrastructure/terraform/agent-vm/README.md) / [Hermes Agent運用](hermes-agent.md) | Debian 13 cloud imageを直接import |
+| Hermes Runner VM | 105 | `192.168.10.105` | コマンド実行と隔離ブラウザ（tailnet外、Dockerなし） | [files/infrastructure/terraform/runner-vm/](../../files/infrastructure/terraform/runner-vm/README.md) / [Hermes Agent運用](hermes-agent.md) | Debian 13 cloud imageを直接import |
 | stashPadDev | 111 | `192.168.10.41` | 開発用。本番復旧の対象外 | [files/infrastructure/terraform/stashpad-dev/](../../files/infrastructure/terraform/stashpad-dev/README.md) | template 9000のfull clone |
 
 2026-10-12にpve1の`qm list`で次を確認した。名前・メモリ・boot diskは各Terraform定義
@@ -372,6 +374,9 @@ VMごとの再構築性とbackupの方針は[現行アーキテクチャ](../arc
 | 103 | elastiflow | running | 32768 MB | 128 G |
 | 111 | stashPadDev | running | 16384 MB | 30 G |
 
+VMID 104 / 105（Hermes Agent / Runner）は2026-10-12時点では存在せず、上の`qm list`確認記録には含まれない。
+復旧時の宣言値は各Terraformルート（`main.tf`と`variables.tf`）を正とする。
+
 1. Apps VMを戻す。NFSが揃ってから[復旧フロー](apps-vm-recovery.md#復旧フロー)に従い、
    `make terraform-plan` / `make terraform-apply`、`make ansible-apply`を使う。
    [tailnet再登録](apps-vm-tailnet.md#現在の手順apps-vmを再構築再登録するとき)を含み、
@@ -381,7 +386,12 @@ VMごとの再構築性とbackupの方針は[現行アーキテクチャ](../arc
    gatewayをApps VMより先に戻す。Apps VMサービスへの直接tailnet接続はgatewayを経由しない。
 3. ElastiFlowを戻す。templateからVMを作成した後、READMEの`install.sh`、dashboard、受信確認を行う。
    router側のcollector定義は`files/infrastructure/network/config.txt`で確認する。
-4. 開発作業を再開する場合だけstashPadDevを戻す。
+4. エージェントを戻す。Agent VM / Runner VMのVM定義はTerraform、OSとサービスはAnsibleで再構築し、
+   記憶とセッションはpve1の専用NFS exportへ取った日次バックアップから戻す。復号identityは運用者が
+   管理端末で与える。手順は[Hermes Agent運用](hermes-agent.md)と
+   [Hermes Agentバックアップ運用](hermes-agent-backup.md)を正とする。Proxmoxのtoken/ACLは他のVMと同様に
+   手動で用意する。
+5. 開発作業を再開する場合だけstashPadDevを戻す。
 
 gateway等のraw apply後の`make state-backup`は各READMEに従う。
 既存resourceと復元stateを照合し、意図しないdestroy / replaceがあるplanを適用しない。
@@ -462,3 +472,8 @@ KeePassXCや運用記録に保存して復旧時の照合元にする。
 exportは再構築時にmarkerとともに再照合する。
 
 採取できない項目は未確認として記録し、旧版の値で補わない。
+
+Hermes Agentについて、2026-10-17のローカル試験では暗号化scratch restoreとDB復元を確認したが、
+VM初回構築・OS reboot・本番DR・Runner/NFSは実機未検証である。ローカルの品質再試験では主要閾値を満たしたが、
+創作1件とrerank速度の残課題があり、
+この復旧手順が通しで検証済みという意味ではない。詳細は[Hermes Agent運用](hermes-agent.md)を参照する。

@@ -53,15 +53,20 @@ graph TB
         end
         GW["tailscale-gateway VM .102<br/>exit node + 192.168.10.0/24 route"]
         EF["elastiflow VM .103"]
+        AG["Hermes Agent VM .104 (VMID 104)<br/>Hermes + Hindsight + memory-db + TEI<br/>Ansible-only, not reconciled"]
+        RN["Hermes Runner VM .105 (VMID 105)<br/>exec account + headless Chromium<br/>off-tailnet, egress-restricted"]
         Dev["stashPadDev VM .41 (out of scope)"]
     end
-    DGX["DGX Spark .51 (vLLM :8000) / .52"]
+    DGX["DGX Spark .51 (OpenAI API :8000, tensorfold serve) / .52"]
     HC[Healthchecks.io dead-man]
     Discord[Discord alerts]
 
     Make --> Toolbox
     Toolbox -->|terraform apply| PVE
     Toolbox -->|ansible apply + sops decrypt| Apps
+    Toolbox -->|"ansible apply (agent root, manual)"| AG
+    AG -->|"SSH + browser CDP tunnel"| RN
+    AG -->|"shared GLM endpoint :8000"| DGX
     AgeKey --> Toolbox
     Make -->|host git push, toolbox commits only| SB
     Main --> Timer
@@ -91,28 +96,33 @@ homelab/
 │       ├── caddy-image.yml       # build/push ghcr.io/koji-genba/caddy-cloudflare
 │       ├── toolbox-image.yml     # build/push ghcr.io/koji-genba/homelab-toolbox:1.0.1
 │       ├── sparkdash-image.yml   # PR: no-push validate; main: build/push ghcr.io/koji-genba/sparkdash:2.31.0 (digest in job summary)
+│       ├── hermes-agent-image.yml  # build/push ghcr.io/koji-genba/homelab-hermes-agent (Hermes base + Hindsight provider; digest in job summary)
+│       ├── memory-db-image.yml     # build/push ghcr.io/koji-genba/homelab-memory-db (PostgreSQL 17 + pgvector + PGroonga)
 │       └── stashpad-staging-image.yml  # hourly: bump staging digest, commit direct to main
 ├── docs/                         # (~126k tokens at the full-map baseline; Japanese except this map)
 │   ├── README.md                 # entry point: current design, operations, decisions, history
 │   ├── CODEBASE_MAP.md            # code navigation (this document)
-│   ├── adr/                      # 0001-0007 + README (decision log)
+│   ├── adr/                      # 0001-0008 + README (decision log)
 │   ├── architecture/target-state.md  # current design + unmet goals
 │   ├── network/target-zones.md    # current network specification
 │   ├── operations/               # application-lifecycle, apps-vm-recovery, apps-vm-tailnet, dgx-storage,
-│   │                             # homepage, nfs-export, open-webui, proxmox-host-recovery, searxng, sparkdash,
-│   │                             # tiered-storage, smb-performance-troubleshooting
+│   │                             # hermes-agent, hermes-agent-backup, homepage, nfs-export, open-webui,
+│   │                             # proxmox-host-recovery, searxng, sparkdash, tiered-storage, smb-performance-troubleshooting
 │   └── archive/                  # README + frozen migration records, pre-migration audit/inventory,
 │                                 # ix-acl-stateful-runbook, proxmox-rebuild
 ├── files/
 │   ├── infrastructure/
 │   │   ├── ansible/apps/         # site.yml + 8 roles + group_vars/inventory (+ *.example)
-│   │   ├── terraform/            # apps-vm, tailscale (CI-validated); elastiflow, tailscale-gateway, stashpad-dev
+│   │   ├── ansible/agent/        # Agent/Runner VM OS root: site.yml, inventories, group_vars/{all,agent,runner}, roles
+│   │   │                         #   (common, docker, firewall, agent_storage, agent_stack, agent_ops, runner)
+│   │   ├── terraform/            # apps-vm, tailscale, agent-vm, runner-vm (CI-validated); elastiflow, tailscale-gateway, stashpad-dev
 │   │   ├── network/              # README + config.txt (annotated IX2215 startup-config copy)
 │   │   ├── storage/              # mover.sh + mover.logrotate (run on pve1, not in VM)
-│   │   └── secrets/              # runtime.sops.yaml (encrypted), runtime.yaml.example, README
+│   │   └── secrets/              # runtime.sops.yaml (encrypted), runtime.yaml.example, README, agent/ (agent bundle)
 │   ├── services/
 │   │   ├── compose/<project>/    # 11 projects: edge dns samba stashpad-prod stashpad-staging sillytavern open-webui searxng sparkdash homepage monitoring (+ .env.example, README)
-│   │   └── images/               # caddy-cloudflare/Dockerfile, sparkdash/Dockerfile (custom images, built by CI)
+│   │   ├── agent/                # Hermes stack, OUTSIDE the Apps reconcile scan path: stack/compose.yaml (project `agent`) + hermes/skills/
+│   │   └── images/               # caddy-cloudflare/Dockerfile, sparkdash/Dockerfile, hermes-agent/Dockerfile, memory-db/Dockerfile (custom images, built by CI)
 │   └── tools/homelab-toolbox/    # Dockerfile, entrypoint.sh, README (pinned management toolbox)
 └── scripts/                      # sh helpers (state backup/restore, validation) + scripts/tests/*-fixture.sh
 ```
@@ -136,10 +146,12 @@ Module token estimates were measured on 2026-10-16 with the Cartographer scanner
 | Terraform apps-vm | `terraform-init`, `terraform-fmt`, `terraform-validate`, `terraform-plan`, `terraform-apply` |
 | Tailscale (manual, import-first) | `terraform-validate-tailscale`, `tailscale-init`, `tailscale-acl-preflight`, `tailscale-plan`, `tailscale-apply`, `tailscale-import-core`, `tailscale-import-acl`, `tailscale-import-dns`, `tailscale-import-router` |
 | Ansible | `ansible-lint`, `ansible-check`, `ansible-apply` |
-| CI fixtures | `ansible-bootstrap-paths-test`, `terraform-apps-vm-lifecycle-test`, `toolbox-uid-test`, `cloud-init-test`, `compose-config`, `adguard-config-check`, `gatus-config-check`, `compose-reconcile-fixture`, `mover-test`, `shellcheck`, `secrets-scan`, `state-backup-test`, `state-restore-test`, `state-backup-preflight-test`, `tailscale-acl-path-test` |
+| Ansible, Hermes Agent/Runner root | `ansible-lint-agent`, `ansible-check-agent` (CI); `ansible-apply-agent` (manual, live VMs) |
+| Terraform agent-vm / runner-vm | `terraform-validate-agent-vm`, `terraform-validate-runner-vm` (CI, `-backend=false`); per-root `terraform-plan` / `terraform-apply` via `TERRAFORM_ROOT` |
+| CI fixtures | `ansible-bootstrap-paths-test`, `terraform-apps-vm-lifecycle-test`, `toolbox-uid-test`, `cloud-init-test`, `compose-config`, `adguard-config-check`, `gatus-config-check`, `compose-reconcile-fixture`, `mover-test`, `shellcheck`, `secrets-scan`, `state-backup-test`, `state-restore-test`, `state-backup-preflight-test`, `tailscale-acl-path-test`, `agent-compose-config`, `agent-vm-cloud-init-test`, `runner-vm-cloud-init-test`, `terraform-agent-runner-vm-lifecycle-test`, `runner-privilege-fixture`, `runner-firewall-fixture`, `agent-runner-scope-fixture`, `agent-dnat-guard-fixture`, `agent-backup-fixture`, `agent-healthcheck-fixture`, `agent-restore-fixture`, `agent-rebuild-fixture`（restore fixtureからmodel-fetch/ops-cleanup/ops-behaviorも実行） |
 | Not in CI | `preflight` |
 | Ops | `state-backup`, `state-backup-push` (alias), `state-backup-preflight`, `state-restore`, `rollback-app` |
-| Secrets | `secrets-encrypt` (needs `AGE_RECIPIENT`, refuses to overwrite), `secrets-decrypt-check` (needs `AGE_IDENTITY_FILE`) |
+| Secrets | `secrets-encrypt` (needs `AGE_RECIPIENT`, refuses to overwrite), `secrets-decrypt-check` (needs `AGE_IDENTITY_FILE`), `secrets-encrypt-agent` / `secrets-decrypt-check-agent` (the `secrets/agent/runtime.sops.yaml` bundle) |
 
 `validate.yml` builds the local toolbox tag, but subsequent toolbox checks still run the pinned `TOOLBOX_IMAGE`; to test a local build, set `TOOLBOX_IMAGE` to the `TOOLBOX_BUILD_IMAGE` tag. `ansible-check` is syntax-check only; `preflight` statically checks `APPS_MANAGEMENT_IP`/`APPS_VMID` against the VLAN-10 convention, without checking that either is free.
 
@@ -168,6 +180,8 @@ Module token estimates were measured on 2026-10-16 with the Cartographer scanner
 **Reconcile** (`homelab-app-reconcile`): skips if `/var/lib/homelab/reconcile.paused`; refuses dirty checkout; maps changed paths → projects (`files/services/compose/<p>/*`; `.env.example` → all, including `homepage`; `images/caddy-cloudflare/*` → `edge`; `images/sparkdash/*` → `sparkdash`); validates from `git archive` of the new SHA; `merge --ff-only`; `HOMELAB_FORCE_RECREATE=true homelab-compose-up <p>`; logs to `/var/lib/homelab/deployments.log`; failures kept in `reconcile.pending`. **Never applies** infra, secrets, firewall, AdGuard config or `compose.env` — those need `make ansible-apply`.
 **Dead-man ping** (every 60 s) only fires if mount guard, apps service, tailscaled+IP, rootfs %, clean checkout, Samba write probe, at least one running service in each of the 11 projects listed in `healthchecks-ping.sh.j2` (including Homepage), and Caddy probe pass.
 
+**Hermes Agent/Runner OS root (`files/infrastructure/ansible/agent/`)**: a separate playbook with hosts `agent` (VM 104) and `runner` (VM 105), inventory `inventory/hosts.yml` (user `deploy`), shared vars `group_vars/{all,agent,runner}.yml`, and `ansible.cfg` setting `roles_path = roles:../apps/roles` so the generic `docker` role is reused from the Apps root. **Applied by hand** (`make ansible-apply-agent`), never by CI. Agent role order: `common` → `docker` → `firewall` → `agent_storage` → `agent_stack` → `agent_ops`; the Runner play runs after and adopts the Runner/CDP SSH public keys the Agent play generated (`agent_runner_ssh_public_key`, `agent_cdp_tunnel_ssh_public_key`) via `hostvars`. `agent_stack` (WS2) owns the Compose project, Hermes config and Hindsight wiring; `agent_ops` (WS5) owns backup/restore/export/rebuild and the five-minute health check (see [the runbook](operations/hermes-agent-backup.md)). The Runner host enforces `firewall_egress_restrict` (internet only). The Agent host has no published ports.
+
 ### 3.3 Terraform (`files/infrastructure/terraform/`) — ~26.8k tokens
 
 State uses the **default local backend per root** (`terraform.tfstate`, gitignored, mode 0600): local state locking applies; there is no shared remote backend. Recovery copy: `make state-backup` age-encrypts every `*.tfstate` to branch `state-backup`.
@@ -177,6 +191,8 @@ State uses the **default local backend per root** (`terraform.tfstate`, gitignor
 | `apps-vm` | bpg/proxmox 0.112.0 | Apps VM (VMID 101, 4c/12G/40G, `192.168.10.101`, VLAN 10) from pinned Debian trixie cloud image + cloud-init snippet | `ignore_changes=[initialization[0].user_data_file_id]` (guarded by a CI fixture); optional VLAN-11 NIC `legacy_service_nic=false`; needs ssh-agent for root@pve ops |
 | `tailscale` | tailscale 0.29.2 | tailnet ACL + DNS (AdGuard nameserver `100.86.147.127`, `use_with_exit_node`) + optional subnet-router | gated by `manage_tailnet`, `enable_adguard_dns`, `adguard_ready`, `acl_policy_file`; ACL/DNS are imported, router is not; DNS has `prevent_destroy` |
 | `tailscale-gateway` | bpg/proxmox ~>0.81 | VM 102, `192.168.10.102`, template-clone (VMID 9000) | `tailscale up` is manual (issue #29); route approval manual |
+| `agent-vm` | bpg/proxmox | Hermes Agent VM (VMID 104, initial 12 vCPU / 24 GiB / 40 GiB OS + 100 GiB data disk, `192.168.10.104`, VLAN 10; 2026-10-17 WS14 user decision) from its own pinned Debian 13 cloud image | not on the tailnet; `ignore_changes=[initialization[0].user_data_file_id]`; Proxmox user/role/ACL manual; Ansible-only runtime |
+| `runner-vm` | bpg/proxmox | Hermes Runner VM (VMID 105, 8 vCPU / 16 GiB / 40 GiB OS + 150 GiB work disk, `192.168.10.105`, VLAN 10) | separate cloud image `file_name`; no Docker, no Discord token/memory DB/management keys |
 | `elastiflow` | bpg/proxmox ~>0.81 | VM 103, `192.168.10.103`; `install.sh` sets up unauthenticated ES/Kibana + flow collector | sFlow collector `:6343` |
 | `stashpad-dev` | bpg/proxmox ~>0.81 | VM 111 `.41` (out of scope) | Gitignored per-root state/tfvars |
 
@@ -188,7 +204,7 @@ Older roots (`elastiflow`, `tailscale-gateway`, `stashpad-dev`) full-clone `temp
 
 See [rebuildability and backup policy](architecture/target-state.md#再構築性とbackupの方針) for the VM assessment: the operator decided on 2026-10-12 that no VM will be backed up. For ElastiFlow and stashPadDev, this reflects acceptance of their loss, rather than repo rebuildability; the linked policy records the reasons and handling of their data. Remaining rebuild gaps are tracked in [#87](https://github.com/koji-genba/homelab/issues/87). The policy assumes the required recovery material and NFS data are available; protection of data on pve1's ZFS pools is a separate concern.
 
-Only `apps-vm` and `tailscale` are fmt/validated in CI and tracked by Dependabot.
+Only `apps-vm`, `tailscale`, `agent-vm` and `runner-vm` are fmt/validated in CI. The agent/runner roots use `-backend=false` (no remote state access) and are tracked by Dependabot separately.
 
 ### 3.4 Compose stacks (`files/services/compose/`) — ~13.9k tokens including configs; `files/services/images/` — ~1.5k tokens
 
@@ -209,6 +225,8 @@ Conventions: project name `homelab-<dir>`; all join external network `homelab_fr
 
 `mcp-searxng` uses stateless Streamable HTTP and trusts one proxy hop (`MCP_HTTP_TRUST_PROXY=1`); keep `MCP_HTTP_ALLOW_PRIVATE_URLS` unset so `web_url_read` keeps rejecting private/loopback/tailnet targets.
 
+**Hermes Agent stack (`files/services/agent/`)** is deliberately **outside** `files/services/compose/`: project `agent`, services `memory-db`, `embedding`, `reranker`, `hindsight`, `hermes` plus a `cdp-tunnel` sidecar, all digest-pinned, on a private bridge with no published port and **`restart: unless-stopped`** (no reconciler, state on the VM's data disk). `scripts/agent-compose-config.sh` (`make agent-compose-config`) renders it with synthetic env/secret files and re-checks the digest pins. Custom images `homelab-hermes-agent` (Hermes base + vendored Hindsight provider) and `homelab-memory-db` (PostgreSQL 17 + pgvector + PGroonga) are built by `hermes-agent-image.yml` / `memory-db-image.yml`, which print the digest for a human to paste into the compose file. The stack is rendered and started by the `agent_stack` role; see [Hermes Agent operations](operations/hermes-agent.md).
+
 **Caddy routes** (all `*.kojigenba-srv.com`): `dns.` (trusted-only), `prod.`/`prod.stashpad.`, `staging.`/`staging.stashpad.` (open), `status.` (trusted + basic auth), `homepage.` (trusted + the same Gatus basic auth credentials), `sillytavern.`, `openwebui.` (open), `searxng.` and `mcp-searxng.` (trusted-only), `sparkdash.` (`import admin_networks` → `sparkdash:5555`; trusted-only, **deliberately no Caddy `basic_auth`** so the app's own `Authorization: Bearer` header passes).
 
 **Homepage config** (`files/services/compose/homepage/config/`): `settings.yaml` defines layout/display and Quick Launch; `services.yaml` defines the 6 groups (matched by `settings.yaml`), links, `siteMonitor` targets and Gatus widget; `widgets.yaml` defines resources, date/time and SearXNG search; `bookmarks.yaml` is an empty list. `custom.css` styles copy cards and `custom.js` implements copying SMB/NFS/SSH destinations and adds those cards to search results. See [Homepage operations](operations/homepage.md).
@@ -217,20 +235,22 @@ Conventions: project name `homelab-<dir>`; all join external network `homelab_fr
 
 `runtime.yaml` (plaintext, gitignored) → `make secrets-encrypt` → `runtime.sops.yaml` (age, committed) → `make ansible-apply` decrypts on the **admin terminal** → 0600 files on the VM. Required keys: `cloudflare.api_token`, `adguard.{username,password_hash}`, `gatus.{discord_webhook_url,basic_auth_hash}`, `samba.koji-genba-password`, `sillytavern.{username,password}`, `healthchecks.ping_url`, `sparkdash.token` (required and validated as 64 hex characters only when `application_cutover_confirmed=true`; pre-cutover bootstrap skips the secrets role), `sparkdash.ssh_private_key` (optional; the VM-side key file is deleted when it is omitted/empty). Placement: `/etc/homelab/secrets/sparkdash.env` (`SPARKDASH_TOKEN=`, root:root 0600); `/etc/homelab/secrets/sparkdash-ssh/` always created (10001:10001, 0500; bind-mounted read-only with `create_host_path: false`) holding `id_ed25519` (10001:10001, 0400) when a key is supplied. Any secret change flips `secrets_runtime_changed` → `homelab-compose-up all` with force-recreate (all projects, incl. DNS and Samba). Edit the bundle for these keys with `sops set` inside the digest-pinned toolbox, then `chmod 0600` since `sops set` rewrites the file 0644 (not `make secrets-encrypt`: the Makefile and runbook say it refuses to overwrite an existing `runtime.sops.yaml`). `searxng.env` remains the only secret not in SOPS. Apps VM Proxmox and Tailscale credentials live in KeePassXC and enter only as environment variables; `elastiflow`, `tailscale-gateway` and `stashpad-dev` instead take Proxmox username/password variables for API and SSH from gitignored tfvars (open [#28](https://github.com/koji-genba/homelab/issues/28), also in §8). One age key protects both SOPS secrets and state backups (shared boundary).
 
+**Agent bundle** (`files/infrastructure/secrets/agent/runtime.sops.yaml`, example `agent/runtime.yaml.example`): a second, separate SOPS/age bundle for the Agent VM. Keys: `discord.{bot_token,allowed_users,allowed_channels,free_response_channels,home_channel}` and `monitoring.{operator_webhook_url,deadman_ping_url}`. The PostgreSQL password and the Runner/CDP SSH keys are generated **on the Agent VM** (or on the controller) and are not in the bundle. Encrypt/check with `make secrets-encrypt-agent` / `make secrets-decrypt-check-agent`. The plaintext `agent/runtime.yaml` is gitignored and forbidden by `scripts/validate-secrets.sh`.
+
 ### 3.6 scripts/ — ~15k tokens
 
-All POSIX `sh` + `set -eu` unless noted. `state-backup.sh` / `state-restore.sh` / `state-backup-preflight.sh` / `check-terraform-state-modes.sh` (age-encrypted state recovery; restore never overwrites, validates JSON, allow-lists paths); `check-saved-terraform-plan.sh`; `validate-tailscale-acl-path.sh` (ACL file must be in-repo, non-symlink); `validate-secrets.sh` (current tree only, not history; ignored files exempt); `compose-config.sh` (offline `docker compose config` for every project with synthetic env); `adguard-config-check.sh` (when no binary is selected and the local image is unavailable, writes `skipped:` to stderr and exits 0 without pulling); `preflight-apps.sh` (VMID must equal last IP octet); `rollback-app.sh` (ssh wrapper, allow-list of 11 projects in its `case` statement, including `homepage`). `compose-config.sh` now also creates a synthetic `sparkdash.env` (`SPARKDASH_TOKEN=fixture-only`) and an empty `sparkdash-ssh/` dir.
+All POSIX `sh` + `set -eu` unless noted. `state-backup.sh` / `state-restore.sh` / `state-backup-preflight.sh` / `check-terraform-state-modes.sh` (age-encrypted state recovery; restore never overwrites, validates JSON, allow-lists paths); `check-saved-terraform-plan.sh`; `validate-tailscale-acl-path.sh` (ACL file must be in-repo, non-symlink); `validate-secrets.sh` (current tree only, not history; ignored files exempt); `compose-config.sh` (offline `docker compose config` for every project with synthetic env); `adguard-config-check.sh` (when no binary is selected and the local image is unavailable, writes `skipped:` to stderr and exits 0 without pulling); `preflight-apps.sh` (VMID must equal last IP octet); `rollback-app.sh` (ssh wrapper, allow-list of 11 projects in its `case` statement, including `homepage`). `compose-config.sh` also creates a synthetic `sparkdash.env` (`SPARKDASH_TOKEN=fixture-only`) and an empty `sparkdash-ssh/` dir. `agent-compose-config.sh` renders the out-of-tree agent project with synthetic env/secret files and re-checks its digest pins (`make agent-compose-config`).
 
 `state-backup.sh` removes ciphertexts for states absent from the local checkout, so back up only from a checkout holding every state you want kept. It keeps local-ahead commits, follows remote-ahead history and refuses divergent `state-backup` histories.
 
-`scripts/tests/*-fixture.sh` — 12 regression guards (string/structure asserts and fake-`age` tests); `adguard-config-fixture.sh` renders the real AdGuard template and its `service_names` list must include every internal FQDN (including `homepage`); `gatus-config-fixture.sh` also asserts Gatus `storage` is sqlite at `/data/data.db` and the exact line `      - gatus:/data` (`grep -Fx`, indentation-sensitive).
+`scripts/tests/*-fixture.sh` — regression guards (string/structure asserts and fake-`age` tests); `adguard-config-fixture.sh` renders the real AdGuard template and its `service_names` list must include every internal FQDN (including `homepage`); `gatus-config-fixture.sh` also asserts Gatus `storage` is sqlite at `/data/data.db` and the exact line `      - gatus:/data` (`grep -Fx`, indentation-sensitive). The agent fixtures (`agent-backup`, `agent-healthcheck`, `agent-restore`, `agent-dnat-guard`, `agent-runner-scope`, `agent-vm-cloud-init`, `runner-vm-cloud-init`, `runner-privilege`, `runner-firewall`, `terraform-agent-runner-vm-lifecycle`) check the committed role/templates/scripts statically and never touch the VMs.
 
 ### 3.7 Network & storage (manual, device/host-side)
 
 - `files/infrastructure/network/config.txt` + README: annotated copy of the NEC **IX2215** router config (zones, ACLs, DHCP, sFlow). Update **only after** the device is changed and `write memory`'d; compare by line set, not order. Not applied by any automation.
 - Host OS, NIC, pool layout and Proxmox storage: see the [pve1 recovery runbook](operations/proxmox-host-recovery.md) for values confirmed on 2026-10-12 and items still unconfirmed.
 - `files/infrastructure/storage/mover.sh`: runs on **pve1** (cron 05:00): rsync SSD cache (`/mnt/cache-sata`) → `/mnt/tank-gen2/data/shared`, verify, delete source, then ZFS snapshot (14 daily/8 weekly/12 monthly). `mover.logrotate`.
-- Zones: VLAN 10 Server `192.168.10.0/24`, 20 Trusted, 30 IoT, 40 Guest (VLAN 11 and 63 abolished). Key hosts: router `.1`, pve1 `.11`, Apps VM `.101`, gateway `.102`, ElastiFlow `.103`, stashPadDev `.41`, DGX Sparks `.51`/`.52`.
+- Zones: VLAN 10 Server `192.168.10.0/24`, 20 Trusted, 30 IoT, 40 Guest (VLAN 11 and 63 abolished). Key hosts: router `.1`, pve1 `.11`, Apps VM `.101`, gateway `.102`, ElastiFlow `.103`, Hermes Agent VM `.104`, Hermes Runner VM `.105`, stashPadDev `.41`, DGX Sparks `.51`/`.52`. The Agent/Runner VMs are off-tailnet; operators reach them through the gateway subnet route.
 - IX2215 policy: Trusted may initiate to Server and IoT, with replies via dynamic filters; unsolicited reverse and Guest inter-zone traffic are blocked. Port 8 is the AP's tagged four-VLAN trunk; keep its untagged base interface out of bridge groups (the network README records an ARP failure when it shared Guest's bridge).
 
 ## 4. Data Flow
@@ -259,6 +279,8 @@ Caddy, toolbox and sparkDash images publish on main pushes touching their image 
 Rollout order for **adding a Compose project** is documented in [application lifecycle](operations/application-lifecycle.md#新しいcompose-projectの追加): create the NFS directory/marker first **if NFS is used**, merge, wait for reconcile to advance the checkout, then run `make ansible-apply` to install updated helper lists. Wrong order can block startup/recreation of **all** projects (including reconcile recreations): `homelab-compose-up` checks every mount through the guard before touching any project; it can also fail the digest gate with `missing Compose project`.
 
 Add SOPS keys before apply **only if the project needs new secrets** (sparkDash requires `sparkdash.token`; Homepage reuses Gatus auth). If `compose_runtime_changed` is true, apply force-recreates all projects; otherwise updating helpers alone does not start a new project in an already-active `homelab-apps.service`. Check startup after apply and use `homelab-compose-up <project>` if it remains stopped. This conditional procedure is derived from the implementation and has not been verified on live hosts. The dated [Homepage rollout record](operations/homepage.md#手動反映の記録) reports that explicit startup was unnecessary; the [sparkDash runbook](operations/sparkdash.md) records its own rollout and notification checks.
+
+**The Hermes Agent stack is a separate, manual path.** It lives outside `files/services/compose/`, so the reconcile timer, digest gate, mount guard and `compose-config.sh` never see it. VM 104/105 are created by the `agent-vm`/`runner-vm` Terraform roots; the OS and Compose project are applied by hand with `make ansible-apply-agent` (Agent play first, so the generated Runner SSH keys exist as facts before the Runner play). The two self-built images must first be published by their image workflows and their digests pasted into `files/services/agent/stack/compose.yaml`, or the start helper refuses to run. This path has not been executed on live hosts; see [Hermes Agent operations](operations/hermes-agent.md) and [its backup runbook](operations/hermes-agent-backup.md).
 
 ### 4.2 Request path (tailnet client → app)
 
@@ -325,6 +347,8 @@ The mover handles only regular files older than `SETTLE_MINUTES` by ctime, requi
 17. **`rollback-app.sh` restores only image + config** — not volumes, secrets or DGX-side changes; it cannot go back before the commit that added the project; and it leaves `reconcile.paused` set until someone releases it by hand (see 10).
 18. **Gatus alert state is persisted since PR #78** (SQLite on named volume `gatus`; previously memory-only, so every recreate dropped the "resolved" notice). Reproduced/verified in Docker only; production confirmation after the next real restart is pending. `gatus-config-fixture.sh` guards the exact `      - gatus:/data` line, so re-indenting the compose file fails CI.
 19. `reconcile.paused` stops automatic reconcile only; Ansible runtime recreation and `homelab-compose-up all` can still overwrite a rollback. A successful rollback queues a pending reapply, but a failed one may leave the pause without a pending retry; check both `reconcile.paused` and `reconcile.pending` before resuming (see [rollback and recovery](operations/application-lifecycle.md#rollbackと再開)).
+20. **Agent VM operations (`agent_ops` role, [runbook](operations/hermes-agent-backup.md))**: the daily backup encrypts every artifact with the age recipients in `agent_backup_age_recipients` and **fails closed while that list is empty**, refuses to write unless `/mnt/agent-backups` is the NFS export (source+fstype+marker), and needs the pve1 export and marker created manually first. `homelab-agent-restore --scratch` needs a running production stack (shared stateless TEI over `agent_internal`) and Compose ≥ 2.24 (`!reset`/`!override`). Health check marks Hermes healthy only when `gateway_state.json` is `running` and every `platforms.*.state` is `connected`, so an unconfigured Discord shows as a failure. Pitfall when editing these role templates: a bash array-length `${#arr[@]}` contains `{#`, which Jinja reads as a comment start — wrap such lines in `{% raw %}`/`{% endraw %}` (the teammate's render check catches it, `ansible-lint` does not).
+21. **The Hermes Agent stack (`files/services/agent/`, [runbook](operations/hermes-agent.md)) is a separate, manual path, not reconciled.** Applied only with `make ansible-apply-agent`; it lives outside `files/services/compose/` and uses `restart: unless-stopped` (no reconciler). Its two self-built images (`homelab-hermes-agent`, `homelab-memory-db`) must be published by their workflows and their digests pasted into `files/services/agent/stack/compose.yaml` first, or `homelab-agent-compose-up` refuses to start (ALL-ZERO placeholder or unpinned image). Both VMs are off-tailnet (LAN only; operators reach them via the gateway subnet route) and the Runner enforces internet-only egress. Hermes `config.yaml`, the `SOUL.md` seed, the Hindsight config, the bank policy and the weekly-review cron are Ansible-rendered and overwritten every apply — do not edit them on the VM; the durable pieces are the memory/session data and the Runner work tree (see the [backup runbook](operations/hermes-agent-backup.md)). The embedding (`cl-nagoya/ruri-v3-310m`) is an asymmetric retriever using a task prefix, so changing it changes the vectors and requires re-embedding the bank (export, not backup).
 
 **History and remaining code / operational issues**
 
@@ -344,6 +368,8 @@ The mover handles only regular files older than `SETTLE_MINUTES` by ctime, requi
 | Add a Compose project | Worked examples: [Homepage](operations/homepage.md) (PRs #82-#84; no new secret/NFS), [sparkDash](operations/sparkdash.md) (PRs #75-#80; required secret), searxng/open-webui (PR #68, #63). Touch: `files/services/compose/<p>/compose.yaml` (digest-pinned, `homelab_frontend`, no restart); `files/services/images/<p>/Dockerfile` + `.github/workflows/<p>-image.yml` if it is a custom image; `edge/Caddyfile` site; `monitoring/config.yaml` endpoint; AdGuard `rewrites` in `roles/secrets/templates/AdGuardHome.yaml.j2` **and** `service_names` in `scripts/tests/adguard-config-fixture.sh`; if new secrets are needed: `roles/secrets/tasks/main.yml` + `runtime.yaml.example` + synthetic files in `scripts/compose-config.sh`; `nfs_mounts` + path var in `group_vars/apps.yml` (+ `.example`) and `compose.env.j2` if it uses NFS (marker on pve1 first); `roles/compose/tasks/main.yml` (digest gate) and the five templates with hard-coded lists (`homelab-compose-up` incl. its usage text, `homelab-compose-down`, `homelab-rollback-app`, `healthchecks-ping.sh.j2`, `homelab-app-reconcile.sh.j2`); `scripts/rollback-app.sh` allow-list; `.github/dependabot.yml` (compose + images entries); `files/services/compose/README.md`; `docs/operations/<p>.md` (runbook + rollout record); docs that state project counts (`README.md`, `docs/architecture/target-state.md`, `docs/operations/application-lifecycle.md`, `apps-vm-recovery.md`). Then follow the rollout order in §4.1 / gotcha 13. Grep an existing project name (e.g. `sparkdash`) across the repo to find every list. |
 | Remove a Compose project | Follow [project removal](operations/application-lifecycle.md#projectの撤去共通手順): quiesce reconcile and stop the project while its definition still exists, then update helper lists before advancing the VM checkout. Ansible does not remove mounts deleted from `nfs_mounts`; client cleanup is explicit. |
 | Bump the sparkDash image | `files/services/images/sparkdash/Dockerfile` (`SPARKDASH_REVISION` + version label) and the tag in `.github/workflows/sparkdash-image.yml` together → run the workflow (push to main on those paths, or `workflow_dispatch`), copy the digest from the job summary → **separate PR** pasting it into `files/services/compose/sparkdash/compose.yaml` → reconcile applies within 15 min |
+| Change the Hermes Agent stack | VM 104/105: `files/infrastructure/terraform/{agent-vm,runner-vm}/`, OS + roles `files/infrastructure/ansible/agent/`, Compose `files/services/agent/stack/compose.yaml` (project `agent`), Hermes config/SOUL/Hindsight templates under `roles/agent_stack/`, backup/restore/health under `roles/agent_ops/`, secrets `files/infrastructure/secrets/agent/`. Apply by hand (`make ansible-apply-agent`); never reconciled. See [Hermes Agent operations](operations/hermes-agent.md). |
+| Update a Hermes custom image | Edit `files/services/images/{hermes-agent,memory-db}/Dockerfile` → run `.github/workflows/{hermes-agent,memory-db}-image.yml` → copy the digest from the job summary into `files/services/agent/stack/compose.yaml` in a **separate change** → `make ansible-apply-agent` |
 | Roll back an app | `PROJECT=sparkdash ROLLBACK_SHA=<sha> APPS_HOST=<apps-vm-ip> make rollback-app` (manual; pass `APPS_HOST`; restores image+config only; leaves `reconcile.paused` set — see gotchas 10, 17) |
 | Change a Caddy route / TLS / access rule | `files/services/compose/edge/Caddyfile` (auto-reconciled); Caddy CIDRs come from `CADDY_TRUSTED_NETWORKS` in `roles/compose/templates/compose.env.j2`, using fixed strings selected by `network_migration_complete`; nftables separately uses `group_vars/apps.yml` `trusted_networks` |
 | Add/modify internal DNS record | `AdGuardHome.yaml.j2` + `adguard-config-fixture.sh`, then `make ansible-apply` |
@@ -374,4 +400,35 @@ Storage decisions remain open: moving opaque PVC-derived paths to `data/apps/{si
 
 End-to-end recovery of the current 11-project Apps VM remains unverified: the 2026-09-06 rebuild covered seven projects, and the current reordered [recovery procedure](operations/apps-vm-recovery.md#復旧フロー) has not been verified end to end.
 
+The Hermes Agent/Runner VMs (104/105) are defined and statically checked in CI but have **never been built or run on live hosts** as of 2026-10-17: no Terraform apply, no `make ansible-apply-agent`, no first image publish/digest paste. Their build order and acceptance steps are derived from the implementation (`[実機未検証]` in the runbook).
+
 Resolved since the full-map baseline: Gatus memory-only alert state (persisted to SQLite on volume `gatus`, PR #78).
+
+WS7a local verification (2026-10-17) exercised 35 synthetic conversations, export, age-encrypted scratch restore and bank deletion/DB restore.
+Memory quality and latency acceptance remain unmet; this does not change the live-host status above. See the
+[measured results and limits](operations/hermes-agent.md#サービスの資源上限). Model fetching uses a download-only helper
+with a complete hashed requirements file; the runtime reads a fixed local snapshot. Bank policy uses custom extraction
+and an observations mission to discourage promoting assistant replies into user facts; this does not repair existing memories.
+
+### 2026-10-17 Hermes運用レビュー補足
+
+Hermes Agent/Runnerはrepo定義のみで本番未反映。WS7cの架空会話は主要品質閾値・会話p95を達成したが、
+創作1件と20候補rerank p50 3秒目標未達は残る。WS7bのRunner試験はsystemd制限を適用しない模擬コンテナまで。
+WS8ではagent_opsの失敗通知/掃除、停止後の安全snapshot、healthcheckの6時間再通知・stats失敗判定、
+rebuildの設定タイムゾーン/operation再開/新bank方針を修正した。rebuildはHindsight専用で、汎用provider投入器ではない。
+現行の仕様・検証範囲は[helper運用文書](operations/hermes-agent-backup.md)を正とする。gotcha番号は変更していない。
+
+WS14（2026-10-17ユーザー決定・WS13計測）でAgent VMを12 vCPU / 24 GiBとする。rerankerは6 CPU / 4 GiB・
+RAYON/OMP/MKL threads・tokenization workers各6、embeddingは4 CPU / 8 GiBとし、CPU上限合計10で2 CPU相当の余地を残す（予約ではない）。
+メモリ上限合計16.625 GiB、OS/Docker・page cache用7.375 GiB。品質優先でMID 20 / HIGH 30を維持し、3秒目標未達を受け入れた。
+rerankerはbatch 4制約で6 CPUを超えてもほぼ伸びず、新配分の会話応答性は本番適用後に再計測する。
+`memory.write_approval: false`、`skills.write_approval: true`も決定済み。前者は組み込みMEMORY.md/USER.mdのゲートで、
+Hindsight自動retainには適用されない。Hindsight側はcustom抽出とSOULで方針を与える。本番適用は未実施。
+
+
+WS16 (2026-10-17): both TEI services pin the cpu-1.9.4 OCI index digest (`2538ea1c…`) for the known queue-panic mitigation.
+Per-input permits are embedding C=128 (2 HTTP slots × 32 inputs + 64) and reranker C=64 (one global HTTP slot × 32 + 32).
+Hindsight explicitly runs one API worker with embedding batch 32 / concurrency 2 (default 8 queued queries beyond the client timeout in WS16); query and retain share those provider slots.
+Candle CPU forces runtime batch 4, so the ineffective `max-batch-requests=1` flag and knob were removed.
+Embedding uses the new `agent_stack_embedding_threads=4` → `TEI_EMBEDDING_THREADS` knob for Rayon/OMP/MKL; reranker remains at 6.
+TEI 429 retries are bounded; exhausted embedding/rerank retries fail recall. See [runbook](operations/hermes-agent.md) and the dated ADR-0008 supplement.

@@ -1,0 +1,29 @@
+---
+# WS2 contract with WS1: this play assumes Docker is installed, /srv/agent is
+# mounted (agent_data_mount) and the deploy user exists. The role only owns the
+# service layer: directories, secrets, SSH identities, model cache, rendered
+# configuration, the Compose project and the weekly review job.
+
+- name: Ensure the Agent service directories exist
+  ansible.builtin.import_tasks: directories.yml
+
+- name: Render the Agent runtime secrets and generated credentials
+  ansible.builtin.import_tasks: secrets.yml
+
+- name: Generate the Runner and CDP tunnel SSH identities
+  ansible.builtin.import_tasks: ssh_keys.yml
+
+- name: Pre-fetch the pinned embedding and rerank models
+  ansible.builtin.import_tasks: models.yml
+
+- name: Render the Hermes configuration and seed the personality
+  ansible.builtin.import_tasks: config.yml
+
+- name: Deploy and start the Compose stack
+  ansible.builtin.import_tasks: stack.yml
+
+- name: Apply the Hindsight bank policy
+  ansible.builtin.import_tasks: bank.yml
+
+- name: Register the weekly review cron job
+  ansible.builtin.import_tasks: cron.yml

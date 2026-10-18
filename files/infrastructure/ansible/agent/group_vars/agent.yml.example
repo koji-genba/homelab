@@ -1,0 +1,28 @@
+---
+# Agent VM desired state for a new or recovered deployment. No credentials.
+common_hostname: agent
+agent_management_ip: 192.168.10.104
+
+agent_data_disk: /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
+agent_data_disk_label: agent-data
+agent_data_mount: /srv/agent
+
+agent_backup_mounts:
+  - name: agent-backups
+    local_path: /mnt/agent-backups
+    server: 192.168.10.11
+    export: /mnt/tank-gen2/data/agent-backups
+    marker: .homelab-export-agent-backups
+    marker_value: agent-backups
+    options: hard,_netdev,nfsvers=4.1,noatime,nconnect=8
+
+firewall_input_allowed_tcp_ports: []
+firewall_egress_restrict: false
+firewall_dnat_guard: true
+
+agent_runner_ssh_key_dir: /etc/homelab/agent/ssh
+
+# WS5: age public recipients used to encrypt backup/export artifacts. The
+# private identities must never live on this VM or in git. Empty => backups
+# fail closed instead of writing plaintext.
+agent_backup_age_recipients: []
