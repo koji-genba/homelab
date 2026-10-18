@@ -6,12 +6,15 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import tarfile
 import tempfile
 
 import jinja2
 from jinja2 import meta
+import yaml
 
 role = Path('files/infrastructure/ansible/agent/roles/agent_ops/templates')
+defaults = yaml.safe_load((role.parent / 'defaults/main.yml').read_text())
 env = jinja2.Environment()
 env.filters['to_json'] = json.dumps
 env.filters['bool'] = bool
@@ -23,7 +26,8 @@ with tempfile.TemporaryDirectory() as directory:
         values = {key: str(root / key) for key in keys}
         values.update(agent_ops_uid=os.getuid(), agent_ops_gid=os.getgid(),
                       agent_ops_health_services=['hermes'], agent_ops_backup_age_recipients=[],
-                      agent_ops_runner_excludes=[], agent_ops_export_encrypt=False,
+                      agent_ops_runner_excludes=defaults['agent_ops_runner_excludes'],
+                      agent_ops_export_encrypt=False,
                       agent_ops_health_pending_ops_threshold=10,
                       agent_ops_health_renotify_seconds=21600, agent_stack_timezone='Asia/Tokyo',
                       agent_ops_backup_daily_keep=14, agent_ops_backup_weekly_keep=8,
@@ -40,6 +44,64 @@ with tempfile.TemporaryDirectory() as directory:
         result = subprocess.run(['bash', str(path)], text=True, capture_output=True)
         assert (result.returncode == 0) == success, (name, result.returncode, result.stdout, result.stderr)
         return result
+
+    # Execute the rendered backup's actual Runner streaming step with SSH
+    # replaced by a local tar invocation. No host, key or network is accessed.
+    backup = render('backup')
+    stream = backup[backup.index("    log 'streaming the Runner work tree over SSH'"):
+                    backup.index('    collect_metadata "$tmp/METADATA.txt"')]
+    workspace = root / 'runner-work'
+    recovery = workspace / 'lost+found'
+    recovery.mkdir(parents=True)
+    (recovery / 'recovered-file').write_text('filesystem recovery data')
+    nested = workspace / 'project/lost+found'
+    nested.mkdir(parents=True)
+    (nested / 'keep.txt').write_text('user data')
+    (workspace / 'work.txt').write_text('runner data')
+    arguments = root / 'runner-tar-arguments'
+    setup = f'''
+RUNNER_WORKSPACE={json.dumps(str(workspace))}
+tmp={json.dumps(str(root))}
+notify_operator() {{ :; }}
+ssh() {{
+    while [ "$1" != tar ]; do shift; done
+    printf '%s\\n' "$@" > {json.dumps(str(arguments))}
+    command "$@"
+}}
+'''
+    recovery.chmod(0)
+    try:
+        run('backup', setup + stream)
+        with tarfile.open(root / 'runner-work.tar.gz') as archive:
+            members = archive.getnames()
+        assert './lost+found' not in members
+        assert not any(name.startswith('./lost+found/') for name in members)
+        assert './project/lost+found/keep.txt' in members
+        assert './work.txt' in members
+        # Also covers root-run fixtures, where chmod cannot cause a read error:
+        # the rendered EXCLUDES must reach tar with no error-suppression flags.
+        assert arguments.read_text().splitlines() == [
+            'tar', '-C', str(workspace),
+            *('--exclude=' + pattern for pattern in defaults['agent_ops_runner_excludes']),
+            '-czf', '-', '.',
+        ]
+        if os.geteuid() != 0:
+            # Neither unrelated unreadable paths nor a nested lost+found may be
+            # silently omitted. Both must reach the backup helper's fail path.
+            for unreadable in (workspace / 'private', nested):
+                unreadable.mkdir(exist_ok=True)
+                unreadable.chmod(0)
+                try:
+                    out = run('backup', setup + stream, success=False)
+                    assert 'Permission denied' in out.stderr, out.stderr
+                    assert 'could not stream' in out.stderr, out.stderr
+                finally:
+                    unreadable.chmod(0o700)
+            print('Runner archive permission checks: ok (unprivileged tar; root lost+found excluded, other read errors fail)')
+        else:
+            print('Runner archive permission checks: rendered tar arguments only (UID 0 bypasses permissions)')
+    finally:
+        recovery.chmod(0o700)
 
     # API failure/malformed JSON must be a failed stats check, and an unhealthy
     # running container must not be counted as healthy.
