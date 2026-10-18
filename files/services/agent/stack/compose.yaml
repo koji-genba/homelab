@@ -27,16 +27,14 @@
 # caps are ceilings, not reservations. Model prefetch is download-only,
 # capped at 1 GiB, and finishes before the inference servers start.
 #
-# Image digests follow the repo convention. The self-built Hermes and memory-db
-# images are published and pinned as of 2026-10-18 by their image workflows
-# (.github/workflows/hermes-agent-image.yml, memory-db-image.yml).
-# The third self-built image, homelab-tei-reranker-onnx, is not yet published;
-# it carries the ALL-ZERO placeholder until tei-reranker-onnx-image.yml publishes
-# its first digest. Copy that digest from the workflow step summary into this
-# file in a follow-up change (CI does not commit it).
+# Image digests follow the repo convention. All three self-built images
+# (Hermes, memory-db, tei-reranker-onnx) are published and pinned as of
+# 2026-10-18 by their image workflows
+# (.github/workflows/hermes-agent-image.yml, memory-db-image.yml,
+# tei-reranker-onnx-image.yml).
 # The role's helper (installed as /usr/local/sbin/homelab-agent-compose-up from
-# roles/agent_stack/templates/homelab-agent-compose-up.sh.j2) refuses to start
-# on the ALL-ZERO placeholder or any unpinned image as a safety net.
+# roles/agent_stack/templates/homelab-agent-compose-up.sh.j2) still refuses to
+# start on an ALL-ZERO placeholder or any unpinned image as a safety net.
 name: agent
 
 services:
@@ -158,9 +156,10 @@ services:
       start_period: 60s
 
   reranker:
-    # Built by tei-reranker-onnx-image.yml: pinned FP32 ONNX, Candle-compatible tanh GELU.
-    # PLACEHOLDER — copy the published digest after the workflow succeeds.
-    image: ghcr.io/koji-genba/homelab-tei-reranker-onnx@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    # Built by .github/workflows/tei-reranker-onnx-image.yml (pinned FP32 ONNX
+    # with Candle-compatible tanh GELU on TEI cpu-1.9.4 ORT). Pinned to the
+    # digest published by the first workflow run (tag cpu-1.9.4, 2026-10-18).
+    image: ghcr.io/koji-genba/homelab-tei-reranker-onnx@sha256:ccc54b553f32e619e278544d70961c0dc8ddfac67beffdf6bf40c3e625240a79
     restart: unless-stopped
     # ORT uses num_cpus 1.17 (cgroup v1/v2 quota aware) for intra-op threads:
     # 6 CPU quota -> 6 threads; OMP/MKL/Rayon envs alone do not set ORT threads.

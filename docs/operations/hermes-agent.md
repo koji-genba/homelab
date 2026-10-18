@@ -259,14 +259,11 @@ Proxmoxのuser/role/token/ACLはTerraform管理外で、apply前に人が用意�
    make TERRAFORM_ROOT=files/infrastructure/terraform/runner-vm terraform-apply
    ```
 
-4. **自前imageのdigest確認** `[Hermes・memory-db公開済み / reranker未公開]`
-   自前2image（`homelab-hermes-agent` / `homelab-memory-db`）は2026-10-18に`hermes-agent-image.yml` /
-   `memory-db-image.yml`でbuild・公開済みで、そのimmutable digestは
-   `files/services/agent/stack/compose.yaml`へ転記済み。両imageは転記漏れが無いことを確認する。
-   3つ目の自前image（`homelab-tei-reranker-onnx`）は未公開で、ALL-ZERO placeholderのまま。
-   `tei-reranker-onnx-image.yml`をmainで実行し、一致検査を通してjob summaryに出力されるimmutable digestを
-   同じ`compose.yaml`のrerankerへ転記する。転記は別変更で行う（CIはcommitしない）。
-   起動helperはALL-ZERO placeholderや未固定imageを検出すると起動を拒否するため、rerankerの転記まで起動できない。
+4. **自前imageのdigest確認** `[公開済み]`
+   自前3image（`homelab-hermes-agent` / `homelab-memory-db` / `homelab-tei-reranker-onnx`）は2026-10-18に
+   `hermes-agent-image.yml` / `memory-db-image.yml` / `tei-reranker-onnx-image.yml`でbuild・公開済みで、
+   そのimmutable digestは`files/services/agent/stack/compose.yaml`へ転記済み。3imageとも転記漏れが無いことを確認する。
+   起動helperはALL-ZERO placeholderや未固定imageを検出すると起動を拒否する（安全策）。
    Dockerfile更新時の再転記は下記「image更新」の手順で行う。
 5. **SOPS bundleの作成** `[実機未検証]`
    `files/infrastructure/secrets/agent/runtime.yaml.example`のkey一覧に従い、Discord bot tokenと
