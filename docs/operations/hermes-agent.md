@@ -27,7 +27,7 @@ Agent VM 192.168.10.104 (VMID 104, VLAN 10, tailnet外)
   hindsight   Hindsight API（local_external、bank `personal`）
   memory-db   PostgreSQL 17 + pgvector + PGroonga（自前image）
   embedding   TEI CPU / ruri-v3-310m
-  reranker    TEI CPU / ruri-v3-reranker-310m
+  reranker    TEI CPU ORT / ruri-v3-reranker-310m (FP32 ONNX同梱)
   cdp-tunnel  RunnerのCDPをSSH転送
                                │ SSH (専用鍵, from=192.168.10.104)
                                ▼
@@ -47,8 +47,10 @@ Runner VM 192.168.10.105 (VMID 105, VLAN 10, tailnet外)
 
 2026-10-17のユーザー決定（WS14）でAgent VMを**12 vCPU / 24 GiB**とする。swapはない前提で設計する。
 Agent stackの各サービスは`mem_limit`を持ち、rerankerは`TEI_RERANKER_CPUS=6`、embeddingは`TEI_EMBEDDING_CPUS=4`とする。
-両モデルのCPU推論プールを明示し、`RAYON/OMP/MKL` threadsはembedding 4 / reranker 6、rerankerのtokenization workersは6とする。
-`max-batch-tokens`はembedding 4096 / reranker 2048を維持する。Candle CPUの実行batch上限は4で、
+embeddingのCandleプールは`RAYON/OMP/MKL=4`、rerankerの周辺プールは6、tokenization workersは6とする。
+rerankerのORT intra-op threadsはTEIが`num_cpus::get()`で決める。固定版のnum_cpus 1.17.0はcgroup v1/v2 quotaを読み、
+`cpus: 6`で6 threadsになる（OMP等のenvがORTを制御するわけではない）。rerankerは`memswap_limit: 4g`でswapを禁止する。
+`max-batch-tokens`はembedding 4096 / reranker 2048を維持する。現行batch上限はembedding Candle 4 / reranker ORT 8。旧Candleでは、
 `--max-batch-requests 1`もrouterに4で上書きされていたため削除した（WS16）。
 検索queryのembeddingはrerankに先行するが、背景retainのembeddingは併走し得るため、両TEIの上限合計を
 10 CPUに抑え、OS・Hermes・Hindsight・memory-db・CDP用に2 CPU相当の余地を残す。
@@ -65,12 +67,12 @@ query・他のretain・consolidationとproviderの共通2枠を共有するた�
 WS16の8同時負荷ではqueryの待ち時間がclient既定timeoutの30秒を超えたため、CPU backendへ積む量を2同時へ制限する。
 1HTTPで32入力あり、2HTTPでもCandleの実行batch 4を供給できる。Cだけ増やして長い待ち行列を作らない。
 rerankerは全recall共通の同時数1、client batch 32、候補LOW 8 / MID 20 / HIGH 30を維持する。
-workers・replica・batch・同時数を増やす際はpermit数も再計算する。Cは待機入力数を増やし得るが、実行batch 4とtoken上限は変えない。
+workers・replica・batch・同時数を増やす際はpermit数も再計算する。Cは待機入力数を増やし得るが、backendの実行batch上限とtoken上限は変えない。
 固定Hindsight imageのTEI clientは429/5xxを最大3回retry（計4試行）し、使い切ると例外になる。
 query embedding失敗もrerank失敗もrecallはエラーになり、429時にrerankを省略して成功を返す設定ではない。
 負荷上限に合わせた設定で429自体を避ける。既知panicへの対策を含む版だが、キュー送信の`expect`は残るため全負荷での無障害を保証しない。
 
-モデルの事前取得はdownload-onlyで1 GiBに制限し、TEI起動前に完了する。上限は固定モデル前提の値で、
+embeddingの事前取得はdownload-onlyで1 GiBに制限し、TEI起動前に完了する。rerankerはimage同梱のため事前取得とhost cache mountを使わない。上限は固定モデル前提の値で、
 全6サービスの合計16.625 GiBに対し、OS・Docker・page cache用に7.375 GiBを残す。
 
 | サービス | メモリ上限 | 根拠 |
@@ -257,12 +259,15 @@ Proxmoxのuser/role/token/ACLはTerraform管理外で、apply前に人が用意�
    make TERRAFORM_ROOT=files/infrastructure/terraform/runner-vm terraform-apply
    ```
 
-4. **自前imageのdigest確認** `[公開済み]`
+4. **自前imageのdigest確認** `[Hermes・memory-db公開済み / reranker未公開]`
    自前2image（`homelab-hermes-agent` / `homelab-memory-db`）は2026-10-18に`hermes-agent-image.yml` /
    `memory-db-image.yml`でbuild・公開済みで、そのimmutable digestは
-   `files/services/agent/stack/compose.yaml`へ転記済み。初回は転記漏れが無いことだけを確認する。
-   起動helperはALL-ZERO placeholderや未固定imageを検出すると起動を拒否する（安全策）。再転記は
-   Dockerfile更新時に下記「image更新」の手順で行う。
+   `files/services/agent/stack/compose.yaml`へ転記済み。両imageは転記漏れが無いことを確認する。
+   3つ目の自前image（`homelab-tei-reranker-onnx`）は未公開で、ALL-ZERO placeholderのまま。
+   `tei-reranker-onnx-image.yml`をmainで実行し、一致検査を通してjob summaryに出力されるimmutable digestを
+   同じ`compose.yaml`のrerankerへ転記する。転記は別変更で行う（CIはcommitしない）。
+   起動helperはALL-ZERO placeholderや未固定imageを検出すると起動を拒否するため、rerankerの転記まで起動できない。
+   Dockerfile更新時の再転記は下記「image更新」の手順で行う。
 5. **SOPS bundleの作成** `[実機未検証]`
    `files/infrastructure/secrets/agent/runtime.yaml.example`のkey一覧に従い、Discord bot tokenと
    user/channel ID、運用通知webhook、任意のdead-man ping URLを用意する。PostgreSQL passwordとSSH鍵は
@@ -293,6 +298,48 @@ Proxmoxのuser/role/token/ACLはTerraform管理外で、apply前に人が用意�
    次節の確認を行う。健康確認は[バックアップ文書の健康確認節](hermes-agent-backup.md#6-健康確認)を正とする。
 
 ## 日常運用
+
+### ORT rerankerのbuild・一致検査（WS18、2026-10-18）
+
+`homelab-tei-reranker-onnx`は元revision `bb46934ee9ed09f850b9fcff17501b3ef7ddb2b3`を
+FP32 / opset17 / 動的batch・sequence軸でexportし、TEI cpu-1.9.4へ同梱する。
+元モデルカードのApache-2.0宣言を確認済み。imageの`/model/`にLICENSE・MODEL_CARD.md・変更内容のNOTICEと
+export.json・SHA256SUMSを保存する。実行時は`--model-id /model`と`HF_HUB_OFFLINE=1`でネットワーク取得を行わない。
+モデル名・revisionは`export_model.py`で固定する。Ansibleのreranker model/revision変数はバックアップ出典情報だけに残し、
+runtime引数や取得には使わない。fixtureでexporterとの一致を検査する。
+
+Candleが使うtanh近似に合わせ、hidden層と分類headを`gelu_pytorch_tanh`にする。
+WS15では20候補p50 3.49→約1.07秒、24クエリ・96回で全順位一致、最大スコア差2.21e-6。
+これはローカル単体試験で、本番の会話p95の保証ではない。embeddingのCandle・prefix・次元・既存vectorは変更しない。
+
+WS18でrepoのimageを実際にbuildし、6 CPU / 4g / swapなし / C64 / workers6で各60回を直列測定した。
+8回の20/30候補warm-upを各backendで破棄し、cgroup memory.peakを測った（page cache込み）。
+
+| backend | 20候補 p50 / p95秒 | 30候補 p50 / p95秒 | 起動warm-up / 全負荷peak GiB |
+| --- | ---: | ---: | ---: |
+| Candle（同じTEI・元重み） | 3.513 / 4.759 | 4.962 / 6.951 | 2.793 / 2.793 |
+| ORT（自前FP32・tanh） | 1.134 / 1.524 | 1.657 / 2.259 | 2.756 / 2.762 |
+
+全120回・3,000スコアで全順位一致、最大絶対差2.21e-6（閾値1e-4以下）。429・panic・OOMは無く、
+memory.eventsのmax/oom/oom_killも0だった。4g上限まで約1.24 GiBの余裕がある。
+ホストはRyzen 7 9800X3D / WSL2 Docker 16 vCPUで、本番pve1の測定ではない。
+
+
+```sh
+docker build -t homelab-tei-reranker-onnx:test files/services/images/tei-reranker-onnx
+docker build --target candle-reference -t homelab-tei-reranker-candle:test files/services/images/tei-reranker-onnx
+python3 scripts/tests/tei-reranker-parity.py \
+  --ort-image homelab-tei-reranker-onnx:test --candle-image homelab-tei-reranker-candle:test \
+  --output /tmp/tei-parity
+```
+
+一致検査は全24入力・全20順位とsigmoidスコアの最大絶対差≤1e-4を検査する。NaN・候補欠落・HTTP失敗も拒否する。
+6 CPU / 4g / swapなし / C64 / workers6 / read-only / cap-drop ALLで順に起動し、作成したcontainerは終了時に削除する。
+CIはrunner容量に合わせ2 CPUとし、同じscriptを実行する。`--runs 60 --extra-input <架空のrerank30.json>`で
+ローカル受入の20/30候補各60回を実施できる。入力を追加する際は実在の個人情報・秘密を含めない。
+
+依存更新はdigest固定Python・TEIとhash固定wheelの組合せを保ち、lock再生成後にbuildと一致検査をやり直す。
+Linux amd64 / CPython 3.12用のwheelのみを許可する。モデルを変える際はrevision・ライセンス・出典・変換設定も再確認する。
 
 ### 起動・停止・再起動
 
@@ -331,18 +378,19 @@ Discordのchannel IDはsecret bundle（`hermes.env`）由来で、`config.yaml`�
 
 - 推論endpointを変える場合は`group_vars/agent.yml`の`agent_stack_llm_base_url` / `agent_stack_llm_model`等を
   編集してapplyする。エンドポイントは1つだけなのでfallbackは設定しない。
-- embedding / rerankerを変える場合は`agent_stack_embedding_*` / `agent_stack_reranker_*`のモデル名・
-  revision・task prefix・入力上限を同時に更新する。モデルはapply時にdownload-onlyコンテナで事前取得する。
+- embeddingを変える場合は`agent_stack_embedding_*`のモデル名・revision・task prefix・入力上限を同時に更新する。
+  embeddingはapply時にdownload-onlyコンテナで事前取得する。rerankerは上記ORT imageのexporterを変更し、
+  一致検査を通したimageのdigestを転記する。候補数・token上限を変える場合はAnsible/Composeも合わせる。
   **embeddingの次元が変わる場合は既存のvector indexを再利用できない**ため、bankをエクスポートして
   空のDBへ再構築する（後述のprovider変更と同じ扱い）。
-- モデル取得だけはAdGuardがxet CDNをNXDOMAIN化するためresolver `1.1.1.1`と`HF_HUB_DISABLE_XET=1`を使う。
+- embeddingのモデル取得だけはAdGuardがxet CDNをNXDOMAIN化するためresolver `1.1.1.1`と`HF_HUB_DISABLE_XET=1`を使う。
   AdGuardの設定は変更せず、TEIは固定local snapshotをHFオフラインで読む。取得helperの依存は
   `roles/agent_stack/files/model-fetch-requirements.txt`で全推移依存をhash固定し、`--require-hashes`で検査する。
   固定Python 3.13 Linux amd64向けなので、image/arch変更時は依存closureも再解決する。
 
 ### image更新
 
-自前image（`homelab-hermes-agent` / `homelab-memory-db`）は`.github/workflows/`がbuild・公開し、digestを
+自前image（`homelab-hermes-agent` / `homelab-memory-db` / `homelab-tei-reranker-onnx`）は`.github/workflows/`がbuild・公開し、digestを
 job summaryへ出力する。上流baseや同梱するHindsight統合revisionを更新するときは、Dockerfile更新 → workflow実行 →
 digest転記を**別の変更**で行う。転記後は`make ansible-apply-agent`で反映する。digestを変えない限り
 同じimageが使われる。
@@ -374,8 +422,8 @@ Agent VM側の値はrole `agent_stack`が`/etc/homelab/secrets/*.env`へroot 060
   MID 12への削減は採用しない。飲み物とかばんを一緒に尋ねると、かばんがprefilterで落ちることがある。
   単独の短い自然文で尋ねる回避は確認したが、SOULの分割指示だけでは1回目のF3再試験は失敗した
   （2回目はF群4/4正答）。2回目は推論threads・tokenization workersを絞り、batch request 1も指定して速度を
-  改善した（診断rerank p50 7.03→4.03秒、20候補p50 9.00→4.24秒）。20候補のp50 3秒以内は未達で、
-  2026-10-17のユーザー決定で品質を優先して未達を受け入れ、MID 20 / HIGH 30を維持する。
+  改善した（診断rerank p50 7.03→4.03秒、20候補p50 9.00→4.24秒）。旧Candleで20候補のp50 3秒以内は未達で、
+  2026-10-17のユーザー決定では品質を優先してMID 20 / HIGH 30を維持した。WS18は候補数を変えずORTで高速化する。
   WS13では6 CPUを超えてもほぼ伸びず、12 vCPU / 24 GiBの新配分の会話応答性は本番適用後に再計測する。
 - rerankerの低い絶対値は、固定revisionをtransformersの分類head+sigmoidで照合して最大絶対差7e-7未満だった。
   モデル本来の分布として`agent_stack_recall_min_reranker_score: 0.0`を維持する。未知属性を拒否する閾値ではない。

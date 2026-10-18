@@ -136,8 +136,82 @@ assert argv[argv.index('--tokenization-workers') + 1].startswith('${TEI_RERANKER
 assert limits['agent_stack_reranker_max_candidates_mid'] == 20
 assert limits['agent_stack_reranker_max_candidates_high'] == 30
 # WS16: the image and per-input permits must agree with the Hindsight fan-out.
-assert embedding['image'] == reranker['image'] == limits['agent_stack_tei_image']
+assert embedding['image'] == limits['agent_stack_tei_image']
 assert embedding['image'].endswith('@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d')
+# WS18: only embedding is fetched on the VM. ORT is selected by an image-
+# bundled ONNX graph; no cache mount or mutable model/revision argument remains.
+assert [m['name'] for m in limits['agent_stack_pinned_models']] == ['embedding']
+image_repository = 'ghcr.io/koji-genba/homelab-tei-reranker-onnx'
+assert re.fullmatch(re.escape(image_repository) + r'@sha256:[0-9a-f]{64}', reranker['image'])
+assert argv[argv.index('--model-id') + 1] == '/model'
+assert '--revision' not in argv and 'volumes' not in reranker
+assert reranker['memswap_limit'] == '4g'
+assert reranker['read_only'] is True and reranker['cap_drop'] == ['ALL']
+assert 'TEI_RERANKER_MODEL=' not in env_template + validator
+assert 'TEI_RERANKER_REVISION=' not in env_template + validator
+
+# Run the rendered production gate with just this image left at zero. A fake
+# docker binary records accidental pass-through, without contacting any daemon.
+import os
+import subprocess
+import jinja2
+with tempfile.TemporaryDirectory() as directory:
+    root = pathlib.Path(directory)
+    env_file = root / 'compose.env'
+    secret_file = root / 'memory-db.env'
+    env_file.touch()
+    secret_file.touch()
+    source = pathlib.Path('files/services/agent/stack/compose.yaml').read_text()
+    source = re.sub(r'@sha256:[0-9a-f]{64}', '@sha256:' + 'a' * 64, source)
+    source = source.replace(image_repository + '@sha256:' + 'a' * 64,
+                            image_repository + '@sha256:' + '0' * 64)
+    compose_file = root / 'compose.yaml'
+    compose_file.write_text(source)
+    template = (role / 'templates/homelab-agent-compose-up.sh.j2').read_text()
+    helper = root / 'up.sh'
+    helper.write_text(jinja2.Template(template).render(
+        agent_stack_project_dir=str(root), agent_stack_project_name='fixture',
+        agent_stack_env_file=str(env_file), agent_stack_secrets_dir=str(root),
+        agent_stack_compose_wait_timeout=600))
+    marker = root / 'docker-called'
+    docker = root / 'docker'
+    docker.write_text('#!/bin/sh\ntouch "' + str(marker) + '"\n')
+    docker.chmod(0o755)
+    environment = dict(os.environ, PATH=str(root) + ':' + os.environ['PATH'])
+    result = subprocess.run(['sh', str(helper)], env=environment, capture_output=True, text=True)
+    assert result.returncode != 0 and 'ALL-ZERO placeholder' in result.stderr
+    assert not marker.exists()
+    compose_file.write_text(source.replace('@sha256:' + '0' * 64, '@sha256:' + 'b' * 64))
+    result = subprocess.run(['sh', str(helper), 'config'], env=environment, capture_output=True, text=True)
+    assert result.returncode == 0 and marker.exists(), result.stderr
+
+image_dir = pathlib.Path('files/services/images/tei-reranker-onnx')
+# Keep the existing backup provenance accurate without executing the exporter.
+import ast
+export_constants = {
+    node.targets[0].id: ast.literal_eval(node.value)
+    for node in ast.parse((image_dir / 'export_model.py').read_text()).body
+    if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+    and node.targets[0].id in {'MODEL', 'REVISION'}
+}
+assert limits['agent_stack_reranker_model'] == export_constants['MODEL']
+assert limits['agent_stack_reranker_revision'] == export_constants['REVISION']
+dockerfile = (image_dir / 'Dockerfile').read_text()
+assert dockerfile.count('@' + limits['agent_stack_tei_image'].split('@')[1]) == 2
+assert 'AS candle-reference' in dockerfile and 'AS runtime' in dockerfile
+assert '--require-hashes' in dockerfile and '--only-binary=:all:' in dockerfile
+assert '/files/services/images/tei-reranker-onnx' in pathlib.Path('.github/dependabot.yml').read_text()
+export_requirements = (image_dir / 'requirements.txt').read_text().splitlines()
+for line in export_requirements:
+    if not line or line.startswith(('#', '--')):
+        continue
+    assert re.fullmatch(r'[A-Za-z0-9_.-]+==[A-Za-z0-9_.+-]+ --hash=sha256:[0-9a-f]{64}', line), line
+workflow = yaml.safe_load(pathlib.Path('.github/workflows/tei-reranker-onnx-image.yml').read_text())
+for job in workflow['jobs'].values():
+    for step in job['steps']:
+        if 'uses' in step:
+            assert re.fullmatch(r'[^@]+@[0-9a-f]{40}', step['uses'])
+
 hindsight_env = compose['services']['hindsight']['environment']
 assert hindsight_env['HINDSIGHT_API_WORKERS'] == '1'
 embed_batch = int(hindsight_env['HINDSIGHT_API_EMBEDDINGS_TEI_BATCH_SIZE'])

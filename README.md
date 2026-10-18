@@ -38,8 +38,11 @@ Apps VMの15分reconcileの対象外で、`make ansible-apply-agent`で手動反
 [Hermes Agent運用](docs/operations/hermes-agent.md)を参照してください。
 2026-10-17時点で両VMの初回構築は未実施です。ローカルでは新規sessionの想起・訂正・未知属性・再起動後の品質閾値と会話p95目標を満たしました。
 会話の創作1件が残ります。2026-10-17のユーザー決定（WS14）でAgent VMは12 vCPU / 24 GiB、embedding 4 CPU / 8 GiB、
-reranker 6 CPU / 4 GiBとします。rerank候補は品質優先でMID 20 / HIGH 30を維持し、3秒目標は未達のまま受け入れます。
-WS13のローカル計測ではrerankerは6 CPUを超えてもほぼ伸びず、新配分の会話応答性は本番適用後に再計測します。
+reranker 6 CPU / 4 GiBとします。rerank候補は品質優先でMID 20 / HIGH 30を維持します。
+2026-10-18の決定（WS18）でrerankerは自前FP32 ONNXを同梱したTEI ORT imageへ切り替え、embeddingはCandleのままです。
+WS15のローカル20候補p50は3.49秒から約1.07秒へ短縮し、tanh GELUでCandleとの全順位一致を確認しました。
+reranker ONNX imageは未公開で、CIの一致検査・公開後にdigest転記が必要です。ALL-ZERO placeholderの間は起動helperが拒否します。
+Hermes・memory-dbは2026-10-18に公開・digest固定済みです。本番での会話応答性は適用後に再計測します。
 `memory.write_approval: false`、`skills.write_approval: true`も決定済みです。本番未適用で、Runnerは模擬コンテナでの部分確認、本番DRは未検証です。
 
 Caddy、DNS、SMBはLAN IPに加え、Apps VMのtailnet IP `100.86.147.127`でも公開します。

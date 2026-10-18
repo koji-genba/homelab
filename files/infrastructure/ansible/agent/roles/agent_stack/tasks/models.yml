@@ -1,6 +1,6 @@
 ---
-# The runtime TEI containers are pinned read-only (HF_HUB_OFFLINE=1) against
-# this cache. Fetching happens here, in a throwaway container, because the
+# The embedding container is pinned read-only (HF_HUB_OFFLINE=1) against
+# this cache; the ORT reranker is image-bundled. Fetching happens here, in a throwaway container, because the
 # homelab resolver NXDOMAINs the Hugging Face xet CDN; we push 1.1.1.1 into the
 # fetcher and disable xet so the classic CDN is used.
 

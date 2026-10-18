@@ -1,0 +1,14 @@
+Ruri-v3-reranker-310m by cl-nagoya (Hayato Tsukagoshi and Ryohei Sasano)
+Source: https://huggingface.co/cl-nagoya/ruri-v3-reranker-310m/tree/bb46934ee9ed09f850b9fcff17501b3ef7ddb2b3
+Model card declares Apache License 2.0; the repository has no separate NOTICE.
+The original model card is preserved as MODEL_CARD.md. LICENSE contains Apache-2.0.
+
+Modified by homelab (2026-10-18): exported the original FP32 safetensors to
+ONNX opset 17 with dynamic batch/sequence axes, eager attention, and tanh GELU
+in the hidden layers and classification head to match TEI Candle's computation.
+No quantization, training, pruning, tokenizer changes or weight changes.
+The generated config records both gelu_pytorch_tanh activation settings.
+See export.json and SHA256SUMS for export versions, revision and graph checksum.
+
+Ruri: Japanese General Text Embeddings, Tsukagoshi and Sasano (2024).
+https://arxiv.org/abs/2409.07737

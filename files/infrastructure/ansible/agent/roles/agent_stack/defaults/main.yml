@@ -72,15 +72,19 @@ agent_stack_hindsight_strict_schema: true
 # dimension from TEI, so nothing here hard-codes it.
 agent_stack_embedding_model: cl-nagoya/ruri-v3-310m
 agent_stack_embedding_revision: 18b60fb8c2b9df296fb4212bb7d23ef94e579cd3
+# Provenance for agent_ops backup metadata only; no VM fetch/runtime argument.
+# The fixture keeps these aligned with images/tei-reranker-onnx/export_model.py.
 agent_stack_reranker_model: cl-nagoya/ruri-v3-reranker-310m
 agent_stack_reranker_revision: bb46934ee9ed09f850b9fcff17501b3ef7ddb2b3
+# ORT intra-op threads follow the cgroup CPU quota via num_cpus 1.17, not these envs.
 # WS7c: bound the CPU inference pools explicitly instead of letting Rayon see
 # all host cores behind a Docker CPU quota. Candle CPU forces runtime batch 4;
 # retain the 2048-token pair limit without shortening candidates.
 # WS14 (2026-10-17 user decision, WS13 measurements): 12-vCPU VM;
 # reranker 6 + embedding 4 leave 2 CPUs for OS/Hermes/Hindsight/DB.
 # Embedding scales with CPU; reranker barely improves above 6 (batch-size-4
-# backend limit). Caps are not reservations; full-stack latency is unmeasured.
+# backend limit in the WS13 Candle baseline). WS18 uses ORT for reranking.
+# Caps are not reservations; full-stack latency is unmeasured.
 agent_stack_embedding_cpus: 4
 # WS16: explicit threads=4 improved both query and 32-fact retain vs unset.
 agent_stack_embedding_threads: 4
@@ -128,9 +132,6 @@ agent_stack_pinned_models:
   - name: embedding
     model: "{{ agent_stack_embedding_model }}"
     revision: "{{ agent_stack_embedding_revision }}"
-  - name: reranker
-    model: "{{ agent_stack_reranker_model }}"
-    revision: "{{ agent_stack_reranker_revision }}"
 
 # --- Secrets -----------------------------------------------------------------
 # Plaintext schema: files/infrastructure/secrets/agent/runtime.yaml.example.

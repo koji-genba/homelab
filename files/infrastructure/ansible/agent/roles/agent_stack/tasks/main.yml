@@ -13,7 +13,7 @@
 - name: Generate the Runner and CDP tunnel SSH identities
   ansible.builtin.import_tasks: ssh_keys.yml
 
-- name: Pre-fetch the pinned embedding and rerank models
+- name: Pre-fetch the pinned embedding model (reranker is image-bundled)
   ansible.builtin.import_tasks: models.yml
 
 - name: Render the Hermes configuration and seed the personality
