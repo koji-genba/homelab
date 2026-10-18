@@ -10,15 +10,21 @@
     - { path: "{{ agent_stack_project_dir }}", mode: "0755" }
     - { path: "/etc/homelab/agent", mode: "0750" }
     - { path: "{{ agent_stack_secrets_dir }}", mode: "0700" }
-    - { path: "{{ agent_stack_ssh_key_dir }}", mode: "0700" }
+    - path: "{{ agent_stack_ssh_key_dir }}"
+      owner: "{{ agent_stack_uid }}"
+      group: "{{ agent_stack_gid }}"
+      mode: "0700"
     # The Hermes image drops to UID/GID 10000 for its data tree.
     - path: "{{ agent_stack_hermes_data_dir }}"
       owner: "{{ agent_stack_uid }}"
       group: "{{ agent_stack_gid }}"
       mode: "0750"
-    # The PostgreSQL entrypoint starts as root, chowns PGDATA and drops to the
-    # postgres account, so a root-owned 0700 directory is safe and private.
-    - { path: "{{ agent_stack_postgres_data_dir }}", mode: "0700" }
+    # The entrypoint only repairs ownership on startup. Never take PGDATA away
+    # from a running postgres process during an Ansible re-apply.
+    - path: "{{ agent_stack_postgres_data_dir }}"
+      owner: "{{ agent_stack_postgres_uid }}"
+      group: "{{ agent_stack_postgres_gid }}"
+      mode: "0700"
     - { path: "{{ agent_stack_models_dir }}", mode: "0755" }
   loop_control:
     label: "{{ item.path }}"

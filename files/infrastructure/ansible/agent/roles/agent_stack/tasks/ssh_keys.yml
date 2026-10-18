@@ -95,16 +95,24 @@
 
 - name: Pin the Runner host key for the CDP tunnel
   ansible.builtin.copy:
-    content: "{{ agent_stack_runner_host_key.stdout }}"
+    content: "{{ agent_stack_runner_host_key.stdout | trim }}\n"
     dest: "{{ agent_stack_ssh_key_dir }}/known_hosts"
     owner: "{{ agent_stack_uid }}"
     group: "{{ agent_stack_gid }}"
     mode: "0644"
 
 - name: Pin the Runner host key for the Hermes terminal backend
-  ansible.builtin.copy:
-    content: "{{ agent_stack_runner_host_key.stdout }}"
-    dest: "{{ agent_stack_hermes_data_dir }}/.ssh/known_hosts"
+  # OpenSSH may learn other host-key algorithms via UpdateHostKeys. Manage the
+  # pinned Ed25519 entry without removing those entries on every apply.
+  ansible.builtin.known_hosts:
+    name: "{{ agent_stack_runner_host }}"
+    key: "{{ agent_stack_runner_host_key.stdout | trim }}"
+    path: "{{ agent_stack_hermes_data_dir }}/.ssh/known_hosts"
+    state: present
+
+- name: Harden the Hermes terminal known hosts file
+  ansible.builtin.file:
+    path: "{{ agent_stack_hermes_data_dir }}/.ssh/known_hosts"
     owner: "{{ agent_stack_uid }}"
     group: "{{ agent_stack_gid }}"
     mode: "0600"

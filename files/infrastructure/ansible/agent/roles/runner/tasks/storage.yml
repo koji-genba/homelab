@@ -1,12 +1,21 @@
 ---
 # The Runner work disk (/srv/agent-work), owned by the execution account.
+- name: Check whether the runner work path is already mounted
+  ansible.builtin.command:
+    argv: [findmnt, -rn, -M, "{{ runner_data_mount }}"]
+  register: runner_data_mountpoint
+  changed_when: false
+  failed_when: runner_data_mountpoint.rc not in [0, 1]
+  check_mode: false
+
 - name: Create the runner work mount point
   ansible.builtin.file:
     path: "{{ runner_data_mount }}"
     state: directory
-    owner: root
-    group: root
+    owner: "{{ runner_user }}"
+    group: "{{ runner_user }}"
     mode: '0750'
+  when: runner_data_mountpoint.rc == 1
 
 - name: Inspect the runner work disk
   ansible.builtin.stat:

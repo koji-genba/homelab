@@ -96,7 +96,11 @@ Agent VM専用の暗号化バックアップ置き場。pve1側の作成と`expo
 | owner / mode | `root:root` / `0700` |
 | marker | `/mnt/tank-gen2/data/agent-backups/.homelab-export-agent-backups`、内容は`agent-backups` |
 | snapshot | なし。バックアップ自体が世代管理・暗号化されるため取らない |
-| client mount | Agent VM `/mnt/agent-backups`（`make ansible-apply-agent`時に検証予定、現時点では未検証） |
+| client mount | Agent VM `/mnt/agent-backups`（2026-10-18のAnsible適用でnfs4 mount・backup成功を確認） |
+
+2026-10-18の再適用で、Ansibleのmount-point作成taskがmount済みのexport rootを`0750`へ変更した
+（`no_root_squash`）。WS26ではmount済みなら作成taskをskipし、server側のowner/modeに触れないよう修正した。
+**pve1側で運用者が`0700`へ戻す作業は未実施**。上表のmodeは契約値であり、復旧済みとはしない。
 
 設定は既存exportと同じ`/etc/exports`に追加した。変更後のSHA-256（2026-10-18）は
 `5639f51953049d980b62faa7745546f9a6364e8eaeb8ffebe306327369f118fe`。

@@ -208,7 +208,7 @@ failed数は履歴も含むため、原因解消だけでは回復しない場�
 
 2026-10-18にpve1で専用dataset `tank-gen2/data/agent-backups` とexportを作成済み。
 mountpointは `/mnt/tank-gen2/data/agent-backups`、`quota=300G`、`recordsize=1M`、
-`compression=lz4`（継承）、owner / modeは `root:root` / `0700`。
+`compression=lz4`（継承）、owner / modeの契約値は `root:root` / `0700`。
 export直下のmarker `.homelab-export-agent-backups` の内容は `agent-backups`。
 バックアップ自体が世代管理・暗号化されているため、snapshotは取らない（作成時もなし）。
 
@@ -223,7 +223,8 @@ clientは `192.168.10.104/32` へ限定し、`fsid` は指定しない。
 `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` を確認した。
 変更後の `/etc/exports` のSHA-256は
 `5639f51953049d980b62faa7745546f9a6364e8eaeb8ffebe306327369f118fe`。
-Agent VMの `/mnt/agent-backups` へのmountは未検証で、`make ansible-apply-agent` 時に確認する。
+Agent VMの `/mnt/agent-backups` へのnfs4 mountとbackupは2026-10-18に確認済み。
+同日の再適用でexport rootが`0750`へ変わったため、運用者がpve1側で`0700`へ戻す作業が残る（[NFS export契約](nfs-export.md#agentバックアップ用export2026-10-18作成)）。
 本リポジトリは NFS server 設定を変更しない。
 
 ## 8. セキュリティ
@@ -234,7 +235,7 @@ Agent VMの `/mnt/agent-backups` へのmountは未検証で、`make ansible-appl
   それらの秘密はSOPSから復旧するかAnsibleで再生成する。
 - 通知 URL・identity のパスをログやコミットに残さない。
 
-## 9. 検証範囲（2026-10-17）
+## 9. 検証範囲（2026-10-18更新）
 
 過去の試験証跡をWS8でコードと照合した。ローカルの成功を本番DR完了とはしない。
 
@@ -246,9 +247,14 @@ Agent VMの `/mnt/agent-backups` へのmountは未検証で、`make ansible-appl
 | WS7b（模擬Runner） | 保存stdoutでterminal実行・ファイル内容・browserのSSRF拒否・公開ページ取得・healthcheck/backup成功を照合。鍵制約・egress・再接続は報告と描画物で確認したが、全ての生の実行証跡は残っていない |
 | WS8（現行helper） | タイムゾーン/JST日付境界、tool-callだけの未完了ターン、pending operationのresume、bank方針適用順、明示失敗時の通知と平文掃除、tar exit 1/2で破壊処理前に停止、stats異常・unhealthy検知、6時間後の通知間隔をfixtureで再検証 |
 
-現行helperの実Hindsight/LLMを含む通し再試験は行っていない。本番VM初回構築・OS reboot・systemd hardening・
-実NFSの容量/障害・実運用age/SSH鍵・公開imageの実pull/起動（3つの自前imageのdigestは2026-10-18に`compose.yaml`へ固定済みで、
-起動helperはALL-ZERO placeholderや未固定imageを拒否する安全策を持つ）・
-Discord/通知先・SearXNG/MCP・本番DRは未検証。
+2026-10-18の実VMではAnsible適用、公開imageのpull/起動、実NFS mount、健康確認（Discord connected・Runner含む）、
+通知webhookのGET 200を確認した。17:06のbackup失敗（Runner `lost+found`とwebhook値）をPR #106で修正し、
+再適用のPGDATA所有権障害を運用者が復旧後、17:30 JSTのbackup set `20261018T083023Z`は成功した。
+Hermes約24 MB、PostgreSQL約120 KB、agent-config、runner-workの暗号化成果物を保存し、`sha256sum -c SHA256SUMS`は全件OK。
+`hindsight_version=unknown`は軽微な残件。続く`--scratch`はtotal_nodes=5、recall 5 results、Hermes archive 667 entries、
+state.db integrity_check ok（2 DB）を確認し、scratch projectを削除、本番は無変更だった。
+復旧age identityはSSH stdin経由で`/run`（tmpfs、0600）の一時ファイルへ渡し、EXIT trapでshred、終了後の不在を確認した。
+
+本番DR、OS reboot、実NFSの容量/障害、Discordの本受入、SearXNG/MCPの網羅的な確認は未実施。
 Runnerのコンテナ試験はsystemdの制限を再現していない。特に`RestrictNamespaces`の制限下でChromium sandboxが
 動くかは実VM受入に残す。helperはroot専用平文作業領域をumask 077で作り、backup/restore/exportを排他制御する。
