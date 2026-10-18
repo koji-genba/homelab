@@ -1,6 +1,6 @@
 # Hermes Agent運用
 
-- 状態: repo定義済み（2026-10-17）。初回構築は実機では未実施（この文書は実装から導いた手順）
+- 状態: VM 104/105作成・pve1バックアップexport準備済み（2026-10-18）。Ansible適用・Discord・受入・復元試験は未実施
 - 対象: Agent VM（`agent`、VMID 104、`192.168.10.104`）と Runner VM（`runner`、VMID 105、`192.168.10.105`）
 - 設計判断: [ADR-0008](../adr/0008-hermes-agent-hindsight-vms.md)
 - 復旧・バックアップ: [Hermes Agent運用（バックアップ・リストア・エクスポート・記憶再構築・健康確認）](hermes-agent-backup.md)
@@ -234,19 +234,21 @@ Agent VM上の配置は次のとおり。role `agent_stack`がCompose環境を�
 各手順の検証状態を付す。`[実機未検証]`は実装から導いた手順であり、まだ実機で通していない。
 Proxmoxのuser/role/token/ACLはTerraform管理外で、apply前に人が用意する（[Apps VM復旧のProxmox準備](apps-vm-recovery.md#terraform実行前のproxmox側準備)に倣う）。
 
-1. **Proxmox側の手動準備** `[実機未検証]`
+1. **Proxmox側の手動準備** `[2026-10-18 実施]`
    VMID 104 / 105 と `192.168.10.104` / `.105` が空いていることを確認し、各Terraform用のAPI token
    （`terraform@pve!agent-vm` / `terraform@pve!runner-vm`、`privsep=0`）と、`/vms/104`・`/vms/105`および
    image importに必要なdatastore権限のACLを用意する。`terraform-*`のrootは重複確認のためのpingを行わない。
    対象datastore `local`のcontent typeに`Import`と`snippets`が含まれることを確認する。
    最初のAnsible接続前に、Proxmox console等のout-of-band経路で各VMのSSH host-key fingerprintを確認し、
    管理端末の`known_hosts`へ追加する。詳細は各rootのREADMEを正とする。
-2. **データdiskのby-id確認** `[実装から導いた手順]`
+   実測: tokenとユーザーACLを追加済み。`privsep=0`の3 tokenは同じユーザーACLを継承し、VM別には分離されない。host keyは手順3のout-of-band経路で登録した。
+2. **データdiskのby-id確認** `[2026-10-18 実施]`
    `group_vars/agent.yml`の`agent_data_disk`（既定`/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1`）と
    `group_vars/runner.yml`の`runner_data_disk`が、hypervisorの割り当てと一致することを確認する。
    一致しない場合は`/dev/sdX`の並びではなくby-idで上書きする。role `agent_storage`は対象diskが無いと
    明示的に失敗する。
-3. **VM作成** `[実機未検証]`
+   実測: 両VMで既定の`/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1`が存在し、group_varsと一致した。
+3. **VM作成** `[2026-10-18 実施]`
    API tokenとSSH公開鍵を`TF_VAR_proxmox_api_token` / `TF_VAR_ssh_public_key`として管理端末へ一時注入し、
    validate → plan → applyの順で実行する。applyは保存planのみを使い`-auto-approve`を使わない。
 
@@ -258,6 +260,10 @@ Proxmoxのuser/role/token/ACLはTerraform管理外で、apply前に人が用意�
    make TERRAFORM_ROOT=files/infrastructure/terraform/runner-vm terraform-plan
    make TERRAFORM_ROOT=files/infrastructure/terraform/runner-vm terraform-apply
    ```
+
+   実測: bpg/proxmox 0.116.1で保存planから各`3 added, 0 changed, 0 destroyed`、両VMの`cloud-init status`は`done`。
+   pve1の`qm guest exec <vmid> -- cat /etc/ssh/ssh_host_ed25519_key.pub`でed25519 host keyを取得し（`ssh-keyscan`は不使用）、
+   管理端末の`known_hosts`へ登録後、両VMの`deploy`接続（`StrictHostKeyChecking=yes`）と`sudo -n true`が成功した。
 
 4. **自前imageのdigest確認** `[公開済み]`
    自前3image（`homelab-hermes-agent` / `homelab-memory-db` / `homelab-tei-reranker-onnx`）は2026-10-18に
@@ -275,12 +281,14 @@ Proxmoxのuser/role/token/ACLはTerraform管理外で、apply前に人が用意�
    AGE_RECIPIENT=age1... make secrets-encrypt-agent
    AGE_IDENTITY_FILE=/secure/path/age-identity.txt make secrets-decrypt-check-agent
    ```
-6. **pve1のバックアップexport準備** `[手動・未実施]`
+6. **pve1のバックアップexport準備** `[2026-10-18 実施]`
    pve1の専用datasetとNFS export、markerは[バックアップ文書のpve1準備節](hermes-agent-backup.md#7-pve1-側の事前準備手動自動化しない)に
-   従って人が作成する。exportは`192.168.10.104/32`へ限定する。あわせて`group_vars/agent.yml`の
-   `agent_backup_age_recipients`へage公開鍵を設定する。空の間はバックアップがfail closedになる。
+   従って人が作成する。exportは`192.168.10.104/32`へ限定する。`group_vars/agent.yml`の
+   `agent_backup_age_recipients`にはSOPS/state backupと同じhomelab復旧用age公開鍵を設定済み。
+   空の間はバックアップがfail closedになる。
    role `agent_storage`は、pve1がexportを広告している場合だけ`/mnt/agent-backups`をmountし、
    advertiseされていない場合は安全にskipする。
+   実測: dataset・`/etc/exports`・markerを作成し`exportfs -v`で確認済み。Agent VM側のmountは未検証。
 7. **Ansible適用** `[実機未検証]`
    SSH agentとage identityを用意して手動適用する。Agent playが先に走り、Agent VM上で生成したRunner SSH鍵を
    factとしてRunner playが受け取るため、この順序は`site.yml`が保証する。
@@ -483,7 +491,7 @@ secret bundleの復号確認は別枠で`make secrets-decrypt-check-agent`（ide
 
 ## 既知の制約・未決事項
 
-- 初回構築を通しで実行していない。各手順は実装から導いたもので、受入は初回構築時に確認する。
+- VM作成・pve1 export準備までは2026-10-18に実施済み。Ansible適用・Discord・受入・復元試験は未実施。
 - Discordのbot token・channel、運用webhookはsecret bundleが正であり、repoには置かない。
 - 推論エンドポイントには優先度機構が無い。背景処理の同時実行を1へ絞ることで会話への影響を抑えるが、
   会話ターンを構造的に優先させる仕組みは持たない。
@@ -501,4 +509,7 @@ secret bundleの復号確認は別枠で`make secrets-decrypt-check-agent`（ide
 
 | 日付 | 操作者 | 反映内容 | 確認結果 |
 | --- | --- | --- | --- |
-| — | — | 初回構築は未実施 | — |
+| 2026-10-18 | 運用者 | Proxmox token `terraform@pve!agent-vm` / `terraform@pve!runner-vm`作成（`privsep=0`、有効期限2027-04-30 23:59:59 JST）。ユーザーACL `/vms/104`・`/vms/105`に`HomelabTerraform`、propagate 1を追加 | 既存`/vms/101`はpropagate 1、`/storage/local`・`/storage/vmpool`・`/nodes/pve1`・`/sdn/zones/localnetwork`・`/sdn/zones/localnetwork/vmbr0/10`はpropagate 0。3 tokenは同じユーザーACLを継承しVM別分離なし。`apps-vm` tokenの期限は2026-12-04のまま |
+| 2026-10-18 | 運用者 | bpg/proxmox 0.116.1、保存planからAgent / Runnerをapply | 各`3 added, 0 changed, 0 destroyed`（`local:import/debian-13-genericcloud-amd64-{agent,runner}.qcow2`、cloud-init snippet、VM）。104: 12 vCPU / 24 GiB / vmpool 40 + 100 GB、105: 8 vCPU / 16 GiB / vmpool 40 + 150 GB。local stateは0600、age暗号化copyを`state-backup`へpush（`d5fdcc5` → `8074808`） |
+| 2026-10-18 | 運用者 | pve1の`qm guest exec <vmid> -- cat /etc/ssh/ssh_host_ed25519_key.pub`でhost keyをout-of-band取得し管理端末の`known_hosts`へ登録 | 両VMでcloud-init done、データdiskのby-id一致、`StrictHostKeyChecking=yes`のdeploy接続と`sudo -n true`成功 |
+| 2026-10-18 | 運用者 | pve1に`tank-gen2/data/agent-backups`、`/etc/exports`のAgent `/32`限定export、markerを作成 | `exportfs -ra`後の`exportfs -v`を確認。`/etc/exports` SHA-256: `5639f51953049d980b62faa7745546f9a6364e8eaeb8ffebe306327369f118fe`。Agent側mountは未検証 |

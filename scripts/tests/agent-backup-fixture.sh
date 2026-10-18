@@ -35,10 +35,13 @@ roles = [r if isinstance(r, str) else next(iter(r)) for r in agent_play["roles"]
 assert "agent_ops" in roles
 assert roles.index("agent_ops") > roles.index("agent_stack")
 
-# --- Recipients fail closed --------------------------------------------------
-for path in ("group_vars/agent.yml", "group_vars/agent.yml.example"):
-    variables = yaml.safe_load((root / path).read_text())
-    assert variables["agent_backup_age_recipients"] == [], path
+# --- Recovery recipient configured; example stays empty ----------------------
+variables = yaml.safe_load((root / "group_vars/agent.yml").read_text())
+assert variables["agent_backup_age_recipients"] == [
+    "age1a8v97ung7t9g39vdxsdxgzta4fq4hz7hv7yezzlx6ac7xfgqgsws420x6u"
+]
+example = yaml.safe_load((root / "group_vars/agent.yml.example").read_text())
+assert example["agent_backup_age_recipients"] == []
 
 backup = (role / "templates" / "homelab-agent-backup.sh.j2").read_text()
 # No recipients -> refuse rather than write plaintext.

@@ -42,8 +42,9 @@ role が Agent VM に配置するヘルパー（`/usr/local/sbin`、root 0755）
 ### 暗号化
 
 - 宛先は `group_vars/agent.yml` の `agent_backup_age_recipients`（age 公開鍵）。
+  SOPS/state backup と同じ homelab 復旧用 age key を設定済み。
 - 復号用の秘密鍵（identity）は **この VM にも git にも置かない**。本リポジトリの復旧用 age key を使う。
-- 未設定（空）の間はバックアップは **fail closed**（平文を書かずに失敗する）。初回実行前に 1 つ以上設定する。
+- 未設定（空）の間はバックアップは **fail closed**（平文を書かずに失敗する）。
 
 ### マウントガード
 
@@ -205,10 +206,24 @@ failed数は履歴も含むため、原因解消だけでは回復しない場�
 
 ## 7. pve1 側の事前準備（手動・自動化しない）
 
-`agent_backup_mounts` の export はまだ存在しない。pve1 で dataset と export を作成し、
-`/etc/exports.d/` に反映する（既存 export と同様に `192.168.10.104/32` へ限定、
-`no_root_squash,no_all_squash`、`fsid` は既存と重複しない値）。marker ファイル
-`.homelab-export-agent-backups` を export 直下に置き内容を `agent-backups` にする。
+2026-10-18にpve1で専用dataset `tank-gen2/data/agent-backups` とexportを作成済み。
+mountpointは `/mnt/tank-gen2/data/agent-backups`、`quota=300G`、`recordsize=1M`、
+`compression=lz4`（継承）、owner / modeは `root:root` / `0700`。
+export直下のmarker `.homelab-export-agent-backups` の内容は `agent-backups`。
+バックアップ自体が世代管理・暗号化されているため、snapshotは取らない（作成時もなし）。
+
+既存exportと同じ **`/etc/exports`** に次の行を追加した（`/etc/exports.d/` は空）。
+clientは `192.168.10.104/32` へ限定し、`fsid` は指定しない。
+
+```text
+/mnt/tank-gen2/data/agent-backups 192.168.10.104/32(rw,sync,no_subtree_check,sec=sys,secure,no_root_squash,no_all_squash)
+```
+
+`exportfs -ra` 後の `exportfs -v` で、clientと有効option
+`sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` を確認した。
+変更後の `/etc/exports` のSHA-256は
+`5639f51953049d980b62faa7745546f9a6364e8eaeb8ffebe306327369f118fe`。
+Agent VMの `/mnt/agent-backups` へのmountは未検証で、`make ansible-apply-agent` 時に確認する。
 本リポジトリは NFS server 設定を変更しない。
 
 ## 8. セキュリティ
