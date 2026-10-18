@@ -59,7 +59,7 @@ agent_stack_llm_max_concurrent: 1
 # tokens with no reasoning text vs 69 with its default. Keep background work light.
 agent_stack_hindsight_reasoning_effort: low
 # The served window is reported as 1M, but that is not a useful per-turn budget.
-# Pin a bounded value; the runtime is text-only.
+# Pin a bounded value for the shared text/vision endpoint.
 agent_stack_llm_context_length: 131072
 agent_stack_llm_max_output_tokens: 16384
 

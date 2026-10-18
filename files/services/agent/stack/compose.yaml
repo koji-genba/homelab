@@ -264,7 +264,7 @@ services:
       HINDSIGHT_API_LLM_MODEL: "${HINDSIGHT_LLM_MODEL:?set HINDSIGHT_LLM_MODEL}"
       HINDSIGHT_API_LLM_REASONING_EFFORT: "${HINDSIGHT_LLM_REASONING_EFFORT:?set HINDSIGHT_LLM_REASONING_EFFORT}"
       HINDSIGHT_API_LLM_API_KEY: no-key-required
-      # Content is text-only; image attachments are refused rather than dropped.
+      # Memory retains text only; Hermes handles images through the DGX endpoint.
       HINDSIGHT_API_LLM_VISION: "false"
       # Bound background extraction/consolidation/reflect so it cannot saturate
       # the single shared inference endpoint.
@@ -338,6 +338,9 @@ services:
     environment:
       HERMES_HOME: /opt/data
       TZ: "${AGENT_TIMEZONE:?set AGENT_TIMEZONE}"
+      # Apps VM Caddy serves a public certificate; keep normal TLS verification.
+      # extra_hosts below pins this name to the Apps LAN IP, as for MCP.
+      SEARXNG_URL: "https://${SEARXNG_FQDN:?set SEARXNG_FQDN}"
       # The terminal backend connects to the Runner VM over SSH with the Agent
       # VM's dedicated key; config.yaml points terminal.ssh_key at this path.
       # The key name is passed so the role and the config template cannot drift.

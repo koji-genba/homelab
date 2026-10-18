@@ -37,11 +37,24 @@ Runner VM 192.168.10.105 (VMID 105, VLAN 10, tailnet外)
 ```
 
 - 推論はDGXの単一エンドポイント`http://192.168.10.51:8000/v1`（`glm-5.3-flash`、OpenAI互換API、
-  実体は`tensorfold serve`）を共用する。fallback providerは無い。テキスト専用。
+  実体は`tensorfold serve`）を共用する。fallback providerは無い。画像入力も同じDGXへ送る
+  （2026-10-18に画像を送って動作を確認）。
 - Agent stackは`files/services/compose/`の外にあるため、Apps VMの15分reconcile・起動helper・digest gate・
   `scripts/compose-config.sh`の対象にならない。変更は`make ansible-apply-agent`で人が反映する。
 - 両VMとも`192.168.10.0/24`（Server VLAN）にあり、IPはTerraform変数と`group_vars/{agent,runner}.yml`が正。
   宅外からは既存gatewayのsubnet route（`192.168.10.0/24`）で到達する。Tailscale ACLは変更しない。
+
+### 外部へ出る経路
+
+Discordへの応答・添付、SearXNG経由のWeb検索（検索語は公開エンジンへ渡る）、MCPの`web_url_read`（ページ本文の取得）、
+Runnerの閲覧・コマンド、監視通知・任意のdead-man通知は意図した外部通信として残す。
+モデルカタログ等の定期取得、tirith、必要な依存のlazy install（TTS以外）も維持する。
+TTS・STT・画像生成は使わず、組み込み`web_extract`は検索専用の`searxng`を指定して抽出を失敗させ、外部SaaSへ切り替えない。
+TTSはツール非公開に加え、command型providerを`/bin/false`へ向けて保存済みvoice modeでも送信を防ぐ。
+`voice.auto_tts: false`も明示する。command型providerはEdgeの利用可否チェックを通らないため、Edgeのlazy installも起きない。
+画像添付は`image_input_mode: native`でmainのGLMへ直接渡し、`vision_analyze`用の`auxiliary.vision`もDGXへ固定する。
+shared metricsの収集・送信、skill sync、Nous guest、connectors、外部monitoring exportは明示的に無効にする。
+これは機能設定による制限であり、Agent全体のnetwork egress遮断ではない。
 
 ### サービスの資源上限
 
