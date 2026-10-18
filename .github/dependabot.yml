@@ -46,6 +46,9 @@ updates:
     directory: /files/services/images/hermes-agent
     schedule: {interval: weekly}
   - package-ecosystem: docker
+    directory: /files/services/images/tei-reranker-onnx
+    schedule: {interval: weekly}
+  - package-ecosystem: docker
     directory: /files/services/images/memory-db
     schedule: {interval: weekly}
   - package-ecosystem: docker

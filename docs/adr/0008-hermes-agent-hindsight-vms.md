@@ -205,3 +205,42 @@ embeddingのthreadsは未設定と4をWS13bのquery/32-fact入力で比較し、
 WS16のswapなし・本番同等上限で、warm-up/負荷peakはembedding 5.383 GiB / reranker 2.789 GiB。
 最終embedding負荷（32件×2並列+query 0.5秒おき3分）とrerank20/30候補各60回は全200、429/panic/OOMなし。
 20候補p50/p95 3.503/4.701秒はWS15の旧版3.492/4.718秒と同等。詳細はrunbookに記載する。本番適用はしていない。
+
+### 2026-10-18補足: WS18 rerankerをORTへ変更
+
+ユーザー判断により、初回本番構築前にrerankerだけをTEI **ONNX Runtime backend**へ切り替える。
+embeddingはcpu-1.9.4のCandleを維持する。WS16のキュー対策・C=64・token2048・候補MID20/HIGH30も維持する。
+この補足はWS12/WS14のCandle速度評価を更新するもので、過去の測定結果はそのまま残す。
+
+WS15では同じ元重み・revision `bb46934ee9ed09f850b9fcff17501b3ef7ddb2b3`からFP32、opset17、
+動的batch/sequence軸のONNXを自前exportし、6 CPUで20候補p50がCandle 3.49秒からORT約1.07秒へ短縮した。
+通常のerf GELUでは24クエリ中1件の下位順位が入れ替わったため、hidden層と分類headをともに
+`gelu_pytorch_tanh`にする。TEI Candleの`HiddenAct::Gelu`がtanh近似を使うためで、
+元Transformers経路との数学的同一性を主張するものではない。互換版は24クエリ・連続96回で全順位一致、
+最大スコア差2.21e-6だった。重み・tokenizerの変更、量子化、追加学習は行わない。
+
+`files/services/images/tei-reranker-onnx/`のmulti-stage buildで、digest固定Python、CPU torch 2.10.0、
+transformers 5.12.0、onnx 1.19.0と全推移依存のwheel hashを固定する。
+`trust_remote_code=False`・safetensors限定で取得し、TEI cpu-1.9.4のindex digestを最終baseに使う。
+ONNX・config・tokenizerは`/model`へ同梱し、safetensorsは最終imageへ入れないためCandleへfallbackできない。
+ONNX SHA-256とexport条件は`/model/export.json`・`SHA256SUMS`とbuild logに残す。
+モデルカードはApache-2.0を明記しており、ライセンス本文、元カード、出典と変換内容のNOTICEを同梱して再配布する。
+
+6 CPU / 4 GiB、swap禁止、tokenization workers=6を採用する。ORTの実行batch上限は8。
+TEI 1.9.4 `backends/ort/src/lib.rs:130`は`num_cpus::get()`でintra-op threadsを設定し、
+Cargo.lockのnum_cpus 1.17.0はLinux cgroup v1/v2のquotaを読むため、quota 6で6 threadsになる。
+`RAYON/OMP/MKL=6`は周辺プール用に残すが、ORTのintra-op制御と混同しない。
+VMの12コアへ広がる前提でenvだけを設定する方法は採らない。
+
+`tei-reranker-onnx-image.yml`はPRでbuildと一致検査のみ、mainでは同じ検証済みimageをGHCRへ公開する。
+固定の架空入力24件×20候補について同じTEIの元safetensors/Candleと比較し、全順位一致かつsigmoidスコアの
+最大絶対差1e-4以下を必須にする。CIは2 CPUで逐次起動し、同じscriptをローカル6 CPUの20/30候補試験にも使う。
+2026-10-18時点でreranker ONNX imageは未公開で、digestはall-zero placeholderのまま。
+Hermes・memory-dbは同日に公開・digest転記済み。rerankerの公開後のdigest転記は別変更で行う。既存の汎用gateはplaceholderを拒否し、
+fixtureは新imageだけがplaceholderの場合にも拒否することを実行検査する。
+Ansibleの事前取得はembeddingだけとし、rerankerのhost cache mount・model/revision envを削除する。
+
+WS18のrepo image実ビルド後、同一6 CPU / 4g / swapなし / C64 / workers6で20/30候補を各60回検証した。
+ORT p50/p95は20候補1.134/1.524秒、30候補1.657/2.259秒（同時のCandle基準3.513/4.759秒、4.962/6.951秒）。
+120回の全順位一致、3,000スコアの最大差2.21e-6、429/panic/OOMなし。ORT起動peak 2.756 GiB、
+全負荷後2.762 GiBで4gを維持する。本番と会話全体の応答性は別途確認する。

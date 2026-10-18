@@ -1,0 +1,90 @@
+name: Build TEI reranker ONNX image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - files/services/images/tei-reranker-onnx/**
+      - scripts/tests/tei-reranker-parity.py
+      - files/services/agent/stack/compose.yaml
+      - files/infrastructure/ansible/agent/roles/agent_stack/**
+      - .github/workflows/tei-reranker-onnx-image.yml
+  pull_request:
+    paths:
+      - files/services/images/tei-reranker-onnx/**
+      - scripts/tests/tei-reranker-parity.py
+      - files/services/agent/stack/compose.yaml
+      - files/infrastructure/ansible/agent/roles/agent_stack/**
+      - .github/workflows/tei-reranker-onnx-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build serving image and original Candle reference without publishing
+        run: |
+          set -eu
+          docker buildx build --platform linux/amd64 --load \
+            --tag homelab-tei-reranker-onnx:validated \
+            files/services/images/tei-reranker-onnx
+          docker buildx build --platform linux/amd64 --load --target candle-reference \
+            --tag homelab-tei-reranker-candle:reference \
+            files/services/images/tei-reranker-onnx
+      - name: Compare all ranks and sigmoid scores on 24 synthetic requests
+        run: |
+          python3 scripts/tests/tei-reranker-parity.py \
+            --ort-image homelab-tei-reranker-onnx:validated \
+            --candle-image homelab-tei-reranker-candle:reference \
+            --cpus 2 --output /tmp/tei-parity
+          cat /tmp/tei-parity/comparison.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Show export provenance and graph SHA-256
+        run: |
+          docker run --rm --network none --entrypoint cat \
+            homelab-tei-reranker-onnx:validated /model/export.json >> "$GITHUB_STEP_SUMMARY"
+      # Pass the exact tested image to the publish job, not a rebuild.
+      - name: Save tested image for publishing
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: docker save homelab-tei-reranker-onnx:validated | gzip > /tmp/tei-reranker-image.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        with:
+          name: tei-reranker-image
+          path: /tmp/tei-reranker-image.tar.gz
+          retention-days: 1
+          compression-level: 0 # The docker archive is already gzip-compressed.
+  publish:
+    needs: validate
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: tei-reranker-image
+          path: /tmp
+      - name: Publish tested image
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          docker load < /tmp/tei-reranker-image.tar.gz
+          printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          image=ghcr.io/koji-genba/homelab-tei-reranker-onnx
+          docker tag homelab-tei-reranker-onnx:validated "$image:cpu-1.9.4"
+          docker push "$image:cpu-1.9.4"
+          # Read the digest attached to this locally pushed image, avoiding a mutable-tag race.
+          digest="$(docker image inspect "$image:cpu-1.9.4" --format '{{range .RepoDigests}}{{println .}}{{end}}' | awk -F@ -v image="$image" '$1 == image {print $2}')"
+          printf '%s\n' "$digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          {
+            echo '## TEI reranker ONNX image'
+            echo 'Copy this immutable digest into Agent Compose (no automatic commit):'
+            echo "\`$image@$digest\`"
+          } >> "$GITHUB_STEP_SUMMARY"

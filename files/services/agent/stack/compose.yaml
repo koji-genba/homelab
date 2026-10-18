@@ -27,12 +27,16 @@
 # caps are ceilings, not reservations. Model prefetch is download-only,
 # capped at 1 GiB, and finishes before the inference servers start.
 #
-# All images are pinned by digest, the repo convention. The two self-built
-# images are pinned to the digests published by the image workflows
-# (.github/workflows/hermes-agent-image.yml, memory-db-image.yml) on 2026-10-18.
+# Image digests follow the repo convention. The self-built Hermes and memory-db
+# images are published and pinned as of 2026-10-18 by their image workflows
+# (.github/workflows/hermes-agent-image.yml, memory-db-image.yml).
+# The third self-built image, homelab-tei-reranker-onnx, is not yet published;
+# it carries the ALL-ZERO placeholder until tei-reranker-onnx-image.yml publishes
+# its first digest. Copy that digest from the workflow step summary into this
+# file in a follow-up change (CI does not commit it).
 # The role's helper (installed as /usr/local/sbin/homelab-agent-compose-up from
-# roles/agent_stack/templates/homelab-agent-compose-up.sh.j2) still refuses to
-# start on the ALL-ZERO placeholder or any unpinned image as a safety net.
+# roles/agent_stack/templates/homelab-agent-compose-up.sh.j2) refuses to start
+# on the ALL-ZERO placeholder or any unpinned image as a safety net.
 name: agent
 
 services:
@@ -154,29 +158,25 @@ services:
       start_period: 60s
 
   reranker:
-    # Same TEI CPU image as embedding (cpu-1.9.4 index digest).
-    image: ghcr.io/huggingface/text-embeddings-inference@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
+    # Built by tei-reranker-onnx-image.yml: pinned FP32 ONNX, Candle-compatible tanh GELU.
+    # PLACEHOLDER — copy the published digest after the workflow succeeds.
+    image: ghcr.io/koji-genba/homelab-tei-reranker-onnx@sha256:0000000000000000000000000000000000000000000000000000000000000000
     restart: unless-stopped
-    # ruri-v3-reranker-310m (ModernBERT, Candle backend) is ~1.7 GiB resident on
-    # CPU. WS16 cpu-1.9.4: swap-free warm-up/workload peak ~2.79 GiB;
-    # 4g leaves ~1.21 GiB headroom. Keep 6 CPUs: Candle CPU's
-    # batch-size-4 limit gives little benefit from 8/10 CPUs. Explicit thread pools
-    # prevent oversubscription behind the CPU quota (WS7c local measurements).
+    # ORT uses num_cpus 1.17 (cgroup v1/v2 quota aware) for intra-op threads:
+    # 6 CPU quota -> 6 threads; OMP/MKL/Rayon envs alone do not set ORT threads.
+    # WS15: FP32/tanh peak ~2.77 GiB at 4g, ~3.3x faster than Candle locally.
     mem_limit: 4g
+    memswap_limit: 4g
     cpus: "${TEI_RERANKER_CPUS:?set TEI_RERANKER_CPUS}"
     command:
       - --model-id
-      - "${TEI_RERANKER_MODEL:?set TEI_RERANKER_MODEL}"
-      - --revision
-      - "${TEI_RERANKER_REVISION:?set TEI_RERANKER_REVISION}"
+      - /model
       # Hindsight globally serializes batches of up to 32 pairs; allow headroom.
       - --max-concurrent-requests
       - "64"
       # The token limit also caps each query/document pair under auto-truncate.
       # Keep it at 2048; shrinking it for throughput can discard evidence.
-      # Candle CPU forces runtime max_batch_requests=4 (router overrides the CLI).
-      # Omit --max-batch-requests: 1 never constrained runtime batching; CPU
-      # warm-up already uses one sequence in 1.9.4, so it is redundant there too.
+      # ORT runtime batch ceiling is 8. Leave --max-batch-requests unset.
       - --max-batch-tokens
       - "2048"
       - --tokenization-workers
@@ -188,13 +188,6 @@ services:
       RAYON_NUM_THREADS: "${TEI_RERANKER_THREADS:?set TEI_RERANKER_THREADS}"
       OMP_NUM_THREADS: "${TEI_RERANKER_THREADS:?set TEI_RERANKER_THREADS}"
       MKL_NUM_THREADS: "${TEI_RERANKER_THREADS:?set TEI_RERANKER_THREADS}"
-    volumes:
-      - type: bind
-        source: "${MODELS_DIR:?set MODELS_DIR}"
-        target: /data
-        read_only: true
-        bind:
-          create_host_path: false
     networks:
       - internal
     cap_drop:
