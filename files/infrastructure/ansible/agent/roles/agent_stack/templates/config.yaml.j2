@@ -170,6 +170,16 @@ auxiliary:
     model: {{ agent_stack_llm_model }}
     base_url: {{ agent_stack_llm_base_url }}
 
+# Hermes latches first-touch hints by rewriting config.yaml, which the next
+# apply then reverts. Pre-mark the gateway hints as seen, and keep the
+# first-message profile-build offer off: it may web_search the user.
+onboarding:
+  profile_build: "off"
+  seen:
+    profile_build_offered: true
+    busy_input_prompt: true
+    tool_progress_prompt: true
+
 # Keep unused hosted features and external monitoring exports off explicitly.
 telemetry:
   shared_metrics:
