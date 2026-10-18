@@ -36,7 +36,7 @@ role が Agent VM に配置するヘルパー（`/usr/local/sbin`、root 0755）
 | `hermes-backup.zip.age` | `hermes backup`（SQLite 整合。agent 自身の `.env`/`auth.json` を含むため暗号化必須） |
 | `hindsight-postgres.dump.age` | Hindsight PostgreSQL の `pg_dump -Fc` |
 | `agent-config.tar.gz.age` | `compose.env`・`config.yaml`・Hindsight `config.json`・`SOUL.md`（**非秘密のみ**） |
-| `runner-work.tar.gz.age` | Runner の作業ツリー（キャッシュ除外、SSH 経由でストリーム） |
+| `runner-work.tar.gz.age` | Runner の作業ツリー（キャッシュとマウント直下の `./lost+found` を除外、SSH 経由でストリーム） |
 | `METADATA.txt` / `MANIFEST.txt` / `SHA256SUMS` | 非秘密のメタデータと破損検知用チェックサム |
 
 ### 暗号化

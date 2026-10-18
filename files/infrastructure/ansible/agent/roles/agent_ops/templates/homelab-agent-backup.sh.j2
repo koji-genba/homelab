@@ -12,7 +12,8 @@
 #   hindsight-postgres.dump.age  pg_dump -Fc of the Hindsight PostgreSQL DB
 #   agent-config.tar.gz.age      config.yaml, hindsight config.json, SOUL.md,
 #                                the non-secret compose.env (NOT secrets/*.env)
-#   runner-work.tar.gz.age       the Runner work tree (caches excluded)
+#   runner-work.tar.gz.age       the Runner work tree (caches and the mount
+#                                root's lost+found excluded)
 #   METADATA.txt, MANIFEST.txt, SHA256SUMS   non-secret set metadata
 #
 # A set is written as .incomplete-<ts> and renamed to <ts> only when complete,

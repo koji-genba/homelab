@@ -67,6 +67,8 @@ agent_ops_runner_host: "{{ agent_stack_runner_host | default(runner_management_i
 agent_ops_runner_user: "{{ agent_stack_runner_user | default(runner_user | default('hermes-runner')) }}"
 agent_ops_runner_workspace: "{{ agent_stack_runner_workspace | default('/srv/agent-work') }}"
 agent_ops_runner_excludes:
+  # The ext4 mount root contains a root-only recovery directory.
+  - ./lost+found
   - node_modules
   - .venv
   - venv
