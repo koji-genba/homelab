@@ -341,6 +341,11 @@ services:
       # Apps VM Caddy serves a public certificate; keep normal TLS verification.
       # extra_hosts below pins this name to the Apps LAN IP, as for MCP.
       SEARXNG_URL: "https://${SEARXNG_FQDN:?set SEARXNG_FQDN}"
+      # Register Discord slash commands with one bulk overwrite. The default
+      # "safe" policy creates ~100 commands one by one at 4.5 s intervals and
+      # hit its 600 s timeout on every start on 2026-10-18/19, so the sync never
+      # finished. Hermes caps the set at Discord's 100-command limit.
+      DISCORD_COMMAND_SYNC_POLICY: bulk
       # The terminal backend connects to the Runner VM over SSH with the Agent
       # VM's dedicated key; config.yaml points terminal.ssh_key at this path.
       # The key name is passed so the role and the config template cannot drift.

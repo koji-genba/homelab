@@ -424,6 +424,11 @@ Ansibleが上書きしない（週次振り返りcronはAnsibleが冪等に登�
 Discordのchannel IDはsecret bundle（`hermes.env`）由来で、`config.yaml`のroutingとnotification channelへ
 描画される。変更時はbundleを更新してからapplyする。
 
+Discordのスラッシュコマンドは、Hermesが起動時に登録する。既定の`safe`方式は約100個を4.5秒間隔で1つずつ作るため、
+2026-10-18〜19は毎回600秒の上限で打ち切られて同期が一度も完了せず、`/new`などが使えなかった。Composeで
+`DISCORD_COMMAND_SYNC_POLICY: bulk`を指定し、起動のたびに1回の要求でまとめて置き換える。登録後もDiscordの
+クライアントに出ないときは、クライアントを再読み込みする（PCはCtrl+R）。
+
 ### モデルと推論の変更
 
 - 推論endpointを変える場合は`group_vars/agent.yml`の`agent_stack_llm_base_url` / `agent_stack_llm_model`等を
