@@ -277,8 +277,9 @@ Proxmoxのuser/role/token/ACLはTerraform管理外で、apply前に人が用意�
    ```
 6. **pve1のバックアップexport準備** `[手動・未実施]`
    pve1の専用datasetとNFS export、markerは[バックアップ文書のpve1準備節](hermes-agent-backup.md#7-pve1-側の事前準備手動自動化しない)に
-   従って人が作成する。exportは`192.168.10.104/32`へ限定する。あわせて`group_vars/agent.yml`の
-   `agent_backup_age_recipients`へage公開鍵を設定する。空の間はバックアップがfail closedになる。
+   従って人が作成する。exportは`192.168.10.104/32`へ限定する。`group_vars/agent.yml`の
+   `agent_backup_age_recipients`にはSOPS/state backupと同じhomelab復旧用age公開鍵を設定済み。
+   空の間はバックアップがfail closedになる。
    role `agent_storage`は、pve1がexportを広告している場合だけ`/mnt/agent-backups`をmountし、
    advertiseされていない場合は安全にskipする。
 7. **Ansible適用** `[実機未検証]`

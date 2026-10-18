@@ -42,9 +42,9 @@ firewall_dnat_guard: true
 agent_runner_ssh_key_dir: /etc/homelab/agent/ssh
 
 # --- WS5: backup encryption -------------------------------------------------
-# age public recipients (e.g. "age1...") used to encrypt every backup and export
-# artifact written to the NFS export. The matching identities must NEVER be
-# stored on this VM or in git. While this is empty the backup fails closed
-# rather than writing plaintext. Set at least one recipient before the first
-# run, e.g. the homelab recovery age key.
-agent_backup_age_recipients: []
+# The homelab recovery age key (same as SOPS/state backups) encrypts every
+# backup and export artifact written to the NFS export. Its identity lives only
+# in KeePassXC/the operator workstation and must NEVER be stored on this VM or
+# in git. An empty recipient list fails closed rather than writing plaintext.
+agent_backup_age_recipients:
+  - "age1a8v97ung7t9g39vdxsdxgzta4fq4hz7hv7yezzlx6ac7xfgqgsws420x6u"

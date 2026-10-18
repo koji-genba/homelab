@@ -42,8 +42,9 @@ role が Agent VM に配置するヘルパー（`/usr/local/sbin`、root 0755）
 ### 暗号化
 
 - 宛先は `group_vars/agent.yml` の `agent_backup_age_recipients`（age 公開鍵）。
+  SOPS/state backup と同じ homelab 復旧用 age key を設定済み。
 - 復号用の秘密鍵（identity）は **この VM にも git にも置かない**。本リポジトリの復旧用 age key を使う。
-- 未設定（空）の間はバックアップは **fail closed**（平文を書かずに失敗する）。初回実行前に 1 つ以上設定する。
+- 未設定（空）の間はバックアップは **fail closed**（平文を書かずに失敗する）。
 
 ### マウントガード
 
