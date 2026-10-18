@@ -3,11 +3,9 @@ name: Build TEI reranker ONNX image
 on:
   push:
     branches: [main]
+    # Main runs publish a new image, so trigger only on image inputs; pull_request also validates Compose/Ansible/parity changes.
     paths:
       - files/services/images/tei-reranker-onnx/**
-      - scripts/tests/tei-reranker-parity.py
-      - files/services/agent/stack/compose.yaml
-      - files/infrastructure/ansible/agent/roles/agent_stack/**
       - .github/workflows/tei-reranker-onnx-image.yml
   pull_request:
     paths:
@@ -51,7 +49,7 @@ jobs:
       - name: Save tested image for publishing
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: docker save homelab-tei-reranker-onnx:validated | gzip > /tmp/tei-reranker-image.tar.gz
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         with:
           name: tei-reranker-image
@@ -66,7 +64,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: tei-reranker-image
           path: /tmp
