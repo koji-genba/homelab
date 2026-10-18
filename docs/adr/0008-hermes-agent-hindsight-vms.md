@@ -37,8 +37,9 @@ VM定義はTerraform root `files/infrastructure/terraform/{agent-vm,runner-vm}/`
 Agent系の反映は**Ansibleの手動適用**（`make ansible-apply-agent`）とする。mainマージでは自動反映しない。
 Composeは5サービス（`memory-db` / `embedding` / `reranker` / `hindsight` / `hermes`）に加え、
 ChromiumのCDPをSSHで転送する`cdp-tunnel`を既定で起動する。全イメージはdigestで固定し、
-自前の`homelab-hermes-agent` / `homelab-memory-db`はCI → GHCRでbuild・公開する。初回buildとComposeへの
-digest転記が済むまで、起動helper（`homelab-agent-compose-up`）はALL-ZERO placeholderを検出して起動を拒否する。
+自前の`homelab-hermes-agent` / `homelab-memory-db`はCI → GHCRでbuild・公開する（2026-10-18に初回公開し、
+digestは`compose.yaml`へ転記済み）。起動helper（`homelab-agent-compose-up`）はALL-ZERO placeholderや
+未固定imageを検出すると起動を拒否する（安全策）。
 
 記憶はHindsightの`local_external`モード、固定bank`personal`で持つ。全文検索にPostgreSQL 17 + PGroonga、
 embeddingに`cl-nagoya/ruri-v3-310m`、rerankerに`cl-nagoya/ruri-v3-reranker-310m`をTEI CPUで自前配信する。

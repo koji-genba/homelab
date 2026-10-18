@@ -257,11 +257,12 @@ Proxmoxのuser/role/token/ACLはTerraform管理外で、apply前に人が用意�
    make TERRAFORM_ROOT=files/infrastructure/terraform/runner-vm terraform-apply
    ```
 
-4. **自前imageの初回buildとdigest転記** `[実機未検証]`
-   `hermes-agent-image.yml`と`memory-db-image.yml`を実行し、job summaryに出力されるimmutable digestを
-   `files/services/agent/stack/compose.yaml`の2つの自前image（`homelab-hermes-agent` / `homelab-memory-db`）へ
-   転記する。転記は別変更で行う（CIはcommitしない）。転記前は起動helperがALL-ZERO placeholderを検出して
-   起動を拒否する。
+4. **自前imageのdigest確認** `[公開済み]`
+   自前2image（`homelab-hermes-agent` / `homelab-memory-db`）は2026-10-18に`hermes-agent-image.yml` /
+   `memory-db-image.yml`でbuild・公開済みで、そのimmutable digestは
+   `files/services/agent/stack/compose.yaml`へ転記済み。初回は転記漏れが無いことだけを確認する。
+   起動helperはALL-ZERO placeholderや未固定imageを検出すると起動を拒否する（安全策）。再転記は
+   Dockerfile更新時に下記「image更新」の手順で行う。
 5. **SOPS bundleの作成** `[実機未検証]`
    `files/infrastructure/secrets/agent/runtime.yaml.example`のkey一覧に従い、Discord bot tokenと
    user/channel ID、運用通知webhook、任意のdead-man ping URLを用意する。PostgreSQL passwordとSSH鍵は
