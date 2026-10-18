@@ -24,6 +24,7 @@
       - "{{ agent_stack_ssh_key_dir }}/id_ed25519"
   when: not agent_stack_runner_key_stat.stat.exists
   changed_when: true
+  notify: Recreate Hermes and the CDP tunnel
 
 - name: Check the CDP tunnel identity
   ansible.builtin.stat:
@@ -44,6 +45,7 @@
       - "{{ agent_stack_ssh_key_dir }}/cdp_tunnel_ed25519"
   when: not agent_stack_cdp_key_stat.stat.exists
   changed_when: true
+  notify: Recreate Hermes and the CDP tunnel
 
 # Both Hermes and the CDP tunnel run as UID 10000 and can read these 0600 keys.
 - name: Harden the identity directory and private keys
@@ -78,6 +80,8 @@
 # terminal backend, which uses the default known_hosts path with its hardcoded
 # StrictHostKeyChecking=accept-new: an existing entry is enforced, so a changed
 # host key fails the connection instead of being silently accepted).
+# Refresh the pair when keys or pins change: terminal SSH can read them on a
+# new connection, but the CDP tunnel keeps its authenticated SSH session alive.
 - name: Scan the Runner SSH host key
   ansible.builtin.command:
     argv:
@@ -121,6 +125,7 @@
     owner: "{{ agent_stack_uid }}"
     group: "{{ agent_stack_gid }}"
     mode: "0644"
+  notify: Recreate Hermes and the CDP tunnel
 
 - name: Pin the Runner host key for the Hermes terminal backend
   # OpenSSH may learn other host-key algorithms via UpdateHostKeys. Manage the
@@ -130,6 +135,7 @@
     key: "{{ agent_stack_runner_host_key_line }}"
     path: "{{ agent_stack_hermes_data_dir }}/.ssh/known_hosts"
     state: present
+  notify: Recreate Hermes and the CDP tunnel
 
 - name: Harden the Hermes terminal known hosts file
   ansible.builtin.file:

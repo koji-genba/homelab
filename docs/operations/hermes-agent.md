@@ -394,7 +394,9 @@ docker compose --project-name agent \
   --file /opt/homelab-agent/compose.yaml stop
 ```
 
-Hermesの設定を再読込する場合は、同じ引数で末尾を`restart hermes`にする（実行中の会話に影響するため保守時に行う）。
+Hermesの設定を再読込する場合は、同じ引数で末尾を
+`up -d --no-deps --force-recreate --wait --wait-timeout 600 hermes cdp-tunnel`にする
+（実行中の会話に影響するため保守時に行う）。待機上限を変更している場合は600をその値に合わせる。
 
 長命サービスは`restart: unless-stopped`のため、VM再起動後は自動で復帰する。operatorが`stop`した
 サービスは停止のままになる。
@@ -405,8 +407,17 @@ Hermesの`config.yaml`、`SOUL.md`（初回のみ`force: false`）、Hindsight `
 週次振り返りcronはrole `agent_stack`がテンプレートから描画する。変更はrepoで`group_vars`や
 `roles/agent_stack/templates/`を編集し、`make ansible-apply-agent`で反映する。`config.yaml`は毎回上書きされる
 ため、VM上で直接編集しない。同じ内容・属性ならtemplate taskは`ok`となる。Hermesにも設定を保存する経路があり、
-runtime側で変わった内容は次回applyで戻る。変更時のhandlerは`homelab-agent-compose-up`（`up -d --wait`）で、
-bind内の内容変更だけでは再作成・再読込を保証しない。反映には必要に応じて上記の再起動手順を使う。
+runtime側で変わった内容は次回applyで戻る。`config.yaml` / `hindsight/config.json`の変更時はhandler
+`Recreate Hermes and the CDP tunnel`が`up -d --no-deps --force-recreate --wait`で両サービスを再作成する。
+待機上限は起動helperと同じ`agent_stack_compose_wait_timeout`（既定600秒）。`cdp-tunnel`はHermesの
+network namespaceを共有するため、必ず一緒に再作成する。SSH鍵の生成・Runnerのknown_hostsの変更と、
+`SOUL.md` / 同梱skillsの不足分をseedした場合も同じhandlerへ通知する。SSHは新規接続時に鍵とknown_hostsを
+読むが、CDP tunnelは認証済み接続を保持するため、変更時に接続を張り直す。
+Compose定義・非secret環境の変更用handler `Restart the Agent stack`（通常の`up -d --wait`）は先に実行する。
+両方が通知されるとHermesが二度再作成される場合があるが、bind先の永続データ・SSH鍵は保持する。
+再作成は実行中の会話に影響するため、設定変更のapplyは保守時に行う。同じ内容・属性なら再作成は通知されない。
+Hindsight本体は設定ファイルをbind mountせず、環境変数の変更は通常の`up`で反映する。embeddingのbind mountは
+revision固定のモデルcacheで、モデル変更はComposeの引数へ反映される。rerankerのモデルはimage同梱である。
 `SOUL.md`以降に蓄積するデータ（`USER.md`/`MEMORY.md`、sessions、ユーザーが追加したskills/cron）は
 Ansibleが上書きしない（週次振り返りcronはAnsibleが冪等に登録する）。
 

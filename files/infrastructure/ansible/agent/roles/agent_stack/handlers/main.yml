@@ -1,10 +1,24 @@
 ---
 # Handlers flush at the end of the play, so the bank policy and cron job are
 # applied through `docker compose exec` against the containers that are already
-# running; the recreation below is what makes Hermes/Hindsight pick up rendered
-# configuration changes on their next start.
+# running. Normal `up` reconciles Compose definitions/env files, but cannot
+# detect content changes inside bind mounts.
 - name: Restart the Agent stack
   ansible.builtin.command:
     argv:
       - "{{ agent_stack_helpers_dir }}/homelab-agent-compose-up"
+  changed_when: true
+
+# Definition order matters: reconcile the stack before refreshing bind-mounted
+# Hermes inputs. If both handlers run, Hermes may be recreated twice; both use
+# the same persistent data/keys, and neither removes them. Always recreate the
+# CDP tunnel with Hermes because it shares Hermes' network namespace. The stack
+# has already been started by tasks/stack.yml, so leave dependencies running.
+- name: Recreate Hermes and the CDP tunnel
+  ansible.builtin.command:
+    argv: >-
+      {{ agent_stack_compose_argv_prefix + [
+           'up', '-d', '--no-deps', '--force-recreate', '--wait',
+           '--wait-timeout', agent_stack_compose_wait_timeout | string,
+           'hermes', 'cdp-tunnel'] }}
   changed_when: true

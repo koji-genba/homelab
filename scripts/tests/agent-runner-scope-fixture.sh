@@ -177,6 +177,49 @@ assert [ordered.index(t) for t in (scan, filtered, validate, line, cdp_pin, pin)
 env = jinja2.Environment(undefined=jinja2.StrictUndefined, keep_trailing_newline=True)
 env.tests["match"] = lambda value, pattern: re.match(pattern, value) is not None
 env.filters["regex_escape"] = re.escape
+
+# Bind-mounted input changes must refresh Hermes even when Compose's service
+# definition is unchanged. Keep its network-namespace consumer in the same up.
+recreate_name = "Recreate Hermes and the CDP tunnel"
+for filename, names in (
+    ("config.yml", (
+        "Render the Hermes configuration", "Render the Hindsight plugin configuration",
+        "Seed the Hermes persona when absent", "Seed the shipped skills when absent")),
+    ("ssh_keys.yml", (
+        "Generate the Runner terminal identity", "Generate the CDP tunnel identity",
+        "Pin the Runner host key for the CDP tunnel",
+        "Pin the Runner host key for the Hermes terminal backend")),
+):
+    for name in names:
+        assert task("agent_stack", name, filename)["notify"] == recreate_name, name
+for name in ("Install the Agent Compose project definition", "Render the non-secret Compose environment"):
+    assert task("agent_stack", name, "config.yml")["notify"] == "Restart the Agent stack"
+for name, module in (("Seed the Hermes persona when absent", "ansible.builtin.template"),
+                     ("Seed the shipped skills when absent", "ansible.builtin.copy")):
+    assert task("agent_stack", name, "config.yml")[module]["force"] is False
+handlers = yaml.safe_load((roles / "agent_stack/handlers/main.yml").read_text())
+assert [h["name"] for h in handlers] == ["Restart the Agent stack", recreate_name]
+assert handlers[0]["ansible.builtin.command"]["argv"] == [
+    "{{ agent_stack_helpers_dir }}/homelab-agent-compose-up"]
+expression_argv = handlers[1]["ansible.builtin.command"]["argv"].strip()[2:-2]
+render_argv = env.compile_expression(expression_argv)
+context = dict(defaults, agent_stack_project_name="fixture",
+               agent_stack_project_dir="/fixture/project", agent_stack_env_file="/fixture/compose.env",
+               agent_stack_secrets_dir="/fixture/secrets")
+prefix = [env.from_string(value).render(**context) for value in defaults["agent_stack_compose_argv_prefix"]]
+for timeout in (defaults["agent_stack_compose_wait_timeout"], 37):
+    argv = render_argv(agent_stack_compose_argv_prefix=prefix, agent_stack_compose_wait_timeout=timeout)
+    assert argv == prefix + ["up", "-d", "--no-deps", "--force-recreate", "--wait",
+                             "--wait-timeout", str(timeout), "hermes", "cdp-tunnel"], argv
+compose = yaml.safe_load((repo / "files/services/agent/stack/compose.yaml").read_text())
+assert compose["services"]["cdp-tunnel"]["network_mode"] == "service:hermes"
+# These services have no host-rendered bind-mounted config requiring a force
+# refresh. Embedding alone mounts an immutable, revision-pinned model cache.
+for service in ("hindsight", "reranker"):
+    assert not compose["services"][service].get("volumes"), service
+assert compose["services"]["embedding"]["volumes"][0]["read_only"] is True
+print("Agent bind-mounted config: notifications, handler order and scoped recreate argv passed")
+
 filter_scan = env.compile_expression(expression.strip()[2:-2])
 validators = [env.compile_expression(check) for check in checks]
 host = "192.168.10.105"
