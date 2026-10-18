@@ -121,8 +121,16 @@
     group: root
     mode: '0750'
   loop: >-
-    {{ ['/etc/homelab', '/etc/homelab/secrets', '/opt/homelab', '/var/lib/homelab']
+    {{ ['/etc/homelab', '/opt/homelab', '/var/lib/homelab']
        + (common_extra_directories | default([])) }}
+
+- name: Create the private host secrets directory
+  ansible.builtin.file:
+    path: /etc/homelab/secrets
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
 
 - name: Configure bounded journald retention
   ansible.builtin.copy:

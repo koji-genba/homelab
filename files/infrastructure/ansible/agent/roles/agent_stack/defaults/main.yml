@@ -22,6 +22,12 @@ agent_stack_ssh_key_dir: "{{ agent_runner_ssh_key_dir | default('/etc/homelab/ag
 agent_stack_uid: 10000
 agent_stack_gid: 10000
 
+# memory-db/Dockerfile extends groonga/pgroonga:4.0.8-debian-17 (digest
+# 15ab42f1...), whose postgres account is 999:999. Keep PGDATA owned by that
+# account even while PostgreSQL is running; re-check on a base-image update.
+agent_stack_postgres_uid: 999
+agent_stack_postgres_gid: 999
+
 # Data lives on the Agent VM's dedicated data disk, never on NFS.
 agent_stack_hermes_data_dir: "{{ agent_data_mount | default('/srv/agent') }}/hermes"
 agent_stack_postgres_data_dir: "{{ agent_data_mount | default('/srv/agent') }}/postgres"

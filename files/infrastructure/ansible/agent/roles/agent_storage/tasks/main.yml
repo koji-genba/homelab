@@ -1,8 +1,16 @@
 ---
 # Agent data disk (/srv/agent) and the optional backup NFS mount
-# (/mnt/agent-backups). The backup export does not exist yet, so the play only
+# (/mnt/agent-backups). To allow bootstrap before export provisioning, the play only
 # mounts it when pve1 advertises it and the guard treats "not mounted" as a safe
 # skip. The guard still fails closed when the mount is present but wrong.
+- name: Check whether the Agent data path is already mounted
+  ansible.builtin.command:
+    argv: [findmnt, -rn, -M, "{{ agent_data_mount }}"]
+  register: agent_storage_data_mountpoint
+  changed_when: false
+  failed_when: agent_storage_data_mountpoint.rc not in [0, 1]
+  check_mode: false
+
 - name: Create the Agent data mount point
   ansible.builtin.file:
     path: "{{ agent_data_mount }}"
@@ -10,6 +18,7 @@
     owner: root
     group: root
     mode: '0750'
+  when: agent_storage_data_mountpoint.rc == 1
 
 - name: Inspect the Agent data disk
   ansible.builtin.stat:
@@ -67,14 +76,26 @@
   changed_when: false
   failed_when: false
 
+- name: Check whether the backup paths are already mounted
+  ansible.builtin.command:
+    argv: [findmnt, -rn, -M, "{{ item.local_path }}"]
+  loop: "{{ agent_backup_mounts }}"
+  register: agent_storage_backup_mountpoints
+  changed_when: false
+  failed_when: agent_storage_backup_mountpoints.rc not in [0, 1]
+  check_mode: false
+
+# With no_root_squash, chmod/chown on a mounted path changes the server's
+# export root. Only pve1 owns that directory's metadata (root:root 0700).
 - name: Create the backup mount points
   ansible.builtin.file:
-    path: "{{ item.local_path }}"
+    path: "{{ item.item.local_path }}"
     state: directory
     owner: root
     group: root
     mode: '0750'
-  loop: "{{ agent_backup_mounts }}"
+  loop: "{{ agent_storage_backup_mountpoints.results }}"
+  when: item.rc == 1
 
 - name: Mount the backup exports that pve1 currently advertises
   ansible.posix.mount:

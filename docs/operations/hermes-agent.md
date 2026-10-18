@@ -1,6 +1,6 @@
 # Hermes Agent運用
 
-- 状態: VM 104/105作成・pve1バックアップexport準備済み（2026-10-18）。Ansible適用・Discord・受入・復元試験は未実施
+- 状態: 2026-10-18にAnsible適用、6サービス起動、健康確認・手動backup・scratch restore成功。Discord本受入、RunnerのChromium sandboxのsystemd hardening検証、本番DRは未完了
 - 対象: Agent VM（`agent`、VMID 104、`192.168.10.104`）と Runner VM（`runner`、VMID 105、`192.168.10.105`）
 - 設計判断: [ADR-0008](../adr/0008-hermes-agent-hindsight-vms.md)
 - 復旧・バックアップ: [Hermes Agent運用（バックアップ・リストア・エクスポート・記憶再構築・健康確認）](hermes-agent-backup.md)
@@ -56,7 +56,7 @@ rerankerのORT intra-op threadsはTEIが`num_cpus::get()`で決める。固定�
 10 CPUに抑え、OS・Hermes・Hindsight・memory-db・CDP用に2 CPU相当の余地を残す。
 これら他サービスにはCPU上限を設けず、固定CPUの予約や応答時間の保証とはしない。
 WS7cのF3再生はreranker 4 CPUで約6.23秒、6 CPUで約5.07秒だった。
-新配分の会話p95・同時稼働時の応答性は本番適用後に再計測する（未適用・未計測）。
+新配分は2026-10-18に本番適用済み。直列の単体測定は下記、会話p95・同時稼働時の応答性は未計測。
 
 WS16では両TEIを**cpu-1.9.4**のindex digest `2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d`に更新する。
 旧cpu-1.8.3の内部QueueCommandキューが満杯になるpanic（WS13c、上流#726の対策は1.9.0以降）が理由で、速度改善を目的としない。
@@ -93,13 +93,13 @@ queryも共通2枠を使う実clientより厳しいTEI直接負荷で、429・pa
 8同時の予備試験は全200でもquery p95 54.989秒だったため採用していない。
 rerankerは20/30候補を直列で各60回、全200。20候補p50/p95 3.503/4.701秒は旧cpu-1.8.3の
 WS15 3.492/4.718秒と同等（WS13cは3.397/4.503秒、数%の試行差あり）。30候補は4.945/6.730秒。
-このローカルCPUでの結果であり、本番5900Xの速度・会話全体の待ち時間は未計測。token上限・候補数・モデルrevisionは維持した。
+このローカルCPUでの結果であり、本番5900Xの直列測定は日常運用節に追記した。会話全体の待ち時間は未計測。token上限・候補数・モデルrevisionは維持した。
 
 メモリ記録はWS7aの`itest/logs/{stats,stats-all}.jsonl`、WS7cの`itest/r2/logs/stats.jsonl`を照合した
 サンプル最大であり、厳密なピークではない。上記の他サービスは70%を超えていない。
 WS13ではembeddingは1 → 2 → 4 CPUでほぼ比例して速くなった。一方rerankerは6 / 8 / 10 CPUで
 20候補p50が約3.40 / 3.29 / 3.49秒とほぼ変わらず、Candle ModernBertのbatch size 4制約により
-CPU追加では3秒目標に届かない。手元のRyzen 7 9800X3Dは本番5900Xより速い見込みだが、速度差は未計測。
+CPU追加では3秒目標に届かなかった。ORTでの手元Ryzen 7 9800X3Dと本番5900Xの直列測定は日常運用節を参照。
 WS7cの4.24秒もローカルstack（`http://reranker:8080`）の値で、本番pve1の実測ではない。
 embeddingの`--max-batch-tokens`は4096を維持する。通常のretainは日付・entity付きfactをembeddingし、
 chunk本文を送るのは`retain_extraction_mode=chunks`（LLM providerがnoneのとき）だけであるため、
@@ -107,7 +107,7 @@ chunk本文を送るのは`retain_extraction_mode=chunks`（LLM providerがnone�
 
 2026-10-17の2回のローカル結合試験（いずれも架空データ）で、35会話、export、age暗号化scratch restore、
 bank消去→DB復元を確認した。1回目（WS7a、修正前）は**記憶品質の総合受入は未達**、2回目（WS7c、WS12変更前の6-vCPU設定）は
-B・D・E・I・Fの品質閾値と会話p95目標を満たした。Aの創作1件と20候補rerank速度目標の未達は残る。本番VM・Discord・NFSは未検証（Runnerは模擬Runnerでの結合試験（WS7b）まで）。
+B・D・E・I・Fの品質閾値と会話p95目標を満たした。Aの創作1件と20候補rerank速度目標の未達は残る。この時点では本番VM・Discord・NFSは未検証だった（2026-10-18の実績は末尾の手動反映記録を参照）。
 
 1回目（修正前、WS7a）:
 
@@ -288,8 +288,9 @@ Proxmoxのuser/role/token/ACLはTerraform管理外で、apply前に人が用意�
    空の間はバックアップがfail closedになる。
    role `agent_storage`は、pve1がexportを広告している場合だけ`/mnt/agent-backups`をmountし、
    advertiseされていない場合は安全にskipする。
-   実測: dataset・`/etc/exports`・markerを作成し`exportfs -v`で確認済み。Agent VM側のmountは未検証。
-7. **Ansible適用** `[実機未検証]`
+   実測: dataset・`/etc/exports`・markerを作成し`exportfs -v`で確認済み。2026-10-18のAnsible適用でAgent VM側のnfs4 mountも確認した。
+7. **Ansible適用** `[2026-10-18 実施]`
+   実測: 16:49–16:58に初回適用（failed=0）、6サービス起動、ext4/nfs4 mount、17:00健康確認成功。約17:27の再適用でPGDATA所有権障害が発生し、運用者が復旧した（末尾の記録参照）。
    SSH agentとage identityを用意して手動適用する。Agent playが先に走り、Agent VM上で生成したRunner SSH鍵を
    factとしてRunner playが受け取るため、この順序は`site.yml`が保証する。
 
@@ -299,8 +300,9 @@ Proxmoxのuser/role/token/ACLはTerraform管理外で、apply前に人が用意�
    AGE_IDENTITY_FILE=/secure/path/age-identity.txt make ansible-apply-agent
    eval "$(ssh-agent -k)"
    ```
-8. **受入確認** `[実機未検証]`
-   次節の確認を行う。健康確認は[バックアップ文書の健康確認節](hermes-agent-backup.md#6-健康確認)を正とする。
+8. **受入確認** `[2026-10-18 一部実施]`
+   健康確認（Hermes gateway・Discord connected・Runnerを含む）、手動backupとscratch restoreは成功。
+   Discordの本受入、実RunnerのChromium sandboxのsystemd hardening検証、本番DRは残る。健康確認は[バックアップ文書の健康確認節](hermes-agent-backup.md#6-健康確認)を正とする。
 
 ## 日常運用
 
@@ -328,6 +330,18 @@ WS18でrepoのimageを実際にbuildし、6 CPU / 4g / swapなし / C64 / worker
 全120回・3,000スコアで全順位一致、最大絶対差2.21e-6（閾値1e-4以下）。429・panic・OOMは無く、
 memory.eventsのmax/oom/oom_killも0だった。4g上限まで約1.24 GiBの余裕がある。
 ホストはRyzen 7 9800X3D / WSL2 Docker 16 vCPUで、本番pve1の測定ではない。
+
+2026-10-18、本番pve1（Ryzen 9 5900X）のAgent stack内からrepoの架空rerank fixture（24 query）で直列測定した。
+
+| 本番の処理 | p50 / p95秒 |
+| --- | ---: |
+| ORT rerank MID 20候補 | 1.73 / 2.36 |
+| ORT rerank HIGH 30候補 | 2.60 / 3.66 |
+| embedding 1 query | 0.08 / 0.17 |
+| Hindsight recall（小規模の本番bank、5 results） | 約0.43 / 未計測 |
+
+手元9800X3Dの参照値は20候補1.13/1.52秒、30候補1.66/2.26秒。MIDは3秒目標を満たすがHIGHのp95は超過する。
+reranker CPU増加（`TEI合計 <= vCPU-2`に従いVMのvCPU増加も必要）またはHIGH 25候補が選択肢で、変更は未決。会話全体・並行負荷の保証ではない。
 
 
 ```sh
@@ -365,6 +379,8 @@ docker compose --project-name agent \
   --file /opt/homelab-agent/compose.yaml stop
 ```
 
+Hermesの設定を再読込する場合は、同じ引数で末尾を`restart hermes`にする（実行中の会話に影響するため保守時に行う）。
+
 長命サービスは`restart: unless-stopped`のため、VM再起動後は自動で復帰する。operatorが`stop`した
 サービスは停止のままになる。
 
@@ -373,7 +389,10 @@ docker compose --project-name agent \
 Hermesの`config.yaml`、`SOUL.md`（初回のみ`force: false`）、Hindsight `config.json`、bank policy、
 週次振り返りcronはrole `agent_stack`がテンプレートから描画する。変更はrepoで`group_vars`や
 `roles/agent_stack/templates/`を編集し、`make ansible-apply-agent`で反映する。`config.yaml`は毎回上書きされる
-ため、VM上で直接編集しない。`SOUL.md`以降に蓄積するデータ（`USER.md`/`MEMORY.md`、sessions、ユーザーが追加したskills/cron）は
+ため、VM上で直接編集しない。同じ内容・属性ならtemplate taskは`ok`となる。Hermesにも設定を保存する経路があり、
+runtime側で変わった内容は次回applyで戻る。変更時のhandlerは`homelab-agent-compose-up`（`up -d --wait`）で、
+bind内の内容変更だけでは再作成・再読込を保証しない。反映には必要に応じて上記の再起動手順を使う。
+`SOUL.md`以降に蓄積するデータ（`USER.md`/`MEMORY.md`、sessions、ユーザーが追加したskills/cron）は
 Ansibleが上書きしない（週次振り返りcronはAnsibleが冪等に登録する）。
 
 Discordのchannel IDはsecret bundle（`hermes.env`）由来で、`config.yaml`のroutingとnotification channelへ
@@ -491,7 +510,9 @@ secret bundleの復号確認は別枠で`make secrets-decrypt-check-agent`（ide
 
 ## 既知の制約・未決事項
 
-- VM作成・pve1 export準備までは2026-10-18に実施済み。Ansible適用・Discord・受入・復元試験は未実施。
+- 2026-10-18にAnsible適用、健康確認・backup・scratch restore済み。運用者の簡易確認では記憶・VM利用が可能だったが、Discord本受入、実RunnerのChromium sandboxのsystemd hardening検証、本番DRは未完了。
+- 本番のHIGH 30候補rerankはp95 3.66秒で3秒目標を超過する。CPU/候補数の変更は未決。
+- 初回起動時はDB準備待ちでHindsightが3回起動失敗し、restart policyで復帰した。
 - Discordのbot token・channel、運用webhookはsecret bundleが正であり、repoには置かない。
 - 推論エンドポイントには優先度機構が無い。背景処理の同時実行を1へ絞ることで会話への影響を抑えるが、
   会話ターンを構造的に優先させる仕組みは持たない。
@@ -512,4 +533,10 @@ secret bundleの復号確認は別枠で`make secrets-decrypt-check-agent`（ide
 | 2026-10-18 | 運用者 | Proxmox token `terraform@pve!agent-vm` / `terraform@pve!runner-vm`作成（`privsep=0`、有効期限2027-04-30 23:59:59 JST）。ユーザーACL `/vms/104`・`/vms/105`に`HomelabTerraform`、propagate 1を追加 | 既存`/vms/101`はpropagate 1、`/storage/local`・`/storage/vmpool`・`/nodes/pve1`・`/sdn/zones/localnetwork`・`/sdn/zones/localnetwork/vmbr0/10`はpropagate 0。3 tokenは同じユーザーACLを継承しVM別分離なし。`apps-vm` tokenの期限は2026-12-04のまま |
 | 2026-10-18 | 運用者 | bpg/proxmox 0.116.1、保存planからAgent / Runnerをapply | 各`3 added, 0 changed, 0 destroyed`（`local:import/debian-13-genericcloud-amd64-{agent,runner}.qcow2`、cloud-init snippet、VM）。104: 12 vCPU / 24 GiB / vmpool 40 + 100 GB、105: 8 vCPU / 16 GiB / vmpool 40 + 150 GB。local stateは0600、age暗号化copyを`state-backup`へpush（`d5fdcc5` → `8074808`） |
 | 2026-10-18 | 運用者 | pve1の`qm guest exec <vmid> -- cat /etc/ssh/ssh_host_ed25519_key.pub`でhost keyをout-of-band取得し管理端末の`known_hosts`へ登録 | 両VMでcloud-init done、データdiskのby-id一致、`StrictHostKeyChecking=yes`のdeploy接続と`sudo -n true`成功 |
-| 2026-10-18 | 運用者 | pve1に`tank-gen2/data/agent-backups`、`/etc/exports`のAgent `/32`限定export、markerを作成 | `exportfs -ra`後の`exportfs -v`を確認。`/etc/exports` SHA-256: `5639f51953049d980b62faa7745546f9a6364e8eaeb8ffebe306327369f118fe`。Agent側mountは未検証 |
+| 2026-10-18 | 運用者 | pve1に`tank-gen2/data/agent-backups`、`/etc/exports`のAgent `/32`限定export、markerを作成 | `exportfs -ra`後の`exportfs -v`を確認。`/etc/exports` SHA-256: `5639f51953049d980b62faa7745546f9a6364e8eaeb8ffebe306327369f118fe`。この時点ではAgent側mountは未検証 |
+| 2026-10-18 16:49–16:58 JST | 運用者 | main `8e4bbbc`から初回`make ansible-apply-agent` | agent-vm ok=93 changed=58、runner-vm ok=54 changed=35、failed=0。6サービス起動、embedding/reranker/memory-db/hindsight healthy、`/srv/agent` ext4・`/mnt/agent-backups` nfs4。17:00健康確認all checks passed（gateway・Discord connected・Runner含む）。HindsightはDB準備待ちで3回失敗後restart policyで復帰 |
+| 2026-10-18 17:06 JST以降 | 運用者 | 初回手動backup失敗をPR #106で修正（Runner tarの`./lost+found`除外、`sops set`でwebhookを数値IDからURLへ修正） | webhookのGETはVMから200。URL・IDは記録しない |
+| 2026-10-18 約17:27 JST | 運用者 | main `f12d054`から2回目`make ansible-apply-agent` | agent-vm ok=80 changed=10、runner-vm ok=46 changed=2。PGDATAとmount rootの属性を再設定する不具合が判明 |
+| 2026-10-18 約17:27–17:30 JST | 運用者 | `/srv/agent/postgres`がroot:root 0700へ戻り、運用者が`chown 999:999 /srv/agent/postgres`で復旧 | 新規DB接続は`global/pg_filenode.map` Permission denied（08:27:49–08:29:49 UTCに20件）、pg_dump失敗。既存pool接続は継続、Hindsight operations completed=20 / failed=0 / pending=0、記憶損失なし。復旧後健康確認成功。WS26で再適用時の所有権競合とmount root属性変更を修正（本番再適用は未実施） |
+| 2026-10-18 17:30 JST | 運用者 | 手動backup set `20261018T083023Z`作成 | Hermes約24 MB、PostgreSQL約120 KB、agent-config、runner-workをage暗号化。`sha256sum -c SHA256SUMS`全件OK。`hindsight_version=unknown`は軽微な残件 |
+| 2026-10-18 17:30 JST | 運用者 | `homelab-agent-restore 20261018T083023Z --identity <tmpfs file> --scratch` | total_nodes=5、recall 5 results、Hermes archive 667 entries、state.db integrity_check ok（2 DB）。scratch project削除、本番無変更。復旧identityはSSH stdinから`/run` tmpfsへ0600で一時配置し、EXIT trapでshred、終了後不在を確認 |
