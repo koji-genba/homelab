@@ -1,14 +1,14 @@
 # NFS export契約
 
-- 状態: marker・`ai` export反映済み。旧4 exportは2026-09-23にApps VM `/32`へ制限済み
+- 状態: marker・`ai` export反映済み。旧4 exportは2026-09-23にApps VM `/32`へ制限済み。`agent-backups` exportは2026-10-18に作成済み（client mount未検証）
 - サーバー: Proxmox/NFS host `192.168.10.11`
 - データ復旧: このリポジトリの対象外
 - 関連設計: [目標ストレージ契約](../architecture/target-state.md#storage-contract)
 - 実測記録: [実機インベントリ（2026-08-30）](../archive/live-inventory-2026-08-30.md)
 
-このリポジトリはNFS serverの設定を自動変更しない。以下はApps VMが必要とするexportを、復旧時と
+このリポジトリはNFS serverの設定を自動変更しない。以下はApps VM / Agent VM等が必要とするexportを、復旧時と
 移行時に再現するための契約である。実機のfilesystem、既存export、NFSv4 pseudo-rootを確認してから
-`/etc/exports.d/homelab-apps.exports`等へ手動反映する。
+`/etc/exports`へ手動反映する（2026-10-18時点の実機では`/etc/exports.d/`は空）。
 
 ## 実測された親export
 
@@ -23,6 +23,7 @@
 | `/mnt/tank-gen1/data/archive` | `192.168.10.101/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | なし |
 | `/mnt/tank-gen2/data/shared` | `192.168.10.101/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid=101` |
 | `/mnt/shared` | `192.168.10.101/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid=100` |
+| `/mnt/tank-gen2/data/agent-backups` | `192.168.10.104/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid`なし（2026-10-18作成） |
 
 ## Apps VMの利用path
 
@@ -79,6 +80,27 @@ clientは次の3つで、いずれも同じ条件でmountする。read-only moun
 | DGX Spark 1TB機 `192.168.10.52` | `/mnt/ai` | 同上 |
 
 DGX側の手順は[DGX Sparkストレージ運用](dgx-storage.md)にある。
+
+## Agentバックアップ用export（2026-10-18作成）
+
+Agent VM専用の暗号化バックアップ置き場。pve1側の作成と`exportfs -ra`後の`exportfs -v`確認まで実施済み。
+
+| 項目 | 値 |
+| --- | --- |
+| dataset | `tank-gen2/data/agent-backups` |
+| property | `quota=300G`、`recordsize=1M`、`compression=lz4`（継承） |
+| server側path / mountpoint | `/mnt/tank-gen2/data/agent-backups` |
+| client範囲 | `192.168.10.104/32` |
+| `/etc/exports`のoption | `rw,sync,no_subtree_check,sec=sys,secure,no_root_squash,no_all_squash`（`fsid`なし） |
+| 有効option | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` |
+| owner / mode | `root:root` / `0700` |
+| marker | `/mnt/tank-gen2/data/agent-backups/.homelab-export-agent-backups`、内容は`agent-backups` |
+| snapshot | なし。バックアップ自体が世代管理・暗号化されるため取らない |
+| client mount | Agent VM `/mnt/agent-backups`（`make ansible-apply-agent`時に検証予定、現時点では未検証） |
+
+設定は既存exportと同じ`/etc/exports`に追加した。変更後のSHA-256（2026-10-18）は
+`5639f51953049d980b62faa7745546f9a6364e8eaeb8ffebe306327369f118fe`。
+詳細は[Agentバックアップのpve1準備](hermes-agent-backup.md#7-pve1-側の事前準備手動自動化しない)を参照。
 
 ## フェーズごとのclient範囲
 

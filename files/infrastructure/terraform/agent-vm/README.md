@@ -5,7 +5,7 @@ generic-cloud imageをProxmoxへ直接importし、SHA-512 checksumを検証す�
 clone操作は使わない。方式は[apps-vm](../apps-vm/README.md)に倣う。
 
 - VMID `104`、VLAN 10 `192.168.10.104/24`、初期12 vCPU / 24 GiB、OS disk 40 GiB
-  （2026-10-17 WS14ユーザー決定。embedding 4 CPU・reranker 6 CPUと、swapなしのTEI warm-upに余裕を持たせる。本番未適用）。
+  （2026-10-17 WS14ユーザー決定。embedding 4 CPU・reranker 6 CPUと、swapなしのTEI warm-upに余裕を持たせる。2026-10-18に適用済み）。
 - データdisk 100 GiB（`scsi1`）を追加し、Ansibleが`/srv/agent`へext4でmountする。
 - tailnetには参加しない。外向きはDiscord / GHCR / Debian / DGX / Apps VM / pve1 NFS。
 
@@ -47,12 +47,12 @@ apply targetはplanの欠落、symlink、緩すぎるmodeを拒否し、`-auto-a
 
 Proxmoxのuser/role/token/ACLはTerraformで管理しない。applyの前に、既存の
 [Apps VM recovery の Proxmox 準備](../../../../docs/operations/apps-vm-recovery.md#terraform実行前のproxmox側準備)
-に倣い、次を手作業で用意する。実機では未検証の手順であり、実施前に内容を確認する。
+に倣い、次を手作業で用意する。2026-10-18にtoken・ACL準備、VM作成、host key登録まで実施済み（Ansible未適用）。
 
 1. Terraform用API token（例 `terraform@pve!agent-vm`、`privsep=0`）を発行する。
-2. tokenへVMID 104用のACLを付与する。少なくとも`/vms/104`と、image importに必要な
+2. ユーザー`terraform@pve`へVMID 104用のACLを付与する。少なくとも`/vms/104`と、image importに必要な
    datastore権限（`Datastore.AllocateTemplate`、`Datastore.AllocateSpace`等）を対象node/datastoreに
-   与える。`/vms/101`とは分ける。
+   与える。`privsep=0`のためApps / Agent / Runnerの3 tokenは同じユーザーACLを継承し、VM別には分離されない。
 3. 対象datastore `local` のcontent typeに`Import`と`snippets`が含まれることを確認する。
 4. VMID 104と`192.168.10.104`が空いていること、旧VMが存在しないことを確認する。このrootは
    重複確認のためのIP取得やpingを行わない。
