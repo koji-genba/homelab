@@ -445,6 +445,11 @@ Discordのスラッシュコマンドは、Hermesが起動時に登録する。�
 
 ### image更新
 
+Runnerで作ったファイルは、最終返答に`MEDIA:/srv/agent-work/x.png`のように書くとDiscordへ添付される。
+上流のリモートMEDIA取得処理はhandler終了後にsession keyを失うため、自前imageの
+`patches/0001-remote-media-session-key.patch`で配信時のsession keyを渡す。上流で修正されたimageへ
+更新したら、このpatchとDockerfileの適用処理を外す。
+
 自前image（`homelab-hermes-agent` / `homelab-memory-db` / `homelab-tei-reranker-onnx`）は`.github/workflows/`がbuild・公開し、digestを
 job summaryへ出力する。上流baseや同梱するHindsight統合revisionを更新するときは、Dockerfile更新 → workflow実行 →
 digest転記を**別の変更**で行う。転記後は`make ansible-apply-agent`で反映する。digestを変えない限り
