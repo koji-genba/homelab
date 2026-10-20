@@ -46,6 +46,18 @@ LABEL org.opencontainers.image.source="https://github.com/koji-genba/homelab" \
     org.opencontainers.image.licenses="MIT" \
     org.opencontainers.image.revision="${HINDSIGHT_INTEGRATION_REVISION}"
 
+# Keep remote MEDIA delivery working after the handler clears its session context.
+# Fail on upstream drift; remove when the pinned base includes the upstream fix.
+COPY patches/0001-remote-media-session-key.patch /tmp/remote-media-session-key.patch
+
+RUN set -eux; \
+    cd /opt/hermes; \
+    git apply --check /tmp/remote-media-session-key.patch; \
+    git apply /tmp/remote-media-session-key.patch; \
+    rm -f /tmp/remote-media-session-key.patch \
+        gateway/__pycache__/media_fetch.*.pyc gateway/platforms/__pycache__/base.*.pyc; \
+    /opt/hermes/.venv/bin/python -m compileall -q -f gateway/media_fetch.py gateway/platforms/base.py
+
 # Vendor the provider into the bundled memory-plugin directory and install the
 # dependencies pinned by requirements.txt. `local_external` mode is used, so the
 # heavyweight embedded runtime (hindsight-embed) is never imported and its deps
