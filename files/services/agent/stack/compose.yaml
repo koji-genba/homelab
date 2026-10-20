@@ -318,7 +318,7 @@ services:
     # v2026.9.24 base + the Hindsight Hermes integration pinned at d952b6e).
     # Pinned to the digest published by the first workflow run (tag 0.21.5,
     # 2026-10-18).
-    image: ghcr.io/koji-genba/homelab-hermes-agent@sha256:c9635a4088e324134582cba1d722cf4f7d6bd975b1a95e602b70769d5241751a
+    image: ghcr.io/koji-genba/homelab-hermes-agent@sha256:75cb227cd55aba85e17a02d884022b405d8f8fe4dfb6702fb2de4a6c85a8e0ee
     # The pinned upstream image has no CMD: without this it starts an
     # interactive CLI, hits EOF under Compose and restarts continuously.
     # Keep the s6 entrypoint and explicitly select its gateway service.
@@ -401,7 +401,7 @@ services:
     # Reuses the self-built Hermes image: it already ships the OpenSSH client and
     # is digest-pinned, so no separate (and unpinnable-by-digest-content) apk
     # install is needed.
-    image: ghcr.io/koji-genba/homelab-hermes-agent@sha256:c9635a4088e324134582cba1d722cf4f7d6bd975b1a95e602b70769d5241751a
+    image: ghcr.io/koji-genba/homelab-hermes-agent@sha256:75cb227cd55aba85e17a02d884022b405d8f8fe4dfb6702fb2de4a6c85a8e0ee
     restart: unless-stopped
     # Tiny: one ssh process holding a port forward.
     mem_limit: 128m
