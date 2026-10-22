@@ -108,6 +108,10 @@ ssh deploy@apps
 gatewayの役割はexit nodeと、exit node経由でApps VM以外のLAN機器（PVE、IX2215、ElastiFlow）へ
 入ることである。宅外からこれらの管理画面を使うときはexit nodeを有効にする。
 
+ElastiFlow UIは例外として `https://elastiflow.kojigenba-srv.com` からApps VMのCaddy経由でも利用でき、
+gateway exit nodeに依存しない（[ADR-0009](../../../../docs/adr/0009-elastiflow-caddy-fqdn.md)）。
+ElastiFlow VMへのSSHや直IPのLANアクセスには従来の経路を使う。
+
 ### `192.168.10.0/24`の広告を外さない
 
 exit nodeは、自身が接続するLANをsubnet routeとして広告しない限り、そのLANへ転送しない

@@ -76,3 +76,8 @@ mcp-searxng.kojigenba-srv.com {
 sparkdash.kojigenba-srv.com {
 	import admin_networks sparkdash:5555
 }
+
+# Kibana runs on a separate LAN VM outside the Apps VM.
+elastiflow.kojigenba-srv.com {
+	import admin_networks 192.168.10.103:5601
+}

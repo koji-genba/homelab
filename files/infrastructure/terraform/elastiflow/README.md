@@ -59,6 +59,31 @@ Kibanaのdashboardは36個、root diskの使用量は123G中17Gでした。
 write aliasが最新のrollover indexを指していること、`elastiflow-flow-*`の件数が増えていることをVMで確認し、
 2026-10-12にcloseしました。いつ・何をして復旧したかは確認していません。
 
+## アクセス方法
+
+通常はtailnet接続済みの管理端末から `https://elastiflow.kojigenba-srv.com` を開きます。
+AdGuard rewriteは既存Webサービスと同じ `web_ip`（現行はApps VMのtailnet IP）を返し、
+CaddyがHTTPSを終端して `http://192.168.10.103:5601` へ中継します。
+Caddyの `admin_networks` で接続元を制限します。Kibana自体には認証がなく、
+Caddy経由のアクセスを保護するのはこの接続元制限です。
+LANからのフォールバックは `http://192.168.10.103:5601` です。直IP経由にはCaddyの制限がかかりません。
+判断は[ADR-0009](../../../../docs/adr/0009-elastiflow-caddy-fqdn.md)を参照してください。
+
+`/etc/kibana/kibana.yml` はAppsのAnsible管理外で、`install.sh`による手動導入後のVM設定です。
+共有リンク等の絶対URL用に `server.publicBaseUrl: "https://elastiflow.kojigenba-srv.com"` を
+設定する作業は任意の手動作業とし、必要性は反映後に共有リンク・redirectの動作を確認して判断します。
+設定を変更する場合はKibanaの再起動が必要です。
+
+### FQDN変更の反映と確認
+
+1. mainへのマージ後、通常の15分reconcileでCaddyとHomepageの変更が反映されます。
+2. DNS rewriteは管理端末から手動の `make ansible-apply` で反映します。
+   AdGuard設定の変更を検出すると全Compose projectが再作成され、DNS/SMB等が短時間途切れます。
+3. 反映後に管理端末で名前がApps VMのtailnet IPへ解決されること、HTTPS証明書、
+   Homepageからの画面表示、dashboard・共有リンク・redirectの動作を確認します。
+   Caddyへ到達できる許可外の接続元からは403となることも確認します。
+   502の場合はApps VMからElastiFlow VMのTCP 5601への到達性とKibanaの稼働を確認します。
+
 ## 前提条件
 
 - Proxmox VE環境（192.168.10.11）
@@ -130,7 +155,7 @@ ssh -i ~/.ssh/k8s_ed25519 ubuntu@192.168.10.103 sudo bash /tmp/install.sh
 
 ### 5. Kibanaダッシュボードのインポート
 
-1. `http://192.168.10.103:5601` を開く
+1. 管理端末のブラウザで `https://elastiflow.kojigenba-srv.com` を開く（Caddy/DNSの反映前やLANからのフォールバックは `http://192.168.10.103:5601`）
 2. ElastiFlowのKibana用ダッシュボードファイルをダウンロード（[docs](https://docs.elastiflow.com/)のバージョンに合ったもの）
 3. Stack Management → Saved Objects → Import からインポート
 

@@ -82,6 +82,9 @@ Tailscale interfaceからの同portも許可する。Internetからのport forwa
 - roaming clientを含む全tailnet clientで`accept-routes=false`を推奨とする。trueでも影響はApps VM以外の
   `192.168.10.x`宛てtrafficがgateway経由になることに限られる。Apps VM以外のLAN管理UIは宅外で
   gateway exit nodeから利用する。判断は[ADR-0007](../adr/0007-apps-vm-tailnet-dns.md)を参照する。
+  例外としてElastiFlow UIは `https://elastiflow.kojigenba-srv.com` からも利用できる。
+  DNSはApps VMのtailnet IPを返し、Caddyが `admin_networks` で接続元を制限して
+  `192.168.10.103:5601` へ中継する（[ADR-0009](../adr/0009-elastiflow-caddy-fqdn.md)）。
 
 ## 有線ポートと無線AP
 

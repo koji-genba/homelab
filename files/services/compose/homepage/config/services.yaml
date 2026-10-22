@@ -59,7 +59,7 @@
         description: VM・ストレージ管理
     - ElastiFlow/Kibana:
         icon: kibana
-        href: http://192.168.10.103:5601
+        href: https://elastiflow.kojigenba-srv.com
         description: ネットワークフロー分析
 - ストレージ (SMB/NFS):
     - shared:
