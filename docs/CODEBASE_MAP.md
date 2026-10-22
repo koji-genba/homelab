@@ -91,7 +91,7 @@ homelab/
 ├── Makefile                      # ONLY entry point: terraform/ansible/tailscale/state/secrets/rollback/fixtures
 ├── .gitignore                    # secrets/state/plans; k8s protection rules retained after cleanup
 ├── .github/
-│   ├── dependabot.yml            # weekly: 12 docker-compose + 6 docker + 4 terraform + actions; upstream Apps ignored until tag+digest
+│   ├── dependabot.yml            # weekly: 12 docker-compose + 6 docker + 4 terraform + actions; monthly: grouped toolbox pip; upstream Apps ignored until tag+digest
 │   └── workflows/
 │       ├── validate.yml          # CI gate (PR + push main): ~20 make targets
 │       ├── caddy-image.yml       # build/push ghcr.io/koji-genba/caddy-cloudflare
@@ -125,7 +125,7 @@ homelab/
 │   │   ├── compose/<project>/    # 11 projects: edge dns samba stashpad-prod stashpad-staging sillytavern open-webui searxng sparkdash homepage monitoring (+ .env.example, README)
 │   │   ├── agent/                # Hermes stack, OUTSIDE the Apps reconcile scan path: stack/compose.yaml (project `agent`) + hermes/skills/
 │   │   └── images/               # caddy-cloudflare/Dockerfile, sparkdash/Dockerfile, hermes-agent/Dockerfile, memory-db/Dockerfile, tei-reranker-onnx/Dockerfile (custom images, built by CI)
-│   └── tools/homelab-toolbox/    # Dockerfile, entrypoint.sh, README (pinned management toolbox)
+│   └── tools/homelab-toolbox/    # Dockerfile, entrypoint.sh, README, requirements.txt, regenerate-requirements.py (pinned management toolbox)
 └── scripts/                      # sh helpers (state backup/restore, validation) + scripts/tests/*-fixture.sh
 ```
 
@@ -144,7 +144,7 @@ Module token estimates were measured on 2026-10-16 with the Cartographer scanner
 
 | Group | Targets |
 |---|---|
-| Toolbox | `toolbox-build` (also the default goal; tags `:1.0.1` locally, not the digest) |
+| Toolbox | `toolbox-build` (also the default goal; tags `:1.0.1` locally, not the digest), `toolbox-requirements` (regenerates Python wheel pins/hashes with `TOOLBOX_IMAGE`; only the toolbox directory is mounted, no credentials) |
 | Terraform apps-vm | `terraform-init`, `terraform-fmt`, `terraform-validate`, `terraform-plan`, `terraform-apply` |
 | Tailscale (manual, import-first) | `terraform-validate-tailscale`, `tailscale-init`, `tailscale-acl-preflight`, `tailscale-plan`, `tailscale-apply`, `tailscale-import-core`, `tailscale-import-acl`, `tailscale-import-dns`, `tailscale-import-router` |
 | Ansible | `ansible-lint`, `ansible-check`, `ansible-apply` |

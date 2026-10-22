@@ -93,6 +93,13 @@ updates:
   - package-ecosystem: docker
     directory: /files/tools/homelab-toolbox
     schedule: {interval: weekly}
+  # Batch Python updates monthly to reduce toolbox publishes and digest bumps.
+  - package-ecosystem: pip
+    directory: /files/tools/homelab-toolbox
+    schedule: {interval: monthly}
+    groups:
+      toolbox-python:
+        patterns: ["*"]
   - package-ecosystem: terraform
     directory: /files/infrastructure/terraform/apps-vm
     schedule: {interval: weekly}

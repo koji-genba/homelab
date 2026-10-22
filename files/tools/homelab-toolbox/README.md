@@ -62,3 +62,45 @@ localの先行commitを保持し、localがremoteの先祖ならremoteへ追随�
 `make state-backup-preflight`はtoolbox内のage roundtripと平文state scanに加え、host側でSSH pushの
 dry-runを行う。SSH origin（またはSSH `pushurl`）とhost SSH agentをcredential境界として使い、hostの
 credential helperやtokenをcontainerへmountしない。HTTPS state-backup pushはサポートしない。
+
+## pip 依存の固定と更新
+
+`requirements.txt` を唯一の version 定義とし、Ansible の直接・推移依存を
+linux/amd64 / CPython 3.13 の wheel と SHA256 で固定する。形式は
+`files/services/images/tei-reranker-onnx/requirements.txt` に合わせた。
+Dependabot の `pip` がこのファイルを直接更新し、通常のバージョン更新は月次の
+`toolbox-python` group で全パッケージを 1 本の PR にまとめる。
+更新ごとの toolbox publish と固定 digest 更新の回数を抑えるためである。
+`requirements.in` や uv lock は使わない。group の更新で新しい推移依存が必要になると、
+CI の `make toolbox-build` は `--require-hashes` により未固定の依存を拒否する。
+その場合は以下の `make toolbox-requirements` で closure と hash を再生成してレビューする。
+
+system Python と `/usr/local/bin` のコマンド名を維持するため venv は使わず、
+`--break-system-packages --ignore-installed --require-hashes --only-binary=:all:` で入れる。
+apt の Jinja2 / PyYAML / MarkupSafe / packaging も同じ requirement として必ず取得・検証し、
+`/usr/local/lib/python3.13/dist-packages` が apt の `/usr/lib/python3/dist-packages` より優先される。
+apt 管理のファイルは消さない。`python3` からも固定した Jinja2 / yaml を import できる。
+既存インストールを理由に hash 検証を省略しないため `--ignore-installed` が必要である。
+pip と wheel は apt の管理用パッケージとして残し、この runtime closure の固定対象外とする。
+
+初回の版は既存の公開 toolbox に合わせた。ただし MarkupSafe は 2.1.5 に
+CPython 3.13 wheel がないため 3.0.4 に更新した。sdist のビルド依存を追加せず、
+すべてのインストールを hash 検証済み wheel に限定するための意図した変更である。
+
+更新時は `requirements.txt` の必要な version を編集し、repository root から以下を実行する。
+生成には `Makefile` の `TOOLBOX_IMAGE` で digest 固定した toolbox を使い、
+スクリプトが Python 3.13 と pip 25.1.1 を確認する。
+生成コンテナは toolbox ディレクトリだけを mount し、呼び出し元の UID/GID で実行して終了時に破棄する。
+鍵・SSH agent・認証設定は渡さない。
+
+```sh
+make toolbox-requirements
+```
+
+`regenerate-requirements.py` は既存 pins を読み、pip 25.1.1 で公開 PyPI の wheel closure を
+解決し、ダウンロードした wheel の SHA256 を書き戻す。入力と出力の version 定義は同じファイルにある。
+更新で不要になった依存は、親の metadata を確認して pin を削除してから再生成する。
+生成後は hash を PyPI JSON の公開 SHA256 と照合し、専用タグで 2 回 `--no-cache` build して
+freeze / 配置先の一致、`pip check`、read-only make 検証を確認する。
+apt と ansible.posix collection はこの hash 固定の対象外である。
+publish 後の `TOOLBOX_IMAGE_DIGEST` 更新は別 PR とする。
