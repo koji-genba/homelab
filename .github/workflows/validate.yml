@@ -85,3 +85,5 @@ jobs:
         run: make state-backup-preflight-test
       - name: Tailscale ACL path fixture
         run: make tailscale-acl-path-test
+      - name: Tailscale import gates fixture
+        run: make tailscale-import-gates-test
