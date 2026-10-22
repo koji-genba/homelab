@@ -5,8 +5,6 @@ FROM debian:13-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455
 ARG TERRAFORM_VERSION=1.15.4
 ARG SOPS_VERSION=3.10.2
 ARG AGE_VERSION=1.2.1
-ARG ANSIBLE_CORE_VERSION=2.19.2
-ARG ANSIBLE_LINT_VERSION=25.8.2
 ARG SHELLCHECK_VERSION=0.10.0-1
 ARG AGE_ARCHIVE_SHA256=7df45a6cc87d4da11cc03a539a7470c15b1041ab2b396af088fe9990f7c79d50
 ARG ADGUARD_VERSION=0.107.79
@@ -56,9 +54,14 @@ RUN curl -fsSL "https://github.com/AdguardTeam/AdGuardHome/releases/download/v${
     && install -m 0755 /tmp/AdGuardHome/AdGuardHome /usr/local/bin/adguardhome-check \
     && rm -rf /tmp/AdGuardHome /tmp/adguardhome.tar.gz
 
-RUN python3 -m pip install --break-system-packages \
-      "ansible-core==${ANSIBLE_CORE_VERSION}" \
-      "ansible-lint==${ANSIBLE_LINT_VERSION}"
+# Reinstall the complete closure, including apt-provided Python dependencies,
+# so an already-satisfied requirement cannot bypass hash verification.
+COPY requirements.txt /tmp/toolbox-requirements.txt
+RUN python3 -m pip install --break-system-packages --ignore-installed \
+      --no-cache-dir --only-binary=:all: --require-hashes \
+      -r /tmp/toolbox-requirements.txt \
+    && python3 -m pip check \
+    && rm /tmp/toolbox-requirements.txt
 
 RUN mkdir -p /usr/share/ansible/collections \
     && ansible-galaxy collection install --collections-path /usr/share/ansible/collections ansible.posix:==2.1.0

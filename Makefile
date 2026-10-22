@@ -72,7 +72,7 @@ TOOLBOX_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_IMAGE)
 TOOLBOX_PROXMOX_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_PROXMOX_ENV) $(TOOLBOX_IMAGE)
 TOOLBOX_TAILSCALE_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_TAILSCALE_ENV) $(TOOLBOX_IMAGE)
 
-.PHONY: toolbox-build terraform-init terraform-fmt terraform-validate terraform-validate-tailscale terraform-validate-agent-vm terraform-validate-runner-vm terraform-plan terraform-apply
+.PHONY: toolbox-build toolbox-requirements terraform-init terraform-fmt terraform-validate terraform-validate-tailscale terraform-validate-agent-vm terraform-validate-runner-vm terraform-plan terraform-apply
 .PHONY: ansible-lint ansible-check ansible-apply ansible-lint-agent ansible-check-agent ansible-apply-agent ansible-bootstrap-paths-test compose-reconcile-fixture terraform-apps-vm-lifecycle-test terraform-agent-runner-vm-lifecycle-test toolbox-uid-test cloud-init-test agent-vm-cloud-init-test runner-vm-cloud-init-test runner-privilege-fixture runner-firewall-fixture agent-runner-scope-fixture agent-dnat-guard-fixture compose-config adguard-config-check gatus-config-check mover-test shellcheck secrets-scan preflight
 .PHONY: state-backup-preflight state-backup-preflight-test state-backup state-backup-push state-restore state-restore-test state-backup-test rollback-app
 .PHONY: secrets-encrypt secrets-decrypt-check secrets-encrypt-agent secrets-decrypt-check-agent
@@ -80,6 +80,12 @@ TOOLBOX_TAILSCALE_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_TAILSCALE_ENV) $(TOOLBOX_I
 
 toolbox-build:
 	docker build --tag $(TOOLBOX_BUILD_IMAGE) files/tools/homelab-toolbox
+
+# 再生成には固定toolboxを使い、toolboxディレクトリだけをmountする。鍵・認証情報は渡さない。
+toolbox-requirements:
+	docker run --rm --platform linux/amd64 --user $(TOOLBOX_USER) \
+		-e HOME=/tmp -v "$(CURDIR)/files/tools/homelab-toolbox:/src" \
+		--entrypoint python3 $(TOOLBOX_IMAGE) /src/regenerate-requirements.py
 
 terraform-init:
 	$(TOOLBOX_RUN) terraform -chdir=$(TERRAFORM_ROOT) init -input=false
