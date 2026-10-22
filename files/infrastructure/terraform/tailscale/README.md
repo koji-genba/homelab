@@ -43,8 +43,8 @@ make tailscale-plan MANAGE_TAILNET=true ENABLE_ADGUARD_DNS=true ADGUARD_READY=tr
 ## 既存resourceのimport順序
 
 provider v0.29.2のimport IDはMake targetで固定している。以下は初回向けの各helperの呼出例である。
-既存の掲載順を残しているが、そのまま連続実行するとDNS import後のrouter helperの内部planが失敗するため、
-下のgate制約を先に確認する。
+既にstateにある対象のgateも指定する。下の例ではDNS import後のrouter helperにもDNS gateを付ける。
+routerを先にimportした場合は、DNS helperにも`MANAGE_SUBNET_ROUTER=true`を付ける。
 
 ```sh
 make tailscale-import-core MANAGE_TAILNET=true \
@@ -53,6 +53,7 @@ make tailscale-import-dns MANAGE_TAILNET=true ENABLE_ADGUARD_DNS=true \
   ADGUARD_READY=true \
   ACL_POLICY_FILE=files/infrastructure/terraform/tailscale/acl-policy.live.json
 make tailscale-import-router MANAGE_TAILNET=true MANAGE_SUBNET_ROUTER=true \
+  ENABLE_ADGUARD_DNS=true ADGUARD_READY=true \
   TAILSCALE_DEVICE_ID=node-id \
   ACL_POLICY_FILE=files/infrastructure/terraform/tailscale/acl-policy.live.json
 ```
@@ -66,17 +67,24 @@ importは自動実行せず、live valueをconfigurationへコピーもしない
 ### import helperのgate制約
 
 [Makefile](../../../../Makefile)の`tailscale-import-core`は`tailscale-import-acl`を呼ぶ。
-`tailscale-import-acl`と`tailscale-import-router`が内部で呼ぶ`tailscale-plan`はDNS gateを明示指定していない。
-上の呼出例には`ENABLE_ADGUARD_DNS` / `ADGUARD_READY`もないため、default falseではDNS resourceのcountが0になる。
-DNSがstateにあると`prevent_destroy`によりplanが失敗する。import後のplanなので、失敗までにstateへresourceが
-取り込まれている場合がある。再実行前にstateを確認する。
+各helperはimport対象のgateを確認し、内部の`tailscale-plan`へ他のgateも呼出時の値のまま明示的に渡す。
+`tailscale-import-core`からACL helperへの呼出しも同様である。DNSのreadinessやrouterのinventory確認を
+省略してgateを自動で有効にすることはない。
 
-GNU Makeは親makeのcommand-line変数を再帰makeへ継承するため、外側に両gateを指定すると内部planにも
-渡る。運用者がreadinessを確認した場合だけ指定する。
-また、routerを先にimportする順序へ単純に入れ替えると、`tailscale-import-dns`が内部で呼ぶ
-`tailscale-plan`はrouter gateを明示指定しないため、`MANAGE_SUBNET_ROUTER=true`を継承させなければrouter resourceの削除を計画し得る。
-各planでは、既にstateにあるDNS・router両方のgateを保持してreviewする必要がある。
-このgate制約に基づく手順は実装から導いた手順で、実機では未検証である。
+このrootはbackendブロックを持たず、`tailscale-init`は`init -backend=false`を使う。
+defaultのlocal backend・default workspaceだけを前提とし、`terraform.tfstate.d`が存在すれば
+想定外のworkspaceとして停止する。`terraform.tfstate`が存在しなければ初回の空stateとして扱う。
+存在する場合は最初のimport前に、import / planと同じtoolbox・Terraform rootで
+`terraform state list`を実行する。providerの認証情報は不要なので、チェックは`TOOLBOX_RUN`を使う。
+stateにあるACLは`MANAGE_TAILNET=true`、DNSはそれに加えて
+`ENABLE_ADGUARD_DNS=true ADGUARD_READY=true`、routerのtagsまたはroutesは
+`MANAGE_SUBNET_ROUTER=true`も必要である。gateが欠けている場合やstateの取得に失敗した場合は、
+importによるstate変更前に停止する。stateファイルの存在確認では内容を読まない。
+readinessとinventoryを確認してから、既に管理している全対象のgateを指定する。
+
+この事前チェックはimport全体をtransactionにするものではない。import自体や後続planの別のerrorで
+途中停止した場合は、再実行前にstateを確認する。通常の`tailscale-plan`も、既にstateにある対象のgateを
+保持してreviewする必要がある。
 
 `manage_tailnet=true`は、import済みpolicyと現在のadmin console exportをreviewした後だけ使う。
 `manage_subnet_router=true`は、tailnet hostname `home-gateway`のdeviceが意図したrouterであり、advertise済みrouteが
@@ -90,8 +98,6 @@ import済みdeviceのrouteを有効化するだけである。
 `adguard_nameserver_ip`で許容するLAN addressとして残す。到達性を自動確認するものではなく、readinessは
 運用者が実測して`adguard_ready`で指定する。
 Split DNSは意図的に管理しない。フェーズ1ではreadyでないaddressへTailscale DNSを変更しない。
-
-Makefile側の修正は[#90](https://github.com/koji-genba/homelab/issues/90)で追跡している。
 
 ### Exit node使用時のDNSと既存stateの移行
 
