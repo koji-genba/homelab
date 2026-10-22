@@ -56,10 +56,36 @@ rm -f "$samba_probe_file" \
   || fail "Samba writable mount cannot delete a probe file"
 trap - EXIT INT TERM
 
+compose() {
+  docker compose --project-name "homelab-$project" --env-file "$compose_env" \
+    --file "$repo/files/services/compose/$project/compose.yaml" "$@"
+}
+
 for project in edge dns samba stashpad-prod stashpad-staging sillytavern open-webui searxng sparkdash homepage monitoring; do
-  running=$(docker compose --project-name "homelab-$project" --env-file "$compose_env" \
-    --file "$repo/files/services/compose/$project/compose.yaml" ps --status running --services)
-  test -n "$running" || { echo "required project is not running: $project" >&2; exit 1; }
+  # Use the same active profiles as startup, without resolving secret env files.
+  # All declared services are long-running; there are no one-shot exceptions.
+  services=$(compose config --no-env-resolution --services) \
+    || fail "project=$project unable to read declared services"
+  test -n "$services" || fail "project=$project no active services declared"
+  containers=$(compose ps --all --format json) \
+    || fail "project=$project unable to read container status"
+  # Compose v2 releases emit either a JSON array or one object per line.
+  containers=$(printf '%s\n' "$containers" | jq -cs 'flatten') \
+    || fail "project=$project invalid container status JSON"
+  # Ignore stopped one-off containers left behind by compose run without --rm.
+  for service in $services; do
+    reason=$(printf '%s\n' "$containers" | jq -r --arg service "$service" '
+      [.[] | select(.Service == $service)] |
+      [.[] | select(.State == "running")] as $running |
+      if length == 0 then "container is missing"
+      elif ($running | length) == 0 then
+        .[] | "container=\(.Name) state=\(.State)"
+      else $running[] | select(.Health == "unhealthy") |
+        "container=\(.Name) health=unhealthy"
+      end
+    ') || fail "project=$project service=$service unable to check container status"
+    test -z "$reason" || fail "project=$project service=$service $reason"
+  done
 done
 # Verify at least one host-facing endpoint before sending the dead-man ping.
 # The accepted status set includes Caddy's protected 403/401 response; 000

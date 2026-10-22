@@ -171,8 +171,10 @@ Ansibleのpre-taskも同じ順序を強制し、ExecStopが失敗した状態で
   または使用率が閾値以上（現行値は`group_vars/apps.yml`を参照）。
 - `/opt/homelab/.git`が無い、Git statusがcleanでない、working treeまたはindexにHEADとの差分がある。
 - `shared_mount_path`で一時probe fileの作成・書込み・削除に失敗する。
-- helperに宣言されたprojectのいずれかでrunning serviceを取得できない。
-  各projectに1つ以上のrunning serviceを要求し、全serviceのhealthyまでは判定しない。
-  全serviceの稼働・health判定の強化は[#86](https://github.com/koji-genba/homelab/issues/86)で追跡する。
+- helperに列挙されたprojectのactive service一覧やcontainer状態を取得・解析できない、または一覧が空。
+  各serviceにrunning containerが1つ以上必要で、そのいずれかが`unhealthy`でも送らない。
+  `starting`とhealthcheck無しのrunningは許容し、runningと並存するexited等は無視する。
+  現行projectにone-shot、profiles、`deploy.replicas`、init専用serviceの指定は無く、追加時は判定を見直す。
+  失敗理由はproject・serviceとともにstderrへ出力し、`journalctl -u homelab-healthchecks-ping.service`で確認する。
 - LAN側の`http://status.kojigenba-srv.com/` probeが2xx、3xx、401、403以外を返す（接続失敗も含む）。
 - `healthchecks.env`の読み込みに失敗する、`HEALTHCHECKS_PING_URL`が空、またはping送信自体が失敗する。
