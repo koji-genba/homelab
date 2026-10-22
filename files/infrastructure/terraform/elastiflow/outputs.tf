@@ -5,7 +5,7 @@ output "elastiflow_ip" {
 
 output "kibana_url" {
   description = "Kibana Web UI URL"
-  value       = "http://${split("/", var.ip_address)[0]}:5601"
+  value       = "https://elastiflow.kojigenba-srv.com"
 }
 
 output "sflow_collector_target" {
@@ -19,6 +19,6 @@ output "next_steps" {
     "1. SSH to VM: ssh ubuntu@${split("/", var.ip_address)[0]}",
     "2. Run the setup script: scp install.sh ubuntu@${split("/", var.ip_address)[0]}:/tmp/ && ssh ubuntu@${split("/", var.ip_address)[0]} sudo bash /tmp/install.sh",
     "3. Configure sFlow export on IX2215 (see ../../network/README.md)",
-    "4. Open Kibana at http://${split("/", var.ip_address)[0]}:5601 and import the ElastiFlow dashboards",
+    "4. Open Kibana at https://elastiflow.kojigenba-srv.com and import the ElastiFlow dashboards",
   ]
 }

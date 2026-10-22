@@ -75,6 +75,7 @@ graph TB
     GHCR --> Compose
     NFS --> Guard --> Compose
     edge --> hp
+    edge -->|"HTTP :5601 (ADR-0009)"| EF
     ow --> DGX
     sd -->|"SSH + HTTP :8000"| DGX
     DGX --> NFS
@@ -103,7 +104,7 @@ homelab/
 ├── docs/                         # (~126k tokens at the full-map baseline; Japanese except this map)
 │   ├── README.md                 # entry point: current design, operations, decisions, history
 │   ├── CODEBASE_MAP.md            # code navigation (this document)
-│   ├── adr/                      # 0001-0008 + README (decision log)
+│   ├── adr/                      # 0001-0009 + README (decision log)
 │   ├── architecture/target-state.md  # current design + unmet goals
 │   ├── network/target-zones.md    # current network specification
 │   ├── operations/               # application-lifecycle, apps-vm-recovery, apps-vm-tailnet, dgx-storage,
@@ -194,7 +195,7 @@ State uses the **default local backend per root** (`terraform.tfstate`, gitignor
 | `tailscale-gateway` | bpg/proxmox ~>0.81 | VM 102, `192.168.10.102`, template-clone (VMID 9000) | `tailscale up` is manual (issue #29); route approval manual |
 | `agent-vm` | bpg/proxmox | Hermes Agent VM (VMID 104, initial 12 vCPU / 24 GiB / 40 GiB OS + 100 GiB data disk, `192.168.10.104`, VLAN 10; 2026-10-17 WS14 user decision) from its own pinned Debian 13 cloud image | not on the tailnet; `ignore_changes=[initialization[0].user_data_file_id]`; Proxmox user/role/ACL manual; Ansible-only runtime |
 | `runner-vm` | bpg/proxmox | Hermes Runner VM (VMID 105, 8 vCPU / 16 GiB / 40 GiB OS + 150 GiB work disk, `192.168.10.105`, VLAN 10) | separate cloud image `file_name`; no Docker, no Discord token/memory DB/management keys |
-| `elastiflow` | bpg/proxmox ~>0.81 | VM 103, `192.168.10.103`; `install.sh` sets up unauthenticated ES/Kibana + flow collector | sFlow collector `:6343` |
+| `elastiflow` | bpg/proxmox ~>0.81 | VM 103, `192.168.10.103`; `install.sh` sets up unauthenticated ES/Kibana + flow collector | sFlow collector `:6343`; UI `https://elastiflow.kojigenba-srv.com` via Apps Caddy (trusted-only), LAN fallback `http://192.168.10.103:5601` |
 | `stashpad-dev` | bpg/proxmox ~>0.81 | VM 111 `.41` (out of scope) | Gitignored per-root state/tfvars |
 
 `apps-vm`: `snippet_datastore_id` must support both `Import` (cloud image) and snippets; keep `debian_cloud_image_url` and its SHA-512 checksum in sync.
@@ -213,7 +214,7 @@ Conventions: project name `homelab-<dir>`; all join external network `homelab_fr
 
 | Project | Services / image | Ports | Data | Notes |
 |---|---|---|---|---|
-| `edge` | Caddy (custom `caddy-cloudflare`) | 80, 443 (TCP only) | named volumes | `Caddyfile`; ACME DNS-01 via Cloudflare; `(admin_networks)` snippet restricts by `remote_ip {$CADDY_TRUSTED_NETWORKS}`; alias `dns.kojigenba-srv.com` for Gatus TLS probe |
+| `edge` | Caddy (custom `caddy-cloudflare`) | 80, 443 (TCP only) | named volumes | `Caddyfile`; ACME DNS-01 via Cloudflare; `(admin_networks)` snippet restricts by `remote_ip {$CADDY_TRUSTED_NETWORKS}`; alias `dns.kojigenba-srv.com` for Gatus TLS probe; first external-VM upstream: ElastiFlow `192.168.10.103:5601` |
 | `dns` | AdGuard Home | 53 tcp/udp | `adguard-work`, `/etc/homelab/adguard` | UI :3000 only via Caddy; config rendered by Ansible (outside the Git checkout) |
 | `samba` | Samba (own image) | 445 | NFS: shared, shared-hdd, archive, ai; local `samba-state` (`/var/lib/samba`), `samba-logs` (`/var/log/samba`) | `config/smb.conf`, `config/users.json`, password from secrets dir; healthcheck overridden |
 | `stashpad-prod` / `-staging` | stashPad (same image repo) | internal 8080 | NFS data + media (ro) | staging digest auto-bumped hourly from `:edge`; prod promoted by explicit PR |
@@ -228,7 +229,9 @@ Conventions: project name `homelab-<dir>`; all join external network `homelab_fr
 
 **Hermes Agent stack (`files/services/agent/`)** is deliberately **outside** `files/services/compose/`: project `agent`, services `memory-db`, `embedding`, `reranker`, `hindsight`, `hermes` plus a `cdp-tunnel` sidecar, using digest references (all three self-built images published and pinned 2026-10-18), on a private bridge with no published port and **`restart: unless-stopped`** (no reconciler, state on the VM's data disk). `scripts/agent-compose-config.sh` (`make agent-compose-config`) renders it with synthetic env/secret files and re-checks the digest pins. Custom images `homelab-hermes-agent` (Hermes base + vendored Hindsight provider + `patches/0001-remote-media-session-key.patch` for post-handler remote MEDIA delivery; remove once fixed upstream), `homelab-memory-db` (PostgreSQL 17 + pgvector + PGroonga), and `homelab-tei-reranker-onnx` (FP32 tanh GELU ONNX on TEI cpu-1.9.4 ORT) are built by `hermes-agent-image.yml` / `memory-db-image.yml` / `tei-reranker-onnx-image.yml`; their published digests are pinned in the compose file. The stack is rendered and started by the `agent_stack` role. Bind-mounted Hermes config/SSH input changes (and missing persona/skill seeds) notify a scoped `--force-recreate --no-deps --wait` handler for `hermes` + `cdp-tunnel` (shared network namespace), after the normal Compose reconciliation handler; dependencies stay running. Main image input and auxiliary vision use the same DGX GLM endpoint; TTS/STT/image generation and external extraction are disabled, and `SEARXNG_URL` reaches Apps Caddy over HTTPS via `extra_hosts`. See [Hermes Agent operations](operations/hermes-agent.md).
 
-**Caddy routes** (all `*.kojigenba-srv.com`): `dns.` (trusted-only), `prod.`/`prod.stashpad.`, `staging.`/`staging.stashpad.` (open), `status.` (trusted + basic auth), `homepage.` (trusted + the same Gatus basic auth credentials), `sillytavern.`, `openwebui.` (open), `searxng.` and `mcp-searxng.` (trusted-only), `sparkdash.` (`import admin_networks` → `sparkdash:5555`; trusted-only, **deliberately no Caddy `basic_auth`** so the app's own `Authorization: Bearer` header passes).
+**ElastiFlow UI**: [ADR-0009](adr/0009-elastiflow-caddy-fqdn.md) adds an exception to ADR-0007: `elastiflow.kojigenba-srv.com` resolves to `web_ip` and proxies via Apps Caddy to the LAN VM. Kibana has no authentication; `admin_networks` is its only Caddy access guard. Other LAN management UIs retain the gateway path. Caddy/Homepage changes reconcile from main; DNS requires manual `make ansible-apply` (all projects recreated on rendered runtime changes). Verify DNS, HTTPS, UI/shared links and denied-source 403 after rollout; see the [runbook](../files/infrastructure/terraform/elastiflow/README.md#fqdn変更の反映と確認).
+
+**Caddy routes** (all `*.kojigenba-srv.com`): `dns.` (trusted-only), `elastiflow.` (`import admin_networks` → `192.168.10.103:5601`, HTTP; trusted-only), `prod.`/`prod.stashpad.`, `staging.`/`staging.stashpad.` (open), `status.` (trusted + basic auth), `homepage.` (trusted + the same Gatus basic auth credentials), `sillytavern.`, `openwebui.` (open), `searxng.` and `mcp-searxng.` (trusted-only), `sparkdash.` (`import admin_networks` → `sparkdash:5555`; trusted-only, **deliberately no Caddy `basic_auth`** so the app's own `Authorization: Bearer` header passes).
 
 **Homepage config** (`files/services/compose/homepage/config/`): `settings.yaml` defines layout/display and Quick Launch; `services.yaml` defines the 6 groups (matched by `settings.yaml`), links, `siteMonitor` targets and Gatus widget; `widgets.yaml` defines resources, date/time and SearXNG search; `bookmarks.yaml` is an empty list. `custom.css` styles copy cards and `custom.js` implements copying SMB/NFS/SSH destinations and adds those cards to search results. See [Homepage operations](operations/homepage.md).
 
@@ -393,7 +396,7 @@ The mover handles only regular files older than `SETTLE_MINUTES` by ctime, requi
 
 Dated migration records leave interactive acceptance re-run after Phase 5 unconfirmed (follow [Apps VM recovery](operations/apps-vm-recovery.md)); the [DGX storage record](operations/dgx-storage.md#手動反映の記録) confirms that step C was completed on both DGX Sparks as confirmed on 2026-10-12 (`/etc/fstab`, `systemctl list-units --type=automount` and `findmnt -t nfs4`; execution date unknown, read speed still unmeasured); explicit IPv6 disable on IX2215 not confirmed done; IX2215 single-flow slow state (~200 Mbps) unexplained; Proxmox token expiry 2026-12-04; Proxmox identity not in IaC.
 
-Issue status as of 2026-10-12 (owner-provided listing): **open** — #28 (unify Proxmox authentication across 3 Terraform roots with API tokens + tfvars), #29 (gateway advertise-routes / exit-node prefs outside IaC), #32 (explicitly disable IPv6 RA, DHCPv6 and forwarding), #33 (ElastiFlow/Kibana has no FQDN), #35 (all Compose projects re-created on every `make ansible-apply`), #85 (Homepage numeric displays after Prometheus/Grafana introduction), [#86](https://github.com/koji-genba/homelab/issues/86) (dead-man checks for all declared services and health), [#87](https://github.com/koji-genba/homelab/issues/87) (remaining rebuild gaps), [#90](https://github.com/koji-genba/homelab/issues/90) (import helpers do not pass other gates to their internal plan); **closed** — #30 (Apps VM Tailscale participation), #31 (IX2215 management-password rotation), #34 (reported ElastiFlow Elasticsearch ingest failure since 2026-07-07; ingestion confirmed and issue closed on 2026-10-12, see §6), #48, #49.
+Issue status as of 2026-10-12 (owner-provided listing): **open** — #28 (unify Proxmox authentication across 3 Terraform roots with API tokens + tfvars), #29 (gateway advertise-routes / exit-node prefs outside IaC), #32 (explicitly disable IPv6 RA, DHCPv6 and forwarding), #33 (ElastiFlow/Kibana FQDN: PR open, rollout pending as of 2026-10-22; ADR-0009), #35 (all Compose projects re-created on every `make ansible-apply`), #85 (Homepage numeric displays after Prometheus/Grafana introduction), [#86](https://github.com/koji-genba/homelab/issues/86) (dead-man checks for all declared services and health), [#87](https://github.com/koji-genba/homelab/issues/87) (remaining rebuild gaps), [#90](https://github.com/koji-genba/homelab/issues/90) (import helpers do not pass other gates to their internal plan); **closed** — #30 (Apps VM Tailscale participation), #31 (IX2215 management-password rotation), #34 (reported ElastiFlow Elasticsearch ingest failure since 2026-07-07; ingestion confirmed and issue closed on 2026-10-12, see §6), #48, #49.
 
 New since 2026-10-11: confirm in production that Gatus sends a "resolved" notice after the next real restart (PR #78 only verified in Docker); revisit the no-backup policy for `sparkdash-config` if units, benchmark results or stored secrets grow (encryption key and ciphertext would share the volume); the accepted sparkDash limits in gotcha 16 remain open (LAN-only DNS, unauthenticated `/`, shared token, `accept-new`, restart after unit changes).
 

@@ -14,3 +14,4 @@ ADR は採用時点の判断を固定するもので、前提が変わった場�
 | [0006](0006-ai-dataset-single-export.md) | 承認済み。repo定義済み、pve1/Apps VMは反映済み、DGX 2台の手順Cも2026-10-12に実施済みと確認 | DGX Spark のデータ置き場を単一 NFS export にする。pve1/Apps VMは2026-09-19に反映済み。DGXの実施日は不明、read速度は未測定（[確認方法・記録](../operations/dgx-storage.md#手動反映の記録)） |
 | [0007](0007-apps-vm-tailnet-dns.md) | 承認済み。2026-10-12補足あり | Apps VMのtailnet addressへ内部DNSを切り替える（0003と0004の一部を更新）。補足でSMBの正式な接続先とServer route維持を明記 |
 | [0008](0008-hermes-agent-hindsight-vms.md) | 実装済み（repo定義済み、2026-10-17）。実機では未検証（初回構築は未実施、ローカル品質閾値は一部達成、創作・rerank速度に残課題） | Hermes常駐エージェントとHindsight記憶をAgent VM（104）とRunner VM（105）へ分離して追加する。Ansible手動反映、Composeはreconcile対象外、記憶はRuri-v3 + PGroonga |
+| [0009](0009-elastiflow-caddy-fqdn.md) | 承認済み（repo定義済み、反映待ち） | ElastiFlow UIをCaddy経由のFQDNで公開する。0007のLAN管理UI経路の例外 |

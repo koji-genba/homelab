@@ -137,7 +137,10 @@ Homepageを追加したcommit以降の既知の正常commitを指定する。
   DGX、Proxmox、ElastiFlowなどLAN機器には付けない。自己署名TLSの回避設定も追加しない。
 - probeは入口の応答確認であり、DGX推論、MCP呼出し、検索engine、認証APIの動作までは保証しない。
 - 内部DNS rewriteがtailnet IPを返すため、FQDNリンクはtailnet接続を前提とする。
-  LAN機器へのIPリンクとSSH先のエントリはLANのIP（`192.168.10.x`）を示す。
+  ElastiFlow UIは `https://elastiflow.kojigenba-srv.com` からApps VMのCaddyを経由して別VMへ届くため、
+  gateway exit nodeに依存しない。Kibanaは認証なしで、Caddyの `admin_networks` で接続元を制限する
+  （[ADR-0009](../adr/0009-elastiflow-caddy-fqdn.md)）。このリンクにも `siteMonitor` は付けない。
+  他のLAN機器へのIPリンクとSSH先のエントリはLANのIP（`192.168.10.x`）を示す。
   宅外やtailnet端末からはgatewayのsubnet route / exit node経由で到達できる必要がある。
 - Basic AuthはGatusと共用で、資格情報の変更は両サービスへ影響する。
 

@@ -171,6 +171,7 @@ systemctl enable --now flowcoll
 
 echo ""
 echo "==> セットアップ完了"
-echo "Kibana:        http://$(hostname -I | awk '{print $1}'):5601"
+echo "Kibana:        https://elastiflow.kojigenba-srv.com (Caddy経由)"
+echo "LAN fallback:  http://$(hostname -I | awk '{print $1}'):5601"
 echo "flow-collector受信ポート: UDP 6343 (sFlow) ※IX2215側の設定は network/README.md を参照"
 echo "サービス状態確認: systemctl status elasticsearch kibana flowcoll"
