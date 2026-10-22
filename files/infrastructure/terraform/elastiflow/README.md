@@ -84,6 +84,10 @@ LANからのフォールバックは `http://192.168.10.103:5601` です。直IP
    Caddyへ到達できる許可外の接続元からは403となることも確認します。
    502の場合はApps VMからElastiFlow VMのTCP 5601への到達性とKibanaの稼働を確認します。
 
+2026-10-22にPR #116をマージし、reconcileと `make ansible-apply` で反映しました。
+名前解決（Apps VMのtailnet IP）、HTTPS証明書、`/app/home` の表示、dashboard 36個、
+許可外の接続元からの403を確認しました。共有リンクと `server.publicBaseUrl` は未確認です。
+
 ## 前提条件
 
 - Proxmox VE環境（192.168.10.11）
