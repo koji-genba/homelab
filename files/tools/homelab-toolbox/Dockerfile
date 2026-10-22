@@ -1,6 +1,6 @@
 # Docker Official Image, Debian 13/trixie multi-platform index digest pinned
-# (resolved 2026-08-30; the amd64 build uses its matching manifest).
-FROM debian:13-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132
+# (resolved 2026-10-22; matches trixie-20261020-slim; amd64 uses its matching manifest).
+FROM debian:13-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad
 
 ARG TERRAFORM_VERSION=1.15.4
 ARG SOPS_VERSION=3.10.2
