@@ -107,11 +107,21 @@ cp terraform.tfvars.example terraform.tfvars
 vim terraform.tfvars
 ```
 
-`terraform.tfvars` の `proxmox_password` は、Terraform が Proxmox API に接続するための認証情報です。サンプル値のままだと `terraform apply` 時に `HTTP 401 authentication failure` になります。実際に Proxmox Web UI へログインできる `root@pam` のパスワードに変更してください。
+このrootでは既存のApps VM token `terraform@pve!apps-vm`を使います。
+実行前にKeePassXCから`TF_VAR_proxmox_api_token`を管理端末へ一時注入します。
+Makeはこの環境変数をProxmox Terraform runnerへ名前で渡すため、値をMakeの出力へ展開しません。
+tokenはrepository、tfvars、runtime SOPS bundle、VMへ保存しません。作業後は
+`unset TF_VAR_proxmox_api_token`で管理端末の環境から削除します。
 
-このルートの[provider](providers.tf)は`proxmox_username` / `proxmox_password`方式で、ProxmoxへのSSHも
-passwordを使います。Apps VMルートのAPI token / SSH agent方式とは異なります。接続情報を入れた
-`terraform.tfvars`はGit ignore対象です。
+`terraform.tfvars.example`を同じdirectoryの`terraform.tfvars`へコピーし、`ssh_public_key`など
+非秘密の値だけを設定します。既存ファイルは上書きしません。tfvarsはGit ignore対象です。
+Proxmoxのuser / role / token / ACLの期待状態と既存環境からの移行は
+[Proxmox側準備](../../../../docs/operations/apps-vm-recovery.md#terraform実行前のproxmox側準備)を正とします。
+
+API認証とは別に、cloud-init snippetのアップロードにpve1の`root` SSHが必要です。
+管理端末のssh-agentへ接続用の鍵を読み込み、`SSH_AUTH_SOCK`と`ssh-add -l`を確認します。
+信頼できる経路でpve1のhost keyを照合して`known_hosts`へ登録します。Makeはagent socketと
+`known_hosts`をtoolboxへmountします。`ssh_public_key`はguestへ配置する公開鍵で、providerのSSH認証とは別です。
 
 `ssh_public_key` は、作成されるVMの `ubuntu` ユーザーへ登録される公開鍵です。VMへSSH接続するときは、この公開鍵に対応する秘密鍵を使います。
 

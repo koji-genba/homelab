@@ -29,35 +29,40 @@ VM全体の評価と方針は[現行アーキテクチャ](../../../../docs/arch
 
 ## Apply
 
-```bash
-cd files/infrastructure/terraform/stashpad-dev
-terraform init
-terraform plan -var-file=../elastiflow/terraform.tfvars
-terraform apply -var-file=../elastiflow/terraform.tfvars
-```
+このrootでは既存のApps VM token `terraform@pve!apps-vm`を使います。
+実行前にKeePassXCから`TF_VAR_proxmox_api_token`を管理端末へ一時注入します。
+Makeはこの環境変数をProxmox Terraform runnerへ名前で渡すため、値をMakeの出力へ展開しません。
+tokenはrepository、tfvars、runtime SOPS bundle、VMへ保存しません。作業後は
+`unset TF_VAR_proxmox_api_token`で管理端末の環境から削除します。
 
-上の例はElastiFlowルートのlocal `terraform.tfvars`に依存します。Proxmox接続情報、SSH公開鍵に加え、
-共有file内のこのルートと同名の変数も適用されるため、内容を確認してください。
-このルート自身の[terraform.tfvars.example](terraform.tfvars.example)から用意する場合は次を使います。
+`terraform.tfvars.example`を同じdirectoryの`terraform.tfvars`へコピーし、`ssh_public_key`など
+非秘密の値だけを設定します。既存ファイルは上書きしません。tfvarsはGit ignore対象です。
+Proxmoxのuser / role / token / ACLの期待状態と既存環境からの移行は
+[Proxmox側準備](../../../../docs/operations/apps-vm-recovery.md#terraform実行前のproxmox側準備)を正とします。
+
+API認証とは別に、cloud-init snippetのアップロードにpve1の`root` SSHが必要です。
+管理端末のssh-agentへ接続用の鍵を読み込み、`SSH_AUTH_SOCK`と`ssh-add -l`を確認します。
+信頼できる経路でpve1のhost keyを照合して`known_hosts`へ登録します。Makeはagent socketと
+`known_hosts`をtoolboxへmountします。`ssh_public_key`はguestへ配置する公開鍵で、providerのSSH認証とは別です。
+
+repository rootから設定を用意します。他rootのtfvarsを`-var-file`で共有せず、このrootの入力を使います。
 以下は実装から導いた手順で、実機では未検証です。
 
 ```bash
-cd files/infrastructure/terraform/stashpad-dev
-cp terraform.tfvars.example terraform.tfvars
-vim terraform.tfvars
-terraform init
-terraform plan
-terraform apply
+cp files/infrastructure/terraform/stashpad-dev/terraform.tfvars.example files/infrastructure/terraform/stashpad-dev/terraform.tfvars
+chmod 0600 files/infrastructure/terraform/stashpad-dev/terraform.tfvars
+# このrootのterraform.tfvarsを編集してから実行
+make terraform-plan TERRAFORM_ROOT=files/infrastructure/terraform/stashpad-dev
+make terraform-apply TERRAFORM_ROOT=files/infrastructure/terraform/stashpad-dev
 ```
 
-`cd`はrepository rootから実行します。providerは`proxmox_username` / `proxmox_password`方式で、
-`ssh_public_key`も設定します。実値を入れた`terraform.tfvars`はGit ignore対象です。
+保存planをreviewしてからapplyします。applyにはstate backupの入力も必要です。
 
 ## Terraform state
 
 active stateはこのルートのlocal `terraform.tfstate`で、Git ignore対象です。
-このルートはraw `terraform apply`で実行し、state backupを呼ばないため、成功後にrepository rootで
-このルートのstateも収集する`make state-backup`を実行します。
+上記の`make terraform-apply`は成功後にstate backupを実行します。raw `terraform apply`を使う場合は、
+成功後にrepository rootでこのルートのstateも収集する`make state-backup`を実行します。
 backup / restoreの仕組みと前提は[ADR-0005](../../../../docs/adr/0005-secrets-and-terraform-state.md)と
 [state-backup.sh](../../../../scripts/state-backup.sh) / [state-restore.sh](../../../../scripts/state-restore.sh)を参照してください。
 

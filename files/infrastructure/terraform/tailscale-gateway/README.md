@@ -40,8 +40,22 @@ cp terraform.tfvars.example terraform.tfvars
 vim terraform.tfvars
 ```
 
-`proxmox_endpoint` / `proxmox_username` / `proxmox_password`でProxmoxへ接続し、`ssh_public_key`を
-guestへ配置します。[provider](providers.tf)はAPIとProxmox SSHにpasswordを使います。
+このrootでは既存のApps VM token `terraform@pve!apps-vm`を使います。
+実行前にKeePassXCから`TF_VAR_proxmox_api_token`を管理端末へ一時注入します。
+Makeはこの環境変数をProxmox Terraform runnerへ名前で渡すため、値をMakeの出力へ展開しません。
+tokenはrepository、tfvars、runtime SOPS bundle、VMへ保存しません。作業後は
+`unset TF_VAR_proxmox_api_token`で管理端末の環境から削除します。
+
+`terraform.tfvars.example`を同じdirectoryの`terraform.tfvars`へコピーし、`ssh_public_key`など
+非秘密の値だけを設定します。既存ファイルは上書きしません。tfvarsはGit ignore対象です。
+Proxmoxのuser / role / token / ACLの期待状態と既存環境からの移行は
+[Proxmox側準備](../../../../docs/operations/apps-vm-recovery.md#terraform実行前のproxmox側準備)を正とします。
+
+API認証とは別に、cloud-init snippetのアップロードにpve1の`root` SSHが必要です。
+管理端末のssh-agentへ接続用の鍵を読み込み、`SSH_AUTH_SOCK`と`ssh-add -l`を確認します。
+信頼できる経路でpve1のhost keyを照合して`known_hosts`へ登録します。Makeはagent socketと
+`known_hosts`をtoolboxへmountします。`ssh_public_key`はguestへ配置する公開鍵で、providerのSSH認証とは別です。
+
 このルートにはTailscale認証キーの変数はなく、TerraformはTailscaleのinstallと`tailscaled`の起動までを行います。
 
 ### 2. Terraform実行

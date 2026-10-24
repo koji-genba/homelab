@@ -4,14 +4,8 @@ variable "proxmox_endpoint" {
   default     = "https://192.168.10.11:8006/"
 }
 
-variable "proxmox_username" {
-  description = "Proxmox username"
-  type        = string
-  default     = "root@pam"
-}
-
-variable "proxmox_password" {
-  description = "Proxmox password"
+variable "proxmox_api_token" {
+  description = "Proxmox API token (user@realm!token=uuid), supplied through an environment variable"
   type        = string
   sensitive   = true
 }

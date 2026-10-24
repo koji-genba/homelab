@@ -6,6 +6,9 @@ importし、SHA-512 checksumを検証する。手動管理のtemplate VMやclone
 apply前に、KeePassXCから`TF_VAR_proxmox_api_token`と`TF_VAR_ssh_public_key`を管理端末へ一時的に
 注入する。MakeはこれらをProxmox Terraform runnerにだけ渡し、repository、runtime SOPS bundle、
 Apps VMには保存しない。
+このrootのtoken `terraform@pve!apps-vm`はElastiFlow / Tailscale gateway / stashPadDevでも共用する。
+Agent / Runnerは各専用tokenを使う。権限と認証移行は
+[Proxmox側準備](../../../../docs/operations/apps-vm-recovery.md#terraform実行前のproxmox側準備)を参照する。
 
 最初のAnsible接続前に、Proxmox consoleまたは別の信頼できるout-of-band channelからVMのSSH
 host-key fingerprintを確認する。VMが提示するkeyと照合してから、管理端末の`known_hosts`へ追加する。

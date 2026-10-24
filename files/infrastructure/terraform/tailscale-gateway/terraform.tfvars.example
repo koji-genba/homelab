@@ -1,2 +1,6 @@
-proxmox_password = "your-proxmox-password"
-ssh_public_key   = "ssh-ed25519 AAAAC3... your-key"
+# Copy to gitignored terraform.tfvars; keep only non-secret values here.
+# Temporarily inject TF_VAR_proxmox_api_token from KeePassXC.
+# Never put API tokens or a private key in this file.
+
+proxmox_endpoint = "https://192.168.10.11:8006/"
+ssh_public_key   = "ssh-ed25519 AAAA... operator@example"
