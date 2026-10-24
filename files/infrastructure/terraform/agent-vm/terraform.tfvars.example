@@ -2,7 +2,7 @@
 # Never put API tokens or a private key in this file.
 
 proxmox_endpoint  = "https://192.168.10.11:8006/"
-proxmox_api_token = "terraform@pve!agent-vm=REPLACE_WITH_TOKEN_SECRET"
+proxmox_api_token = "terraform@pve!terraform=REPLACE_WITH_TOKEN_UUID"
 ssh_public_key    = "ssh-ed25519 AAAA... operator@example"
 
 node_name            = "pve1"

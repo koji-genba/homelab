@@ -34,7 +34,7 @@ Apps VMだけを作り直す場合は[Apps VM復旧手順](apps-vm-recovery.md)�
   vmpoolを新規作成するとVM内データは失われ、現状はbackupから戻せない。Apps VMのnamed volumeは
   [復旧範囲](apps-vm-recovery.md#vm内named-volumeの復旧範囲)、ElastiFlowの保存データは
   [データ永続化](../../files/infrastructure/terraform/elastiflow/README.md#データ永続化)を確認する。
-- gateway・ElastiFlow・stashPadDev用のProxmox passwordとSSH key、各Terraformルートのlocal入力。
+- gateway・ElastiFlow・stashPadDevでも使うApps VM用API token、pve1 root用SSH key、各rootの非秘密のlocal入力。
   実値はKeePassXC等から復元し、旧版の公開鍵・password・tokenを転載しない。
 
 ## ホストOSとProxmox
@@ -338,14 +338,15 @@ ElastiFlow・stashPadDevが各`variables.tf`の`disk_size_gb`で宣言する。
 
 user / role / token / ACLは
 [Terraform実行前のProxmox側準備](apps-vm-recovery.md#terraform実行前のproxmox側準備)に従う。
-Apps VMのAPI token `terraform@pve!apps-vm`の期限は2026-12-04 23:59:59 JSTで、
-Apps VMのTerraformだけが使う。稼働中のサービスは使わず、期限切れでも本番は停止しない。
-運用者は、期限が切れてから必要になったときに対応すると判断した（2026-10-12）。
-期限後は次のTerraform実行前に再発行（または期限の延長）が必要で、
-[既存の期限確認・token再発行とsecret差し替えの手順](apps-vm-recovery.md#403-permission-check-failedが出たときの診断手順)を参照する。
+共通API token `terraform@pve!terraform`（`privsep=0`、comment `Terraform (all Proxmox roots)`）の
+期限は2027-10-31 23:59:59 JST（UNIX time `1824994799`）で、Apps VM / Agent / Runner /
+gateway / ElastiFlow / stashPadDevの6 rootで共用する。稼働中のサービスは使わず、期限切れでも停止しない。
+期限切れは全6 rootの次回Terraform実行へ影響する。次の実行前に再発行または期限延長を行い、
+[期限確認・token再発行とsecret差し替えの手順](apps-vm-recovery.md#403-permission-check-failedが出たときの診断手順)に従う。
+2026-10-25に共通tokenへ移行済み。確認結果と旧token削除は[実施記録](apps-vm-recovery.md#実機確認認証移行の実施記録2026-10-25)を参照する。
 管理端末のSSH agent・host key・state復元・保存plan・state backupの前提も同文書を使う。
-gateway・ElastiFlow・stashPadDevの各`providers.tf`はAPIとProxmox SSHにpasswordを使い、
-Apps VMのAPI token / SSH agent方式とは異なる。
+全rootでKeePassXCから`TF_VAR_proxmox_api_token`へ一時注入し、tfvarsには非秘密の値だけを置く。
+snippet転送にはSSH agent経由のpve1 root接続を使う。
 
 ## VM群の復旧
 

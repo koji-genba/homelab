@@ -8,6 +8,10 @@ TAILSCALE_ROOT ?= files/infrastructure/terraform/tailscale
 # the Apps VM state; validated in CI via the dedicated validate targets.
 AGENT_VM_ROOT ?= files/infrastructure/terraform/agent-vm
 RUNNER_VM_ROOT ?= files/infrastructure/terraform/runner-vm
+# Legacy Proxmox VM roots, validated without backend access in CI.
+ELASTIFLOW_ROOT ?= files/infrastructure/terraform/elastiflow
+TAILSCALE_GATEWAY_ROOT ?= files/infrastructure/terraform/tailscale-gateway
+STASHPAD_DEV_ROOT ?= files/infrastructure/terraform/stashpad-dev
 # Hermes OS-level Ansible root (groups `agent` and `runner`). ANSIBLE_CONFIG is
 # set explicitly because ansible-playbook only reads ansible.cfg from the
 # working directory; the Agent root reuses generic roles from the Apps root
@@ -77,7 +81,7 @@ TOOLBOX_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_IMAGE)
 TOOLBOX_PROXMOX_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_PROXMOX_ENV) $(TOOLBOX_IMAGE)
 TOOLBOX_TAILSCALE_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_TAILSCALE_ENV) $(TOOLBOX_IMAGE)
 
-.PHONY: toolbox-build toolbox-requirements terraform-init terraform-fmt terraform-validate terraform-validate-tailscale terraform-validate-agent-vm terraform-validate-runner-vm terraform-plan terraform-apply
+.PHONY: toolbox-build toolbox-requirements terraform-init terraform-fmt terraform-validate terraform-validate-tailscale terraform-validate-agent-vm terraform-validate-runner-vm terraform-validate-elastiflow terraform-validate-tailscale-gateway terraform-validate-stashpad-dev terraform-plan terraform-apply
 .PHONY: ansible-lint ansible-check ansible-apply ansible-lint-agent ansible-check-agent ansible-apply-agent ansible-lint-gateway ansible-check-gateway ansible-apply-gateway gateway-routes-test ansible-bootstrap-paths-test compose-reconcile-fixture terraform-apps-vm-lifecycle-test terraform-agent-runner-vm-lifecycle-test toolbox-uid-test cloud-init-test agent-vm-cloud-init-test runner-vm-cloud-init-test runner-privilege-fixture runner-firewall-fixture agent-runner-scope-fixture agent-dnat-guard-fixture compose-config adguard-config-check gatus-config-check mover-test shellcheck secrets-scan preflight
 .PHONY: state-backup-preflight state-backup-preflight-test state-backup state-backup-push state-restore state-restore-test state-backup-test rollback-app
 .PHONY: secrets-encrypt secrets-decrypt-check secrets-encrypt-agent secrets-decrypt-check-agent
@@ -97,6 +101,9 @@ terraform-init:
 
 terraform-fmt:
 	$(TOOLBOX_RUN) terraform -chdir=$(TERRAFORM_ROOT) fmt -check -recursive
+	$(TOOLBOX_RUN) terraform -chdir=$(ELASTIFLOW_ROOT) fmt -check -recursive
+	$(TOOLBOX_RUN) terraform -chdir=$(TAILSCALE_GATEWAY_ROOT) fmt -check -recursive
+	$(TOOLBOX_RUN) terraform -chdir=$(STASHPAD_DEV_ROOT) fmt -check -recursive
 	$(TOOLBOX_RUN) terraform -chdir=$(TAILSCALE_ROOT) fmt -check -recursive
 	$(TOOLBOX_RUN) terraform -chdir=$(AGENT_VM_ROOT) fmt -check -recursive
 	$(TOOLBOX_RUN) terraform -chdir=$(RUNNER_VM_ROOT) fmt -check -recursive
@@ -117,6 +124,18 @@ terraform-validate-agent-vm:
 terraform-validate-runner-vm:
 	$(TOOLBOX_RUN) terraform -chdir=$(RUNNER_VM_ROOT) init -backend=false -input=false
 	$(TOOLBOX_RUN) terraform -chdir=$(RUNNER_VM_ROOT) validate
+
+terraform-validate-elastiflow:
+	$(TOOLBOX_RUN) terraform -chdir=$(ELASTIFLOW_ROOT) init -backend=false -input=false
+	$(TOOLBOX_RUN) terraform -chdir=$(ELASTIFLOW_ROOT) validate
+
+terraform-validate-tailscale-gateway:
+	$(TOOLBOX_RUN) terraform -chdir=$(TAILSCALE_GATEWAY_ROOT) init -backend=false -input=false
+	$(TOOLBOX_RUN) terraform -chdir=$(TAILSCALE_GATEWAY_ROOT) validate
+
+terraform-validate-stashpad-dev:
+	$(TOOLBOX_RUN) terraform -chdir=$(STASHPAD_DEV_ROOT) init -backend=false -input=false
+	$(TOOLBOX_RUN) terraform -chdir=$(STASHPAD_DEV_ROOT) validate
 
 # Tailscale changes are deliberately explicit/manual. Import existing objects
 # before planning; apply also records encrypted Terraform state using the

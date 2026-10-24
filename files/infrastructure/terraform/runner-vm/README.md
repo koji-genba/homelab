@@ -45,9 +45,11 @@ Proxmoxのuser/role/token/ACLはTerraformで管理しない。applyの前に、�
 [Apps VM recovery の Proxmox 準備](../../../../docs/operations/apps-vm-recovery.md#terraform実行前のproxmox側準備)
 に倣い、次を手作業で用意する。2026-10-18にtoken・ACL準備、VM作成、host key登録まで実施済み（Ansible未適用）。
 
-1. Terraform用API token（例 `terraform@pve!runner-vm`、`privsep=0`）を発行する。
+1. 全6 Proxmox root共通のAPI token `terraform@pve!terraform`（`privsep=0`）を使う。
+   2026-10-25に共通tokenへ移行済み（[記録](../../../../docs/operations/apps-vm-recovery.md#実機確認認証移行の実施記録2026-10-25)）。
+   上記のProxmox準備に従い、KeePassXCに保存した共通tokenを`TF_VAR_proxmox_api_token`へ一時注入する。
 2. ユーザー`terraform@pve`へVMID 105用のACLを付与する。少なくとも`/vms/105`と、image importに必要な
-   datastore権限を対象node/datastoreに与える。`privsep=0`のためApps / Agent / Runnerの3 tokenは同じユーザーACLを継承し、VM別には分離されない。
+   datastore権限を対象node/datastoreに与える。`privsep=0`のため共通tokenはユーザーACLを継承し、VM別には分離されない。
 3. 対象datastore `local` のcontent typeに`Import`と`snippets`が含まれることを確認する。
 4. VMID 105と`192.168.10.105`が空いていることを確認する。このrootは重複確認のためのIP取得や
    pingを行わない。

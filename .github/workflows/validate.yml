@@ -19,6 +19,12 @@ jobs:
         run: make terraform-fmt
       - name: Terraform Apps VM validation
         run: make terraform-validate
+      - name: Terraform ElastiFlow validation
+        run: make terraform-validate-elastiflow
+      - name: Terraform Tailscale Gateway validation
+        run: make terraform-validate-tailscale-gateway
+      - name: Terraform stashPadDev validation
+        run: make terraform-validate-stashpad-dev
       - name: Terraform Tailscale validation
         run: make terraform-validate-tailscale
       - name: Terraform Agent VM validation
