@@ -15,6 +15,11 @@ RUNNER_VM_ROOT ?= files/infrastructure/terraform/runner-vm
 AGENT_ANSIBLE_ROOT ?= files/infrastructure/ansible/agent
 AGENT_ANSIBLE_INVENTORY ?= $(AGENT_ANSIBLE_ROOT)/inventory/hosts.yml
 AGENT_ANSIBLE_CONFIG ?= $(AGENT_ANSIBLE_ROOT)/ansible.cfg
+# Registered gateway prefs use their own Ansible root and SSH-agent inventory.
+GATEWAY_ANSIBLE_ROOT ?= files/infrastructure/ansible/gateway
+GATEWAY_ANSIBLE_INVENTORY ?= $(GATEWAY_ANSIBLE_ROOT)/inventory/hosts.yml
+GATEWAY_ANSIBLE_CONFIG ?= $(GATEWAY_ANSIBLE_ROOT)/ansible.cfg
+GATEWAY_ANSIBLE_ARGS ?=
 TERRAFORM_PLAN_NAME := terraform.tfplan
 TAILSCALE_PLAN_NAME := terraform.tfplan
 TERRAFORM_PLAN_FILE := $(TERRAFORM_ROOT)/$(TERRAFORM_PLAN_NAME)
@@ -73,7 +78,7 @@ TOOLBOX_PROXMOX_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_PROXMOX_ENV) $(TOOLBOX_IMAGE
 TOOLBOX_TAILSCALE_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_TAILSCALE_ENV) $(TOOLBOX_IMAGE)
 
 .PHONY: toolbox-build toolbox-requirements terraform-init terraform-fmt terraform-validate terraform-validate-tailscale terraform-validate-agent-vm terraform-validate-runner-vm terraform-plan terraform-apply
-.PHONY: ansible-lint ansible-check ansible-apply ansible-lint-agent ansible-check-agent ansible-apply-agent ansible-bootstrap-paths-test compose-reconcile-fixture terraform-apps-vm-lifecycle-test terraform-agent-runner-vm-lifecycle-test toolbox-uid-test cloud-init-test agent-vm-cloud-init-test runner-vm-cloud-init-test runner-privilege-fixture runner-firewall-fixture agent-runner-scope-fixture agent-dnat-guard-fixture compose-config adguard-config-check gatus-config-check mover-test shellcheck secrets-scan preflight
+.PHONY: ansible-lint ansible-check ansible-apply ansible-lint-agent ansible-check-agent ansible-apply-agent ansible-lint-gateway ansible-check-gateway ansible-apply-gateway gateway-routes-test ansible-bootstrap-paths-test compose-reconcile-fixture terraform-apps-vm-lifecycle-test terraform-agent-runner-vm-lifecycle-test toolbox-uid-test cloud-init-test agent-vm-cloud-init-test runner-vm-cloud-init-test runner-privilege-fixture runner-firewall-fixture agent-runner-scope-fixture agent-dnat-guard-fixture compose-config adguard-config-check gatus-config-check mover-test shellcheck secrets-scan preflight
 .PHONY: state-backup-preflight state-backup-preflight-test state-backup state-backup-push state-restore state-restore-test state-backup-test rollback-app
 .PHONY: secrets-encrypt secrets-decrypt-check secrets-encrypt-agent secrets-decrypt-check-agent
 .PHONY: tailscale-init tailscale-acl-preflight tailscale-plan tailscale-apply tailscale-import-core tailscale-import-acl tailscale-import-dns tailscale-import-router tailscale-acl-path-test tailscale-import-gates-test
@@ -200,6 +205,20 @@ ansible-check-agent:
 
 ansible-apply-agent:
 	$(TOOLBOX_RUN) env ANSIBLE_CONFIG=$(AGENT_ANSIBLE_CONFIG) ansible-playbook -i $(AGENT_ANSIBLE_INVENTORY) $(AGENT_ANSIBLE_ROOT)/site.yml
+
+# Gateway prefs root. Only lint and syntax-check run in CI; apply is manual.
+ansible-lint-gateway:
+	$(TOOLBOX_RUN) env ANSIBLE_CONFIG=$(GATEWAY_ANSIBLE_CONFIG) ansible-lint $(GATEWAY_ANSIBLE_ROOT)/site.yml
+
+ansible-check-gateway:
+	$(TOOLBOX_RUN) env ANSIBLE_CONFIG=$(GATEWAY_ANSIBLE_CONFIG) ansible-playbook -i $(GATEWAY_ANSIBLE_INVENTORY) $(GATEWAY_ANSIBLE_ROOT)/site.yml --syntax-check
+
+# Live operation, manual only. GATEWAY_ANSIBLE_ARGS=--check previews prefs.
+ansible-apply-gateway:
+	$(TOOLBOX_RUN) env ANSIBLE_CONFIG=$(GATEWAY_ANSIBLE_CONFIG) ansible-playbook -i $(GATEWAY_ANSIBLE_INVENTORY) $(GATEWAY_ANSIBLE_ROOT)/site.yml $(GATEWAY_ANSIBLE_ARGS)
+
+gateway-routes-test:
+	./scripts/tests/gateway-routes-fixture.sh
 
 ansible-bootstrap-paths-test:
 	./scripts/tests/ansible-bootstrap-paths-fixture.sh

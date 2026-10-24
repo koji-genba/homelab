@@ -381,7 +381,7 @@ VMID 104 / 105（Hermes Agent / Runner）は2026-10-12時点では存在せず�
    `make terraform-plan` / `make terraform-apply`、`make ansible-apply`を使う。
    [tailnet再登録](apps-vm-tailnet.md#現在の手順apps-vmを再構築再登録するとき)を含み、
    tailnet IPは`group_vars/apps.yml`の`apps_tailnet_ip`へ合わせる。DNSとSMBはApps VMが提供する。
-2. gatewayを戻す。template 9000が必要で、Terraform後のtailnet登録・route / exit node承認は
+2. gatewayを戻す。template 9000が必要で、Terraform後の手動tailnet登録 → Ansible prefs適用（未検証）→ route / exit node承認は
    gateway READMEに従う。宅外からホストを管理する経路が先に必要なら、template準備後に
    gatewayをApps VMより先に戻す。Apps VMサービスへの直接tailnet接続はgatewayを経由しない。
 3. ElastiFlowを戻す。templateからVMを作成した後、READMEの`install.sh`、dashboard、受信確認を行う。
