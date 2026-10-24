@@ -343,13 +343,10 @@ user / role / token / ACLは
 gateway / ElastiFlow / stashPadDevの6 rootで共用する。稼働中のサービスは使わず、期限切れでも停止しない。
 期限切れは全6 rootの次回Terraform実行へ影響する。次の実行前に再発行または期限延長を行い、
 [期限確認・token再発行とsecret差し替えの手順](apps-vm-recovery.md#403-permission-check-failedが出たときの診断手順)に従う。
-2026-10-12には旧Apps VM tokenの期限切れ後、必要になったときに対応する判断だったが、
-2026-10-25に全6 rootを新tokenへ統一する方針とした（実機移行は未検証）。
+2026-10-25に共通tokenへ移行済み。確認結果と旧token削除は[実施記録](apps-vm-recovery.md#実機確認認証移行の実施記録2026-10-25)を参照する。
 管理端末のSSH agent・host key・state復元・保存plan・state backupの前提も同文書を使う。
 全rootでKeePassXCから`TF_VAR_proxmox_api_token`へ一時注入し、tfvarsには非秘密の値だけを置く。
 snippet転送にはSSH agent経由のpve1 root接続を使う。
-[認証移行手順](apps-vm-recovery.md#既存環境からの認証移行)に従い、新tokenで6 rootのplanが
-No changesになったことを確認してから、旧token 3本を削除する。
 
 ## VM群の復旧
 

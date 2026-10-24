@@ -257,9 +257,7 @@ Proxmoxのuser/role/token/ACLはTerraform管理外で、apply前に人が用意�
    最初のAnsible接続前に、Proxmox console等のout-of-band経路で各VMのSSH host-key fingerprintを確認し、
    管理端末の`known_hosts`へ追加する。詳細は各rootのREADMEを正とする。
    実測: tokenとユーザーACLを追加済み。`privsep=0`の3 tokenは同じユーザーACLを継承し、VM別には分離されない。host keyは手順3のout-of-band経路で登録した。
-   2026-10-25に共通tokenへ統一する方針とした（実機移行は未検証）。現在はKeePassXCから共通tokenを
-   `TF_VAR_proxmox_api_token`へ一時注入し、tfvarsには保存しない。新tokenで6 rootのNo changes確認後に
-   旧3本を削除する（[認証移行手順](apps-vm-recovery.md#既存環境からの認証移行)）。
+   2026-10-25に共通tokenへ移行済み。確認結果と旧token削除は[実施記録](apps-vm-recovery.md#実機確認認証移行の実施記録2026-10-25)を参照する。
 2. **データdiskのby-id確認** `[2026-10-18 実施]`
    `group_vars/agent.yml`の`agent_data_disk`（既定`/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1`）と
    `group_vars/runner.yml`の`runner_data_disk`が、hypervisorの割り当てと一致することを確認する。

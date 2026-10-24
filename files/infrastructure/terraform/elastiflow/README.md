@@ -108,6 +108,7 @@ vim terraform.tfvars
 ```
 
 このrootでは全6 Proxmox root共通のtoken `terraform@pve!terraform`を使います。
+2026-10-25に共通tokenへ移行済み（[記録](../../../../docs/operations/apps-vm-recovery.md#実機確認認証移行の実施記録2026-10-25)）。
 実行前にKeePassXCから`TF_VAR_proxmox_api_token`を管理端末へ一時注入します。
 Makeはこの環境変数をProxmox Terraform runnerへ名前で渡すため、値をMakeの出力へ展開しません。
 tokenはrepository、tfvars、runtime SOPS bundle、VMへ保存しません。作業後は
@@ -126,6 +127,10 @@ API認証とは別に、cloud-init snippetのアップロードにpve1の`root` 
 `ssh_public_key` は、作成されるVMの `ubuntu` ユーザーへ登録される公開鍵です。VMへSSH接続するときは、この公開鍵に対応する秘密鍵を使います。
 
 ### 2. Terraform実行
+
+2026-10-25のplanではリソース変更なし、`kibana_url` / `next_steps`のOutputs差分のみでした。
+`b11bc12`以来applyしておらずstateのoutputsが古いためで、このPRとは無関係です。
+この確認時点ではapplyすればoutputsだけ更新されます。このPRでは更新しません。
 
 ```bash
 terraform init

@@ -79,7 +79,7 @@ Proxmox identityはTerraformでは管理せず、管理者がpve1で手動設定
 作成やACL付与自体に管理権限が必要なため、通常のTerraform用tokenへidentity管理権限は与えない。
 不足すると`HTTP 403 Permission check failed`になる。
 
-### 過去の実機確認と今回の拡張
+### 実機確認・認証移行の実施記録（2026-10-25）
 
 2026-10-12にuser `terraform@pve`、role `HomelabTerraform`の20権限、token `apps-vm`の
 `privsep=0`と期限（2026-12-04 23:59:59 JST）、Apps VM用ACL 6 pathを実機と照合した。
@@ -87,15 +87,39 @@ Proxmox identityはTerraformでは管理せず、管理者がpve1で手動設定
 `Terraform Apps VM (VMID 101)`だった。廃止済みVLAN 11用ACLは同日に削除した。
 Agent / RunnerのREADMEには2026-10-18のVMID 104 / 105用ACL・専用token準備の記録がある。
 
-2026-10-25に全6 rootを新しい共通tokenへ統一する方針を決めた。すべてprivsep 0で同じuser ACLを
-継承するためtokenを分けても権限は分離されず、旧Apps VM tokenも期限に伴う再発行が必要になるためである。
-以下はその期待状態であり、共通tokenへの移行・3 rootのclone・追加ACLは**実機未検証**。
-Apps VMでVM作成まで到達した既存20権限は維持する。最小権限であることも未検証。
-既存の他VMのACLは削除せず、現在の一覧を採取して不足分を追加する。
+2026-10-25に運用者がスクリプトで共通tokenへの移行を実施し、出力を確認した。
+すべてprivsep 0で同じuser ACLを継承するためtokenを分けても権限は分離されず、
+旧Apps VM tokenも期限に伴う再発行が必要になるため統一した。
+
+- 実施前は`HomelabTerraform`が既存20権限、ACLが8 path（Apps用6 pathと`/vms/104`・`/vms/105`、
+  `/vms/*`のみpropagate 1）。tokenは`apps-vm`（期限2026-12-04 23:59:59 JST）、
+  `agent-vm`・`runner-vm`（ともに2027-04-30 23:59:59 JST）の3本で、すべてprivsep 0だった。
+- `HomelabTerraformClone`（`VM.Audit,VM.Clone`）を追加し、`/vms/102`・`/vms/103`・`/vms/111`へ
+  `HomelabTerraform`（propagate 1）、`/vms/9000`へ`HomelabTerraformClone`（propagate 0）を追加した。
+  既存role・ACL・tokenはこの追加時点では変更せず、ACLは12 pathになった。
+- 旧コードから本ブランチの1本目のcommit時点のコードへ切り替え、旧`terraform@pve!apps-vm`で
+  legacy 3 rootをplanした。gateway・stashPadDevはNo changes、ElastiFlowは既知のOutputs差分のみで
+  リソース変更は無かった。
+- 共通token `terraform@pve!terraform`を下記の期限・privsep・commentで発行し、secretをKeePassXCへ保存した。
+  新tokenで全6 rootのplanを実施し、Apps VM（101）・Agent（104）・Runner（105）・gateway（102）・
+  stashPadDev（111）はNo changes、ElastiFlow（103）は同じOutputs差分のみでリソース変更なしを確認した。
+  各VM・snippetと、Apps / Agent / Runnerのcloud image download fileのrefreshが通った。
+- 旧token `apps-vm`・`agent-vm`・`runner-vm`を削除し、一覧は`terraform`の1本だけになった。
+  下記の期待状態（ACL 12 path、token 1本）は2026-10-25に実機と照合済み。
+  user commentも同日に`Terraform Proxmox VMs`へ変更した。
+- ElastiFlowとgatewayのlocal tfvarsから`proxmox_password`を各1行削除した。
+  `proxmox_username`の行は無く、modeは0600。stashPadDevにはlocal tfvarsが無かったため、
+  従来借用していたElastiFlowのtfvarsから`ssh_public_key`の1行だけを写して作成した。
+  init時の古いprovider symlinkの対処は[stashPadDev README](../../files/infrastructure/terraform/stashpad-dev/README.md#トラブルシューティング)を参照する。
+
+今回の移行について未検証なのは、新tokenでtemplate 9000からVMを新規cloneする操作
+（`HomelabTerraformClone`の実使用）、role・ACLの最小権限性、gateway / ElastiFlow / stashPadDevの
+再構築の通し確認。planのrefresh成功はclone・再構築の確認には含めない。
+ElastiFlowのOutputs差分は`b11bc12`以来applyしていないためで、このPRとは無関係。
 
 ### 用意が必要なもの
 
-- user `terraform@pve`（有効）。API用のPVE realm userで、SSHの`root`とは別。
+- user `terraform@pve`（有効、comment `Terraform Proxmox VMs`）。API用のPVE realm userで、SSHの`root`とは別。
 - role `HomelabTerraform`（既存20権限、下記）とtemplate読取・clone専用role `HomelabTerraformClone`。
 - user `terraform@pve`のAPI tokenは次の1本。`privsep=0`でuser ACLを継承する。
   tokenを分けても権限は同じで、違いは失効・有効期限だけである。
@@ -122,9 +146,6 @@ Apps VMでVM作成まで到達した既存20権限は維持する。最小権限
 | `/nodes/pve1` | `HomelabTerraform` / 0 | node / network / storage情報取得、image download / import関連 `Sys.Audit`, `Sys.AccessNetwork`, `Sys.Modify` |
 | `/sdn/zones/localnetwork`、`/sdn/zones/localnetwork/vmbr0/10` | `HomelabTerraform` / 0 | 全VMのVLAN 10 NIC割当 `SDN.Use` |
 
-既存Apps VM用の6 pathに、VMID 102 / 103 / 111、template 9000のpathを追加する。
-104 / 105も期待状態に含め、既存なら維持する。`HomelabTerraform`に不足する`VM.Clone`は
-新しい`HomelabTerraformClone`でtemplateだけへ付与し、共有templateを変更可能にしない。
 cloneの権限判定は[Proxmox公式のAPI実装説明](https://lore.proxmox.com/all/1686149104.s7kd1zg63z.astroid%40yuna.none/t/)
 （clone元`VM.Clone`、clone先`VM.Allocate`、storage `Datastore.AllocateSpace`、bridge `SDN.Use`）を参照。
 既定以外のVMID / node / datastore / bridge / VLANへ変更するときは、このACL対応も見直す。
@@ -132,8 +153,8 @@ cloneの権限判定は[Proxmox公式のAPI実装説明](https://lore.proxmox.co
 稼働中のサービスはtokenを使わず、期限切れでも停止しない。共通tokenの期限切れ・失効・漏えいは
 全6 rootの次回Terraform実行へ影響する。2027-10-31 23:59:59 JSTの期限後は、次の実行前に
 再発行または期限延長が必要となる。再発行後はKeePassXCを更新し、全rootで新tokenを環境へ
-注入し直してplanを確認する。旧tokenの削除は、使用する全6 rootのNo changes確認後に行う。
-2026-10-12には旧Apps VM tokenの期限切れ後、必要となった時点で対応する判断をしていた。
+注入し直してplanを確認する。今後の再発行時も、使用する全6 rootでリソース変更なしを確認し、
+Outputs差分があれば原因を切り分けてから旧tokenを削除する。
 
 ### role `HomelabTerraform`の権限一覧
 
@@ -149,7 +170,7 @@ VM.Config.Options, VM.GuestAgent.Audit, VM.PowerMgmt
 
 ### 投入コマンド例
 
-以下は管理者がpve1のシェルで行う手順で、実機未検証。
+以下は今後の再実施・新規復旧時に管理者がpve1のシェルで行う手順。
 新規復旧時だけuser / 既存roleを作成する。既存環境ではrole一覧・ACLを照合し、不足分のみ追加する。
 既存roleに追加の権限があれば削らず維持する。共通tokenは新規復旧時または下記の移行時に作成し、
 既に存在する場合は期限・privsep・commentを照合して再作成しない。
@@ -187,7 +208,7 @@ pveum acl modify /sdn/zones/localnetwork/vmbr0/10 --user terraform@pve --role Ho
 
 ### 既存環境からの認証移行
 
-以下は運用者が行う実機作業で、実機未検証。全6 rootを共通tokenへ移行する。
+既存環境は[上記の実施記録](#実機確認認証移行の実施記録2026-10-25)のとおり移行済み。以下は今後の再実施用の手順である。
 identityの変更をTerraform applyで行わない。
 
 1. pve1の管理者権限で`pveum role list`、`pveum acl list`、`pveum user token list terraform@pve`を
@@ -205,7 +226,7 @@ identityの変更をTerraform applyで行わない。
    新規agentを起動する例は`eval "$(ssh-agent -s)"`、鍵の追加は`ssh-add /path/to/pve1-key`。
 5. KeePassXCから共通token `terraform@pve!terraform`を`TF_VAR_proxmox_api_token`へ一時注入する。
    値は`user@realm!token=secret`形式で渡し、shell履歴やコマンド出力にsecretを残さない。
-   repository rootから全6 rootで次を実行し、すべて **No changes** を確認する。
+   repository rootから全6 rootで次を実行し、全rootでリソース変更がないことを確認する。
 
    ```sh
    for root in apps-vm agent-vm runner-vm elastiflow tailscale-gateway stashpad-dev; do
@@ -216,7 +237,7 @@ identityの変更をTerraform applyで行わない。
    provider認証だけの変更なのでresource再作成は想定しない。差分・destroy / replaceや403があれば
    applyせず、既存drift・token / ACLを調査する。保存planはmode `0600`のまま、確認後に削除する。
    途中失敗・未確認のrootがあれば旧tokenは削除しない。
-6. 全6 rootのNo changesを確認してから、pve1の管理者権限で旧token 3本を削除する。
+6. 全6 rootでリソース変更なしを確認し、Outputs差分があれば原因を切り分けてから、pve1の管理者権限で旧token 3本を削除する。
 
    ```sh
    pveum user token remove terraform@pve apps-vm

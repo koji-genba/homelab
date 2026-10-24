@@ -50,6 +50,7 @@ Proxmoxのuser/role/token/ACLはTerraformで管理しない。applyの前に、�
 に倣い、次を手作業で用意する。2026-10-18にtoken・ACL準備、VM作成、host key登録まで実施済み（Ansible未適用）。
 
 1. 全6 Proxmox root共通のAPI token `terraform@pve!terraform`（`privsep=0`）を使う。
+   2026-10-25に共通tokenへ移行済み（[記録](../../../../docs/operations/apps-vm-recovery.md#実機確認認証移行の実施記録2026-10-25)）。
    上記のProxmox準備に従い、KeePassXCに保存した共通tokenを`TF_VAR_proxmox_api_token`へ一時注入する。
 2. ユーザー`terraform@pve`へVMID 104用のACLを付与する。少なくとも`/vms/104`と、image importに必要な
    datastore権限（`Datastore.AllocateTemplate`、`Datastore.AllocateSpace`等）を対象node/datastoreに

@@ -30,6 +30,7 @@ VM全体の評価と方針は[現行アーキテクチャ](../../../../docs/arch
 ## Apply
 
 このrootでは全6 Proxmox root共通のtoken `terraform@pve!terraform`を使います。
+2026-10-25に共通tokenへ移行済み（[記録](../../../../docs/operations/apps-vm-recovery.md#実機確認認証移行の実施記録2026-10-25)）。
 実行前にKeePassXCから`TF_VAR_proxmox_api_token`を管理端末へ一時注入します。
 Makeはこの環境変数をProxmox Terraform runnerへ名前で渡すため、値をMakeの出力へ展開しません。
 tokenはrepository、tfvars、runtime SOPS bundle、VMへ保存しません。作業後は
@@ -46,7 +47,7 @@ API認証とは別に、cloud-init snippetのアップロードにpve1の`root` 
 `known_hosts`をtoolboxへmountします。`ssh_public_key`はguestへ配置する公開鍵で、providerのSSH認証とは別です。
 
 repository rootから設定を用意します。他rootのtfvarsを`-var-file`で共有せず、このrootの入力を使います。
-以下は実装から導いた手順で、実機では未検証です。
+以下のうち plan までは2026-10-25に実機で確認済み。apply は未検証です。
 
 ```bash
 cp files/infrastructure/terraform/stashpad-dev/terraform.tfvars.example files/infrastructure/terraform/stashpad-dev/terraform.tfvars
@@ -71,3 +72,11 @@ backup / restoreの仕組みと前提は[ADR-0005](../../../../docs/adr/0005-sec
 ```bash
 ssh -i ~/.ssh/id_ed25519 ubuntu@192.168.10.41
 ```
+
+## トラブルシューティング
+
+2026-10-25に、ホストで過去に`-plugin-dir=../elastiflow/.terraform/providers`を使ってinitした
+`.terraform/`にホストの絶対パスを指すprovider symlinkが残り、toolbox内のinitが失敗しました。
+`.terraform/`を退避してinitし直すと通りました。同じ症状では、このrootの`.terraform/`だけを削除し、
+repository rootから`make terraform-init TERRAFORM_ROOT=files/infrastructure/terraform/stashpad-dev`で
+initし直してください。
