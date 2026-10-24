@@ -250,13 +250,16 @@ Agent VM上の配置は次のとおり。role `agent_stack`がCompose環境を�
 Proxmoxのuser/role/token/ACLはTerraform管理外で、apply前に人が用意する（[Apps VM復旧のProxmox準備](apps-vm-recovery.md#terraform実行前のproxmox側準備)に倣う）。
 
 1. **Proxmox側の手動準備** `[2026-10-18 実施]`
-   VMID 104 / 105 と `192.168.10.104` / `.105` が空いていることを確認し、各Terraform用のAPI token
-   （`terraform@pve!agent-vm` / `terraform@pve!runner-vm`、`privsep=0`）と、`/vms/104`・`/vms/105`および
+   VMID 104 / 105 と `192.168.10.104` / `.105` が空いていることを確認し、全6 Proxmox root共通の
+   API token `terraform@pve!terraform`（`privsep=0`）と、`/vms/104`・`/vms/105`および
    image importに必要なdatastore権限のACLを用意する。`terraform-*`のrootは重複確認のためのpingを行わない。
    対象datastore `local`のcontent typeに`Import`と`snippets`が含まれることを確認する。
    最初のAnsible接続前に、Proxmox console等のout-of-band経路で各VMのSSH host-key fingerprintを確認し、
    管理端末の`known_hosts`へ追加する。詳細は各rootのREADMEを正とする。
    実測: tokenとユーザーACLを追加済み。`privsep=0`の3 tokenは同じユーザーACLを継承し、VM別には分離されない。host keyは手順3のout-of-band経路で登録した。
+   2026-10-25に共通tokenへ統一する方針とした（実機移行は未検証）。現在はKeePassXCから共通tokenを
+   `TF_VAR_proxmox_api_token`へ一時注入し、tfvarsには保存しない。新tokenで6 rootのNo changes確認後に
+   旧3本を削除する（[認証移行手順](apps-vm-recovery.md#既存環境からの認証移行)）。
 2. **データdiskのby-id確認** `[2026-10-18 実施]`
    `group_vars/agent.yml`の`agent_data_disk`（既定`/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1`）と
    `group_vars/runner.yml`の`runner_data_disk`が、hypervisorの割り当てと一致することを確認する。

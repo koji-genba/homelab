@@ -338,16 +338,18 @@ ElastiFlow・stashPadDevが各`variables.tf`の`disk_size_gb`で宣言する。
 
 user / role / token / ACLは
 [Terraform実行前のProxmox側準備](apps-vm-recovery.md#terraform実行前のproxmox側準備)に従う。
-Apps VMのAPI token `terraform@pve!apps-vm`の期限は2026-12-04 23:59:59 JSTで、
-Apps VM / gateway / ElastiFlow / stashPadDevの4 rootで共用する。稼働中のサービスは使わず、期限切れでも本番は停止しない。
-運用者は、期限が切れてから必要になったときに対応すると判断した（2026-10-12）。
-期限後は次のTerraform実行前に再発行（または期限の延長）が必要で、
-[既存の期限確認・token再発行とsecret差し替えの手順](apps-vm-recovery.md#403-permission-check-failedが出たときの診断手順)を参照する。
+共通API token `terraform@pve!terraform`（`privsep=0`、comment `Terraform (all Proxmox roots)`）の
+期限は2027-10-31 23:59:59 JST（UNIX time `1824994799`）で、Apps VM / Agent / Runner /
+gateway / ElastiFlow / stashPadDevの6 rootで共用する。稼働中のサービスは使わず、期限切れでも停止しない。
+期限切れは全6 rootの次回Terraform実行へ影響する。次の実行前に再発行または期限延長を行い、
+[期限確認・token再発行とsecret差し替えの手順](apps-vm-recovery.md#403-permission-check-failedが出たときの診断手順)に従う。
+2026-10-12には旧Apps VM tokenの期限切れ後、必要になったときに対応する判断だったが、
+2026-10-25に全6 rootを新tokenへ統一する方針とした（実機移行は未検証）。
 管理端末のSSH agent・host key・state復元・保存plan・state backupの前提も同文書を使う。
 全rootでKeePassXCから`TF_VAR_proxmox_api_token`へ一時注入し、tfvarsには非秘密の値だけを置く。
-Agent / Runnerは各専用token（期限2027-04-30）を維持する。3本ともprivsep 0で同じuser ACLを継承する。
-snippet転送にはSSH agent経由のpve1 root接続を使う。3 rootの
-[認証移行手順](apps-vm-recovery.md#既存環境からの認証移行)を参照する。
+snippet転送にはSSH agent経由のpve1 root接続を使う。
+[認証移行手順](apps-vm-recovery.md#既存環境からの認証移行)に従い、新tokenで6 rootのplanが
+No changesになったことを確認してから、旧token 3本を削除する。
 
 ## VM群の復旧
 

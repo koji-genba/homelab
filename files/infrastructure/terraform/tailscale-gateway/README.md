@@ -40,7 +40,7 @@ cp terraform.tfvars.example terraform.tfvars
 vim terraform.tfvars
 ```
 
-このrootでは既存のApps VM token `terraform@pve!apps-vm`を使います。
+このrootでは全6 Proxmox root共通のtoken `terraform@pve!terraform`を使います。
 実行前にKeePassXCから`TF_VAR_proxmox_api_token`を管理端末へ一時注入します。
 Makeはこの環境変数をProxmox Terraform runnerへ名前で渡すため、値をMakeの出力へ展開しません。
 tokenはrepository、tfvars、runtime SOPS bundle、VMへ保存しません。作業後は
