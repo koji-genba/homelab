@@ -1,0 +1,65 @@
+---
+- name: Manage registered gateway Tailscale preferences
+  hosts: gateway
+  become: true
+  gather_facts: false
+  tasks:
+    # Read-only commands must run even in check mode. No package, service or
+    # sysctl changes precede registration validation; cloud-init owns those.
+    - name: Read gateway Tailscale status
+      ansible.builtin.command: tailscale status --json
+      register: gateway_tailscale_status
+      check_mode: false
+      changed_when: false
+      failed_when: false
+
+    - name: Require manual gateway Tailscale registration
+      ansible.builtin.assert:
+        that:
+          - gateway_tailscale_status.rc == 0
+          - (gateway_tailscale_status.stdout | from_json).BackendState | default('') == 'Running'
+        fail_msg: >-
+          Gateway Tailscale is unavailable or not Running. Complete manual
+          registration in files/infrastructure/terraform/tailscale-gateway/README.md
+          (section "3. guest内でTailscale登録（手動）"), then re-run Ansible.
+
+    - name: Read gateway Tailscale preferences
+      ansible.builtin.command: tailscale debug prefs
+      register: gateway_tailscale_prefs
+      check_mode: false
+      changed_when: false
+
+    - name: Compute desired gateway advertised routes
+      ansible.builtin.set_fact:
+        gateway_tailscale_expected_routes: >-
+          {{ gateway_tailscale_advertise_routes
+             + (['0.0.0.0/0', '::/0'] if gateway_tailscale_advertise_exit_node else []) }}
+
+    - name: Compare gateway advertised routes without depending on order
+      ansible.builtin.set_fact:
+        gateway_tailscale_prefs_differ: >-
+          {{ ((gateway_tailscale_prefs.stdout | from_json).AdvertiseRoutes | default([], true) | sort)
+             != (gateway_tailscale_expected_routes | sort) }}
+
+    - name: Report pending gateway preference change in check mode
+      ansible.builtin.debug:
+        msg: >-
+          AdvertiseRoutes would change from
+          {{ (gateway_tailscale_prefs.stdout | from_json).AdvertiseRoutes | default([], true) | sort }}
+          to {{ gateway_tailscale_expected_routes | sort }}.
+      changed_when: true
+      when:
+        - ansible_check_mode
+        - gateway_tailscale_prefs_differ
+
+    - name: Enforce gateway advertised routes and exit node preferences
+      ansible.builtin.command:
+        argv:
+          - tailscale
+          - set
+          - "--advertise-routes={{ gateway_tailscale_advertise_routes | join(',') }}"
+          - "--advertise-exit-node={{ gateway_tailscale_advertise_exit_node | bool | lower }}"
+      changed_when: true
+      when:
+        - not ansible_check_mode
+        - gateway_tailscale_prefs_differ

@@ -1,0 +1,6 @@
+---
+gateway_tailscale_advertise_exit_node: true
+# Removing this LAN route breaks LAN management access through the exit node.
+# Keep the effective routes in sync with Terraform tailscale/advertised_routes.
+gateway_tailscale_advertise_routes:
+  - 192.168.10.0/24

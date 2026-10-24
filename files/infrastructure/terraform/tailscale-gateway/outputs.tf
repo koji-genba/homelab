@@ -30,8 +30,9 @@ output "next_steps" {
   description = "Next configuration steps"
   value = [
     "1. SSH to VM: ssh ubuntu@${split("/", var.ip_address)[0]}",
-    "2. Authenticate Tailscale: sudo tailscale up --advertise-exit-node --advertise-routes=192.168.10.0/24 --accept-dns=false --hostname=home-gateway",
-    "3. Approve routes in Tailscale admin console",
-    "4. Test connection from mobile device"
+    "2. Authenticate Tailscale: sudo tailscale up --accept-dns=false --hostname=home-gateway",
+    "3. From repository root, review tracked gateway inventory/hosts.yml and run make ansible-apply-gateway (see README)",
+    "4. Approve routes via Terraform or Tailscale admin console",
+    "5. Test connection from mobile device"
   ]
 }

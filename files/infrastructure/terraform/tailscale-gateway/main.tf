@@ -37,7 +37,7 @@ resource "proxmox_virtual_environment_file" "tailscale_cloud_config" {
       - systemctl enable --now qemu-guest-agent  # ← k8s実績設定（重要）
       - echo "VM initialized at $(date)" > /var/log/cloud-init-custom.log
       # Keep the guest/PVE identity distinct from the existing Tailnet device
-      # hostname (home-gateway); the latter is set by `tailscale up` below.
+      # hostname (home-gateway); the latter is set during manual registration.
       - hostnamectl set-hostname tailscale-gateway
 
       # IP転送有効化（Subnet Router必須）

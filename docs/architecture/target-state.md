@@ -39,7 +39,7 @@ ZFSスナップショット、レプリケーション、NFSサーバー自体�
 | 対象 | repoから再構築できるか | diskとともに失うもの | backup |
 | --- | --- | --- | --- |
 | Apps VM（101） | できる。Terraform → Ansible → Compose。tailnet登録とProxmox権限は文書化された手作業。ただし現行11 projectsでの通し再構築は未実証 | AdGuardの統計・query log、Sambaのログ、Gatusの履歴、sparkDashのunit登録（[再登録手順](../operations/sparkdash.md#永続化backup復旧)あり） | 取らない |
-| Tailscale gateway（102） | できる。template 9000からcloneし、手動で`tailscale up`とroute承認を行う。templateの作成が固定されていない点は穴 | nodeのidentity（再登録が必要） | 取らない |
+| Tailscale gateway（102） | できる。template 9000からcloneし、手動登録 → Ansibleでprefs適用 → Terraform / 管理画面でroute承認を行う（Ansible手順は実機未検証）。templateの作成が固定されていない点は穴 | nodeのidentity（再登録が必要） | 取らない |
 | ElastiFlow（103） | サービスは作り直せるが、`install.sh`の実行・dashboardの取り込みに手作業が残り、dashboardの取得元も固定されていない（[詳細](../../files/infrastructure/terraform/elastiflow/README.md#再構築性とbackup)） | 過去のフローデータ、Kibanaのdashboardへの変更 | 取らない（過去のフローは不要。VMを作り直し、空のindexから取り込み直す） |
 | stashPadDev（111） | できない。開発環境がrepoに宣言されていない（[詳細](../../files/infrastructure/terraform/stashpad-dev/README.md#再構築性とbackup)） | VMの中にしか無い作業、手作業で入れた開発環境 | 取らない（重要ではないUbuntuの開発用VM。VM内だけの作業は運用者が別途pushする） |
 | Hermes Agent VM（104） | 実装上は可能（実機未検証）。Terraform → Ansible。記憶DBとHermesデータはVM内の専用データディスクにあり、[日次バックアップ](../operations/hermes-agent-backup.md)から戻せる | 直近バックアップ以降の記憶の更新 | 取らない（Proxmox VM backupは取らず、アプリケーションレベルの日次バックアップをpve1のNFS exportへage暗号化して保存する。復号identityはVMに置かない） |
@@ -73,7 +73,7 @@ Proxmox pve1 192.168.10.11
 │   └── Gatus                       内部Docker network
 ├── Hermes Agent VM (Debian 13)     192.168.10.104。Hermes + Hindsight + 記憶DB + TEI（tailnet外）
 ├── Hermes Runner VM (Debian 13)    192.168.10.105。実行とヘッドレスChromium（tailnet外、Dockerなし）
-├── Tailscale gateway               VM定義はTerraform、node登録・route広告は手動
+├── Tailscale gateway               VM定義はTerraform、node登録は手動、route広告はAnsible
 ├── ElastiFlow                      維持
 └── stashPadDev                     一時VM、対象外
 
@@ -89,8 +89,8 @@ Apps VMはVMID 101、Debian 13、管理userは`deploy`で、LAN `192.168.10.101`
 tailnet `100.86.147.127`でサービスを公開する。LAN IP・VMID・legacy NIC無効は
 `files/infrastructure/terraform/apps-vm/variables.tf`、tailnet IP・legacy IP無効は
 `files/infrastructure/ansible/apps/group_vars/apps.yml`に定義する。
-Tailscale gatewayのVM定義とtailnet ACL/DNSはTerraformで管理し、gatewayのnode登録と
-route広告設定は手動で行う。移行の経緯は[移行記録](../archive/k8s-to-compose.md)を参照する。
+Tailscale gatewayのVM定義とtailnet ACL/DNSはTerraformで管理し、gatewayのnode登録は手動で行う。route広告・exit nodeのprefsは
+[gateway専用Ansible](../../files/infrastructure/terraform/tailscale-gateway/README.md)で管理する（実機未検証）。移行の経緯は[移行記録](../archive/k8s-to-compose.md)を参照する。
 
 ## サービス経路
 
