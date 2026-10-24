@@ -19,7 +19,7 @@ publishするimageは`linux/amd64`であり、Dockerfileが取得するtool bina
 正確なlocal tagを`make toolbox-build`でbuildするか、review済みimage workflowを通して同じimageを
 `ghcr.io/koji-genba/homelab-toolbox:1.0.1`としてpublishする。
 
-**Makefileはtoolboxをtagではなくdigestで固定して実行する。** publish workflowは
+**Makefileの通常実行はtoolboxをtagではなくdigestで固定する。** publish workflowは
 `.github/workflows/toolbox-image.yml`自身の変更でも起動し、同じ`:1.0.1`タグを上書きするため、
 タグ参照では引かれるimageが再現しない。2026-09-06のPR #8（`actions/checkout`のbump）は
 Dockerfileを変えていないのにタグを`sha256:7607f2c7...`から`sha256:9da8408a...`へ移した。
@@ -28,6 +28,8 @@ Dockerfileを変えていないのにタグを`sha256:7607f2c7...`から`sha256:
 - 実行に使う参照は`TOOLBOX_IMAGE`（`TOOLBOX_IMAGE_REPO@TOOLBOX_IMAGE_DIGEST`）である。
 - `make toolbox-build`がlocalに付けるtagは`TOOLBOX_BUILD_IMAGE`（`TOOLBOX_IMAGE_REPO:TOOLBOX_IMAGE_TAG`）で、
   実行用の参照とは分離してある。buildだけでは通常実行のdigest参照は切り替わらない。
+- `validate.yml` の static job は `TOOLBOX_BUILD_IMAGE` と `TOOLBOX_IMAGE` を同じ local tag
+  `homelab-toolbox:ci` に設定し、その checkout で build した image を後続の検証に使う。
 - imageを更新するときは、workflowのpublish後に
   `docker buildx imagetools inspect ghcr.io/koji-genba/homelab-toolbox:1.0.1`で新しいdigestを確認し、
   Makefileの`TOOLBOX_IMAGE_DIGEST`を差し替える。
