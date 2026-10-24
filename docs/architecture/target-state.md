@@ -195,7 +195,7 @@ VM側はNFSv4、`hard,_netdev`を使用する。systemd mount unit、`RequiresMo
   Appsの自前・promotion管理imageは`koji-genba/*`で恒久的に除外し、検証済みdigestの手動反映と
   stashPad staging専用の`edge`追跡を維持する（directoryの監視は将来の上流image用に残す）。
   Agent stackの自前`koji-genba/homelab-*`は各workflowの検証済みdigestへ手動で再pinするため除外する。
-  上流TEIとHindsightは`cpu-1.9.4@sha256:…` / `1.0.0-slim@sha256:…`のtag+digestで追跡し、
+  上流TEIとHindsightは`cpu-1.9.4@sha256:…` / `1.1.0-slim@sha256:…`のtag+digestで追跡し、
   version更新時もCPU/slim variantの維持を確認する。
   embedding TEIとreranker imageのTEI baseは別々のPRになるため、同じTEI versionに揃えて一緒にレビューする。
   reranker DockerfileのPythonはcp312・hash固定wheelに合わせminor/major更新を除外し、
