@@ -25,9 +25,9 @@
     components: stable
     architectures:
       - >-
-        {{ 'amd64' if ansible_architecture == 'x86_64'
-           else 'arm64' if ansible_architecture in ['aarch64', 'arm64']
-           else ansible_architecture }}
+        {{ 'amd64' if ansible_facts.architecture == 'x86_64'
+           else 'arm64' if ansible_facts.architecture in ['aarch64', 'arm64']
+           else ansible_facts.architecture }}
     signed_by: /etc/apt/keyrings/docker.asc
     state: present
 
