@@ -33,8 +33,14 @@ jobs:
         run: |
           make ansible-lint-agent
           make ansible-check-agent
+      - name: Gateway Ansible lint and syntax check
+        run: |
+          make ansible-lint-gateway
+          make ansible-check-gateway
       - name: Ansible bootstrap path regression
         run: make ansible-bootstrap-paths-test
+      - name: Gateway advertisement and Terraform approval contract
+        run: make gateway-routes-test
       - name: Compose reconcile bind-mount regression
         run: make compose-reconcile-fixture
       - name: Toolbox arbitrary UID/GID regression
