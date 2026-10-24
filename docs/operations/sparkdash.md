@@ -156,7 +156,7 @@ shred -u ~/sparkdash_monitor_id
 
    ```sh
    export AGE_IDENTITY_FILE=/secure/path/age-identity.txt
-   TOOLBOX_IMAGE=ghcr.io/koji-genba/homelab-toolbox@sha256:807a2874cc5b0590643c3cdf40f9b072facc4b09788e552fa29f31a0f2293dcc
+   TOOLBOX_IMAGE="ghcr.io/koji-genba/homelab-toolbox@$(sed -n 's/^TOOLBOX_IMAGE_DIGEST ?= //p' Makefile)"
    sops_toolbox() {
      docker run --rm --user "$(id -u):$(id -g)" \
        -v "$PWD:/workspace" -w /workspace \
