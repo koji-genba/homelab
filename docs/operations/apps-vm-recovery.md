@@ -6,6 +6,18 @@
 - 目標: Git管理の定義から全アプリケーション機能を復旧する
 - アーキテクチャ: [現行アーキテクチャと復旧目標](../architecture/target-state.md)
 
+## 実証の範囲
+
+| 日付・構成 | 確認できた範囲 |
+| --- | --- |
+| 2026-09-06: VMID 112、7 projects / NFS 7 mount | destroyからの再構築、受入12項目とユーザー受入が合格。[実証記録](../archive/implementation-status.md#phase-3-再構築性の証明2026-09-06全項目合格) |
+| 2026-09-25: VMID 101、7 projects / NFS 8 mount | 再構築、内部/外部DNS、7 FQDNのHTTPS/TLSまで確認。アプリ操作・SMB・通知は再受入していない。[実施記録](../archive/next-session.md#実施済み)・[残る受入](../archive/next-session.md#引き続き必要なこと) |
+| 現行: VMID 101、11 projects / 12 services、NFS 9 mount | Apps VM自身のtailnet参加を含む通し再構築は未検証。個別の追加・運用確認は、以下の各運用文書を参照 |
+
+2026-10-25に運用者は現行構成の通し再構築の実証を見送り、未実証のriskを受け入れた。
+再実証は未実施。普段の更新では行わず、[実証し直す契機](#通し再構築を実証し直す契機)に従う。
+過去の実証は既存NFSデータを残したVMの再構築であり、NFSデータ喪失からの復元を実証したものではない。
+
 ## 必要な復旧情報
 
 - homelab Git repositoryと`state-backup` branchへのアクセス
@@ -22,16 +34,19 @@ age private keyはApps VMへコピーしない。secretの復号は管理端末�
 
 `/etc/homelab/secrets/searxng.env`（SearXNGの`SEARXNG_SECRET`）はAnsibleが再生成するため、復元するものはない。
 
-sparkDashのnamed volumeはNFS復旧に含まれない。2026-10-11時点では自動backupを構築せず、VM外の暗号化backupも
-必須としない。volume喪失時は再deployでvolumeを再作成し、tokenとSSH鍵をSOPSから再配置して、UIで2台を
-再登録する（約5分）。unit/settings/historyは元に戻らない。unit数・benchmark結果・保存secretが増えたら
-backup方針を見直す。保存secretの暗号鍵はciphertextと同じvolumeに置かれる。
-[sparkDash運用](sparkdash.md)のbackup・復旧手順を参照する。
+### 2026-09-25以降に増えた復旧対象
 
-現在のCompose定義は11 projects / 12 servicesで、Homepageも復旧対象に含む。
-Homepageの設定はGitから復元し、認証はGatusと共用の`edge.env`をAnsibleで再配置する。
-tmpfs上のlogs・生成ファイルは再作成され、NFSや追加secretの復元は不要である。
-[Homepage運用](homepage.md)に従って起動と画面表示を確認する。
+外部のNFS export・データ・credential等が揃った状態でTerraform / Ansibleを実行した場合の範囲である。
+VM内の状態を引き継ぐものではない。詳細な設定・操作・受入は各運用文書を参照する。
+
+| 対象 | 宣言から自動で戻るもの | 手作業が要るもの | 失ってよいもの |
+| --- | --- | --- | --- |
+| [tailnet参加](apps-vm-tailnet.md#現在の手順apps-vmを再構築再登録するとき) | package/daemon、登録後のrouting/DNS preference・listener設定 | 旧device削除、手動登録、`100.86.147.127`への再固定、tag/expiry確認、Ansible再実行 | 旧node identity（固定IPは手動で引き継ぐ） |
+| [Open WebUI](open-webui.md#再deploy) | Compose・NFS mount。DB・ユーザー設定・署名鍵は既存NFSデータから利用 | NFS directory・marker・既存データの復旧、DGX APIとlogin/chatの確認 | VM内に復元すべき永続dataはない。NFS上のDB・署名鍵は保護対象 |
+| [SearXNG / MCP](searxng.md#再deploy) | 設定・container、instance secretの再生成、空cache。MCPはstateless | 外部検索先、MCP呼出し、Open WebUIの検索連携の確認 | cache、旧instance secret |
+| [sparkDash](sparkdash.md#永続化backup復旧) | image・空config volume、暗号化runtime bundleからtoken・任意SSH鍵を再配置 | DGX account/authorized_keysの準備、UIで2台を再登録、fingerprint照合、登録後再起動 | unit/settings/history/known_hosts、volume内に保存したsecret等。保存内容が増えたらbackup方針を見直す |
+| [Homepage](homepage.md#ログと復旧) | Gitの静的設定、Gatus共用Basic Authの再配置、tmpfs | 画面・リンクの確認 | tmpfs上のlogs・生成ファイル |
+| [Gatusの永続化](application-lifecycle.md#通常のreconcile) | Git設定・通知credential、空SQLite volume | 障害・復旧通知の受入 | 監視履歴・alert状態（backup対象外） |
 
 ## VM内named volumeの復旧範囲
 
@@ -52,7 +67,8 @@ Homepageにはnamed volumeがない。2026-10-12にpve1で確認したところ�
 VM backupも無かった。`/etc/pve/jobs.cfg`は存在せず、`/etc/pve/vzdump.cron`にjobの行は無く、
 `pvesm list <storage> --content backup`は`local` / `local-lvm` / `vmpool`とも0件、
 `/var/lib/vz/dump`は空だった。`storage.cfg`にPBS / NFS / CIFSのbackup先も無い。
-Apps VMはrepoから機能を再構築できるため、VM backupを取らない。
+Apps VMはrepoから機能を再構築する方針とし、VM backupを取らない。
+2026-10-25の見送り判断では、現行構成の通し再構築が未実証であることと、以下の喪失を受け入れる。
 diskとともに失うのはAdGuardの統計・query log、Sambaのログ、Gatusの履歴、sparkDashのunit登録などである。
 [再構築性とbackupの方針](../architecture/target-state.md#再構築性とbackupの方針)に従い、
 上表の再生成・再配置はvolumeの復元とは区別する。
@@ -278,7 +294,7 @@ identityの変更をTerraform applyで行わない。
 
 ## 復旧フロー
 
-再構築は[2026-09-06に当時の手順で実証された記録](../archive/implementation-status.md#phase-3-再構築性の証明2026-09-06全項目合格)がある。
+実証済みの範囲と見送り判断は[実証の範囲](#実証の範囲)を参照する。
 2026-10-12にhost-key確認の順序などを実装に合わせて並べ替え、前提を補った。
 以下は実装から導いた手順で、並べ替え後の順序は実機では未検証（この順序で通しでは実行していない）。
 通常の復旧は現行mainの希望状態へ戻す。compose roleは`homelab_repo_branch: main`をVMへcloneし、
@@ -318,7 +334,8 @@ identityの変更をTerraform applyで行わない。
 6. VMの有無に応じて進める。
    - 既存VMへ接続する場合: Proxmox console等でそのVMのhost-key fingerprintを確認し、
      提示keyと照合して`known_hosts`へ登録する。planで意図しないdestroy/replaceが無いことを確認する。
-   - VMを新規作成する場合: VMID/IPが解放されていることを外部で確認し、下記のTerraform applyとbootの後、
+   - VMを新規作成する場合: VMID/IPが解放されていることを外部で確認する。destroy後は`/vms/101`のACLも
+     消えるため、[ACL再付与](#罠-destroyはaclを道連れに削除する)をplan/apply前に済ませる。下記のTerraform applyとbootの後、
      最初のAnsible接続前に新VMのhost keyを確認・登録する。旧VMのkeyをそのまま信頼しない。
 
    ```sh
@@ -331,21 +348,46 @@ identityの変更をTerraform applyで行わない。
    拒否し、`-auto-approve`を使用しない。apply後に暗号化state recovery copyを作成してpushする。
    詳細は[Apps VM Terraform入口](../../files/infrastructure/terraform/apps-vm/README.md)を参照する。
 7. `AGE_IDENTITY_FILE=/path/to/identity make ansible-apply`でbootstrapとdeploymentを行う。
-   新規構築・復旧で`apps.yml.example`から入力を作る場合は、現行ネットワークの初期値
-   （`network_migration_complete: true`、legacy系flagは`false`）を使い、
-   `application_cutover_confirmed: false`でNFSをread-only、アプリ・reconcile・dead-manを停止して始める。
-   新規VMはTailscale package/daemonの準備後、未登録の`not Running`で停止する。
-   [tailnet再登録手順](apps-vm-tailnet.md#現在の手順apps-vmを再構築再登録するとき)に従い、旧deviceを削除し、
-   手動登録・同じIPv4への固定・tags/expiry確認を済ませる。exampleの`apps_tailnet_ip`は例示値なので
-   固定した実値に合わせ、DNSの`internal_records_use_tailnet_ip`を`true`にする。
-   復旧したexport・markerと他writerの停止を確認してから`application_cutover_confirmed`も`true`にし、
-   Ansibleを再実行する。これによりsecretを配置し、アプリとtimerを起動する。
+   入力は[apps.yml](../../files/infrastructure/ansible/apps/group_vars/apps.yml)にあり、現行mainの
+   `application_cutover_confirmed`は`true`である。復旧時はそのまま使わず、以下の確認表に従う。
+   [example](../../files/infrastructure/ansible/apps/group_vars/apps.yml.example)の初期値は`false`で、
+   roleの未定義時fallbackも`false`である。
+
+   | 段階 | 入力・確認 | 次へ進む条件 |
+   | --- | --- | --- |
+   | 初回Ansible | `application_cutover_confirmed: false`。`network_migration_complete: true`、legacy系flagは`false` | NFSはread-only、アプリ・reconcile・dead-manは停止の状態で始める。新規VMはpackage/daemon準備後、tailnet未登録の`not Running`で停止する |
+   | tailnet登録 | [再登録手順](apps-vm-tailnet.md#現在の手順apps-vmを再構築再登録するとき)で旧device削除、手動登録 | `100.86.147.127`へ再固定し、実値と`apps_tailnet_ip`の一致、`tag:apps`、key expiry無効を確認。exampleのIPは例示値なので実値に合わせ、`internal_records_use_tailnet_ip: true`にする |
+   | NFS / writer確認 | [NFS export契約](nfs-export.md)と`nfs_mounts`の9 mount、marker・既存データを照合 | 復旧対象データの他writerが停止済みであることを確認する |
+   | 再実行 | 上記の確認後に`application_cutover_confirmed: true`でAnsibleを再実行 | storage roleとmount guardの検査後、secretを配置しアプリとtimerを起動。`stashpad-media`はroのまま、他8 mountはrw |
+
+   管理端末とVM checkoutの版を[本フロー冒頭の前提](#復旧フロー)に揃える。
    既存cloneの更新が必要な場合は[通常のreconcile](application-lifecycle.md#通常のreconcile)を確認する。
-   全NFS mountとmarkerはcontainer起動前にstorage roleとmount guardが検証する。
 8. 必要な場合だけ、[別Terraform rootの手順](../../files/infrastructure/terraform/tailscale/README.md)で
-   Tailscale DNS/route/grantを復元する。現行と整合していればDNSのLAN IPから100.xへの差分を期待しない。
+   Tailscale DNS/route/grantを復元する。ACL全文を失った場合は[暗号化copyからの復元](../../files/infrastructure/terraform/tailscale/README.md#復元)から始める。
+   手順7の登録に必要なACLも失った場合は、登録前にこの復元を行う。
+   ACL全文だけでは端末登録・DNSは戻らない。現行と整合していればDNSのLAN IPから100.xへの差分を期待しない。
 9. 各serviceの受入試験、Gatus、Discord、Healthchecks.ioを確認し、復旧commit SHA、image digest、
    state backup revision、試験結果を記録する。
+
+## 通し再構築を実証し直す契機
+
+再実証は[issue #142](https://github.com/koji-genba/homelab/issues/142)で追跡する。
+
+普段の更新（projectの追加・設定変更・imageのdigest更新）ごとには通し再構築を行わない。
+次のように復旧経路の前提が変わるときに、実証し直す範囲と方法を決める。
+
+- Apps VMの起動経路の変更: Terraformの`apps-vm` root、Ansibleのbase / storage / network / tailscale / secrets roleの中身や`site.yml`の順序
+- NFS mountの追加・変更（project追加に伴う場合も含む）
+- tailnet参加手順の変更
+- Debianのメジャー更新（次はDebian 14）、Proxmoxのメジャー更新
+
+| 実証方法 | 手間と得られる確度 |
+| --- | --- |
+| 本番VM 101をその場で作り直す | 本番停止と復旧準備が必要。本番IPの引き継ぎ・tailnet IPの再固定と既存clientの復旧まで確認できるが、削除後は旧VMへ戻せない |
+| 隔離した別VMでリハーサル | 別state・IP、NFSデータの隔離copy、試験用DNS・通知・外部連携の準備が必要。構築と受入を確認できるが、本番IPの引き継ぎは確認できない |
+| 別VMを事前に作って切り替え | 事前構築に加えNFS writer・tailnet IPの受け渡しが必要。本番経路まで確認でき、旧VMを停止保存して戻せる余地がある |
+
+本番操作は別途明示承認を得て行い、実証後は構成・受入範囲と結果を日付付きで記録する。
 
 ## 保持する復旧資産とデータ
 
@@ -371,9 +413,21 @@ identityの変更をTerraform applyで行わない。
 
 ## 復旧の検証
 
-[移行時の受入試験一覧](../archive/k8s-to-compose.md)と各serviceの現行runbookを使う。VM boot成功やcontainerがhealthyになっただけでは復旧完了とは
-みなさない。applicationのread/write、DNS動作、SMB identity、TLS、通知、fail-closed mountがすべて合格する
-必要がある。
+各serviceの現行runbookと[移行時の受入試験一覧](../archive/k8s-to-compose.md)を使う。
+VM boot成功やcontainerがhealthyになっただけでは復旧完了とはみなさない。
+以下をすべて確認し、日付と結果を記録する。
+
+| 対象 | 完了条件 |
+| --- | --- |
+| 宣言・稼働状態 | 現行11 projects / 12 servicesすべてが稼働し、image digestがGit宣言と一致。管理端末・VM checkout・Ansible描画物の版が整合し、reconcileとdead-man timerが動作する |
+| NFS・既存データ | 9 mountのsource・mode・markerが宣言どおりで、writerが競合しない。stashPad prod/stagingの操作とmetadata分離、SillyTavernの会話・設定保存、Open WebUIの既存user・chat履歴とDGX経由のchatを確認する |
+| LAN / tailnet | 両経路でDNSの通常解決・内部rewrite・block/allowlist、全公開FQDNのHTTPS/TLS・認証、既存userによるSMB全shareのread/writeを確認。tailnet IPの固定・direct到達とNFSがeth0を通ること、許可外networkからの遮断も確認する |
+| 追加機能・外部依存 | SearXNG検索・MCP呼出し・Open WebUIの検索連携、sparkDashの2台再登録・fingerprint照合・登録後再起動、Homepageの画面・リンクを各runbookで確認。ElastiFlow等の外部upstreamは別途復旧し、Caddy経由の到達を確認する |
+| 通知 | Gatusの障害・復旧Discord通知、Healthchecks.ioのdead-man断・復帰を確認。project内の一部service（MCP等）だけの停止もdead-manが検出することを確認する |
+| 再起動・起動拒否 | reboot後に9 mountと全serviceが自動復旧する。mount欠落・不正なsource/mode・marker異常時はアプリ起動を拒否し、空のbind sourceへ書き込まない |
+
+履歴・ログ等の復元は[VM内named volumeの復旧範囲](#vm内named-volumeの復旧範囲)に従う。
+以下は過去の確認記録であり、現行構成の通し受入完了を示すものではない。
 
 [2026-09-25の引き継ぎ記録](../archive/next-session.md#引き続き必要なこと)では、Trusted LAN・tailnetからの
 アプリ操作、SMB read/write、通知など対話を要する受入再確認は未実施だった。
