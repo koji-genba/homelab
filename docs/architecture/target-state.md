@@ -38,7 +38,7 @@ ZFSスナップショット、レプリケーション、NFSサーバー自体�
 
 | 対象 | repoから再構築できるか | diskとともに失うもの | backup |
 | --- | --- | --- | --- |
-| Apps VM（101） | できる。Terraform → Ansible → Compose。tailnet登録とProxmox権限は文書化された手作業。ただし現行11 projectsでの通し再構築は未実証 | AdGuardの統計・query log、Sambaのログ、Gatusの履歴、sparkDashのunit登録（[再登録手順](../operations/sparkdash.md#永続化backup復旧)あり） | 取らない |
+| Apps VM（101） | できる。Terraform → Ansible → Compose。tailnet登録とProxmox権限は文書化された手作業。ただし現行11 projectsでの通し再構築は未実証。2026-10-25に実証を見送り、未実証のriskを受容。再実証の契機は[復旧手順](../operations/apps-vm-recovery.md#通し再構築を実証し直す契機)に定める | AdGuardの統計・query log、Sambaのログ、Gatusの履歴、sparkDashのunit登録（[再登録手順](../operations/sparkdash.md#永続化backup復旧)あり） | 取らない |
 | Tailscale gateway（102） | できる。template 9000からcloneし、手動登録 → Ansibleでprefs適用 → Terraform / 管理画面でroute承認を行う（Ansible手順は実機未検証）。template 9000はscriptで作成済み（gateway rootでのcloneは未検証） | nodeのidentity（再登録が必要） | 取らない |
 | ElastiFlow（103） | できる。Terraform → 専用Ansible。2026-10-25にVMを作り直して確認（[詳細](../../files/infrastructure/terraform/elastiflow/README.md#再構築性とbackup)） | 過去のフローデータ、Kibanaのdashboardへの変更 | 取らない（過去のフローは不要。VMを作り直し、空のindexから取り込み直す） |
 | stashPadDev（111） | 2026-10-25に[READMEで開発環境を宣言](../../files/infrastructure/terraform/stashpad-dev/README.md#開発環境の再構築)。手順は実機で通し実行しておらず未検証。template 9000はscriptで作成済み（stashPadDev rootでのcloneは未検証） | VMの中にしか無い作業、宣言外の追加ツールや設定 | 取らない（重要ではないUbuntuの開発用VM。VM内だけの作業は運用者が別途pushする） |
