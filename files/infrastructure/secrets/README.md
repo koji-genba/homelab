@@ -16,6 +16,11 @@ Agent VMのsecretは`agent/runtime.sops.yaml`として同じSOPS/ageで暗号化
 channel ID、監視用webhookが対象で、PostgreSQL passwordとSSH鍵はVM上で生成するためbundleへ
 含めない。
 
+## Tailscale ACL全文の復旧用コピー
+
+`tailscale/acl-policy.sops.json`は、既存age鍵で暗号化したreview済みACL全文のSOPS binary形式の復旧コピーである。
+更新・復元は[Tailscale手順](../terraform/tailscale/README.md#acl全文の復旧用コピー2026-10-25)に従う。
+
 ## 初回作成
 
 1. 管理端末で`age-keygen`を実行し、identityをmode `0600`で保存する。host上で実行する場合はhost版ageが

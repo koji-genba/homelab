@@ -55,6 +55,9 @@ Hermes Agent VM（104）の記憶・セッション・Runner作業ツリーはre
 日次のアプリケーションレベルbackupをpve1のNFS exportへage暗号化して取る（[Hermes Agentバックアップ運用](../operations/hermes-agent-backup.md)）。
 設計判断は[ADR-0008](../adr/0008-hermes-agent-hindsight-vms.md)を参照する。
 
+2026-10-25の判断として、tailnet ACL全文は既存age鍵を使うSOPS binary形式の復旧コピーをrepoに保存する。
+更新・復元は[Tailscale手順](../../files/infrastructure/terraform/tailscale/README.md#acl全文の復旧用コピー2026-10-25)に従う。
+
 ## 実行環境の構成
 
 ```text
@@ -217,6 +220,7 @@ VM側はNFSv4、`hard,_netdev`を使用する。systemd mount unit、`RequiresMo
 | 望ましい状態と手順 | Git main branch |
 | 暗号化Terraform復旧state | Git `state-backup` branch |
 | SOPS暗号化secret | Git main branch |
+| Tailscale ACL全文 | Git main branchのSOPS binary暗号文 |
 | age復旧鍵 | KeePassXC |
 | ProxmoxとTailscaleのcredential | KeePassXC、デプロイ時に注入 |
 | NFS上のアプリケーションデータ | 外部で復旧したNFS/ZFS（Apps VM内のlocal volumeは含まない） |

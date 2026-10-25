@@ -10,7 +10,7 @@ bad=0
 tracked_files=$(git -C "$repo_root" ls-files -co --exclude-standard)
 for path in $tracked_files; do
   case "$path" in
-    *.tfstate|*.tfstate.*|*/runtime.yaml|*/.env|.env)
+    *.tfstate|*.tfstate.*|*/runtime.yaml|*/.env|.env|*/acl-policy.live.json)
       echo "forbidden plaintext state/runtime file: $path" >&2
       bad=1
       ;;
@@ -24,6 +24,30 @@ for path in $(git -C "$repo_root" ls-files -co --exclude-standard '*runtime.sops
     bad=1
   }
 done
+
+# Binary SOPS ACL copy: only the encrypted blob and SOPS metadata may remain.
+acl_backup=files/infrastructure/secrets/tailscale/acl-policy.sops.json
+if test -f "$repo_root/$acl_backup"; then
+  if ! python3 - "$repo_root/$acl_backup" <<'PYACL'
+import json
+import sys
+
+try:
+    with open(sys.argv[1]) as source:
+        policy = json.load(source)
+    if (set(policy) != {"data", "sops"}
+            or not policy["data"].startswith("ENC[AES256_GCM,")
+            or not policy["sops"]["mac"].startswith("ENC[AES256_GCM,")
+            or not policy["sops"]["age"]):
+        raise ValueError("not a binary SOPS copy")
+except (OSError, ValueError, TypeError, KeyError, AttributeError):
+    sys.exit(1)
+PYACL
+  then
+    echo "ACL backup lacks binary SOPS encryption: $acl_backup" >&2
+    bad=1
+  fi
+fi
 
 # Hermes Agent bundle: the gitignored plaintext must never be tracked, even if
 # it was force-added. The encrypted agent/runtime.sops.yaml is the only

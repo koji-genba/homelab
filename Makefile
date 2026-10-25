@@ -30,6 +30,7 @@ TERRAFORM_PLAN_FILE := $(TERRAFORM_ROOT)/$(TERRAFORM_PLAN_NAME)
 TAILSCALE_PLAN_FILE := $(TAILSCALE_ROOT)/$(TAILSCALE_PLAN_NAME)
 TAILSCALE_ACL_POLICY_REL := $(if $(ACL_POLICY_FILE),$(patsubst $(CURDIR)/%,%,$(abspath $(ACL_POLICY_FILE))),)
 TAILSCALE_ACL_POLICY_CONTAINER := /workspace/$(TAILSCALE_ACL_POLICY_REL)
+TAILSCALE_ACL_BACKUP_FILE ?= files/infrastructure/secrets/tailscale/acl-policy.sops.json
 TAILSCALE_VAR_ARGS := $(if $(MANAGE_TAILNET),-var="manage_tailnet=$(MANAGE_TAILNET)",) \
 	$(if $(MANAGE_SUBNET_ROUTER),-var="manage_subnet_router=$(MANAGE_SUBNET_ROUTER)",) \
 	$(if $(ENABLE_ADGUARD_DNS),-var="enable_adguard_dns=$(ENABLE_ADGUARD_DNS)",) \
@@ -85,7 +86,7 @@ TOOLBOX_TAILSCALE_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_TAILSCALE_ENV) $(TOOLBOX_I
 .PHONY: ansible-lint ansible-check ansible-apply ansible-lint-agent ansible-check-agent ansible-apply-agent ansible-lint-gateway ansible-check-gateway ansible-apply-gateway gateway-routes-test ansible-bootstrap-paths-test compose-reconcile-fixture terraform-apps-vm-lifecycle-test terraform-agent-runner-vm-lifecycle-test toolbox-uid-test cloud-init-test agent-vm-cloud-init-test runner-vm-cloud-init-test runner-privilege-fixture runner-firewall-fixture agent-runner-scope-fixture agent-dnat-guard-fixture compose-config adguard-config-check gatus-config-check mover-test shellcheck secrets-scan preflight
 .PHONY: state-backup-preflight state-backup-preflight-test state-backup state-backup-push state-restore state-restore-test state-backup-test rollback-app
 .PHONY: secrets-encrypt secrets-decrypt-check secrets-encrypt-agent secrets-decrypt-check-agent
-.PHONY: tailscale-init tailscale-acl-preflight tailscale-plan tailscale-apply tailscale-import-core tailscale-import-acl tailscale-import-dns tailscale-import-router tailscale-acl-path-test tailscale-import-gates-test
+.PHONY: tailscale-acl-encrypt tailscale-acl-decrypt tailscale-init tailscale-acl-preflight tailscale-plan tailscale-apply tailscale-import-core tailscale-import-acl tailscale-import-dns tailscale-import-router tailscale-acl-path-test tailscale-import-gates-test
 
 toolbox-build:
 	docker build --tag $(TOOLBOX_BUILD_IMAGE) files/tools/homelab-toolbox
@@ -339,6 +340,34 @@ tailscale-acl-path-test:
 
 tailscale-import-gates-test:
 	sh ./scripts/tests/tailscale-import-gates-fixture.sh
+
+# ACL recovery copy: binary SOPS keeps policy keys inside the encrypted blob.
+tailscale-acl-encrypt:
+	test -n "$(AGE_RECIPIENT)" || { echo "AGE_RECIPIENT is required" >&2; exit 1; }
+	TAILSCALE_REPO_ROOT="$(CURDIR)" ./scripts/validate-tailscale-acl-path.sh "$(ACL_POLICY_FILE)" >/dev/null
+	mkdir -p "$$(dirname -- "$(TAILSCALE_ACL_BACKUP_FILE)")"
+	TAILSCALE_REPO_ROOT="$(CURDIR)" ./scripts/validate-tailscale-acl-path.sh --allow-missing "$(TAILSCALE_ACL_BACKUP_FILE)" >/dev/null
+	test ! -e "$(TAILSCALE_ACL_BACKUP_FILE)" && test ! -L "$(TAILSCALE_ACL_BACKUP_FILE)" || { echo "refusing to overwrite existing ACL backup" >&2; exit 1; }
+	$(TOOLBOX_RUN) sh -eu -c '\
+		umask 077; \
+		tmp=$$(mktemp "$$(dirname -- "$$2")/.acl-encrypt.XXXXXX"); \
+		trap '\''rm -f "$$tmp"'\'' EXIT HUP INT TERM; \
+		sops encrypt --age "$$AGE_RECIPIENT" --input-type binary --output-type json "$$1" >"$$tmp"; \
+		ln "$$tmp" "$$2"' sh "$(TAILSCALE_ACL_POLICY_CONTAINER)" "$(TAILSCALE_ACL_BACKUP_FILE)"
+
+tailscale-acl-decrypt:
+	test -n "$(AGE_IDENTITY_FILE)" && test -r "$(AGE_IDENTITY_FILE)" || { echo "AGE_IDENTITY_FILE must be readable" >&2; exit 1; }
+	test -f "$(TAILSCALE_ACL_BACKUP_FILE)" && test ! -L "$(TAILSCALE_ACL_BACKUP_FILE)" || { echo "missing regular ACL backup" >&2; exit 1; }
+	TAILSCALE_REPO_ROOT="$(CURDIR)" ./scripts/validate-tailscale-acl-path.sh --allow-missing "$(ACL_POLICY_FILE)" >/dev/null
+	$(TOOLBOX_RUN) sh -eu -c '\
+		umask 077; \
+		tmp=$$(mktemp "$$(dirname -- "$$2")/.acl-decrypt.XXXXXX"); \
+		trap '\''rm -f "$$tmp"'\'' EXIT HUP INT TERM; \
+		sops decrypt --input-type json --output-type binary "$$1" >"$$tmp"; \
+		if test -e "$$2"; then \
+			{ test -f "$$2" && test ! -L "$$2"; } || { echo "ACL policy is not a regular file" >&2; exit 1; }; \
+			if cmp -s "$$tmp" "$$2"; then echo "ACL: 一致"; else echo "ACL: 不一致" >&2; exit 1; fi; \
+		else ln "$$tmp" "$$2"; echo "ACL: 復元しました"; fi' sh "$(TAILSCALE_ACL_BACKUP_FILE)" "$(TAILSCALE_ACL_POLICY_CONTAINER)"
 
 secrets-encrypt:
 	test -n "$(AGE_RECIPIENT)" || { echo "AGE_RECIPIENT is required" >&2; exit 1; }
