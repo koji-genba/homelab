@@ -303,7 +303,9 @@ Apps VMにはtemplateが不要である。gateway・ElastiFlow・stashPadDevは�
 `template_vm_id`（各`variables.tf`のdefault `9000`）を使う。
 2026-10-25のread-only採取で現物の設定と元imageを特定し、
 [`scripts/create-proxmox-ubuntu-template.sh`](../../scripts/create-proxmox-ubuntu-template.sh)に固定した。
-**tag=10への変更後の実機での作成・cloneは未検証**である。9000を削除する前に、必ず別VMIDで検証する。
+同日、運用者が9001を作成し、net0を`tag=10`へ変更してElastiFlow rootからVM 103へのcloneを確認した後、
+scriptで9000を作り直して9001を削除した。9000のキー照合はすべて`OK`、diskはraw / 3758096384 bytesだった。
+gateway / stashPadDevのrootからのcloneは未検証である。9000を削除する前に、必ず別VMIDで検証する。
 
 採用imageはUbuntu 24.04 amd64の`release-20260518`である。
 
@@ -314,18 +316,20 @@ Apps VMにはtemplateが不要である。gateway・ElastiFlow・stashPadDevは�
   `D2EB44626FDDC30B513D5BB71A5D6C4C7DB87C81`。image更新時も署名を確認してからURL・hashを一緒に変更する。
 - 固定URLは`http://cloud-images-archive.ubuntu.com/releases/noble/release-20260518/ubuntu-24.04-server-cloudimg-amd64.img`へ
   redirectされる。scriptはHTTPへのredirectを許可し、毎回repo固定のSHA-256で内容を照合する。
+  2026-10-25はarchiveから598 MBの取得に52分（約196 KB/s）かかったため、約50分以上の取得時間を見込む。
   upstream消失時に備え、image・SHA256SUMS・署名を別途保管する。rolling imageへ切り替えない。
 
 pve1に残っていた`/var/lib/vz/template/iso/noble-server-cloudimg-amd64.img`は上記hashと一致し、
 9000.confのmtimeは2026-05-24だった。scriptはこの既存ファイルには触れず、
 `/var/lib/vz/template/iso/ubuntu-24.04-server-cloudimg-amd64-release-20260518.img`を使う。
+pve1に同じhashのimageがあれば、上記cache名へコピーして使える。
 そのファイルがありhashが合えば再利用し、無ければ同じdirectoryの一時ファイルへdownloadし、照合後にrenameする。
 hashが合わないcacheまたはdownload途中のファイルは削除して停止する。
 
 旧9000を基にした設定は次のとおり。MACとstorageが割り当てるdisk番号は固定しない。
 旧9000（2026-05作成）のnet0はtagなしだった。2026-10-25に9001からVM 103へのTerraform cloneが
 `HTTP 403: Permission check failed (/sdn/zones/localnetwork/vmbr0, SDN.Use)`で失敗したため、
-権限を増やさず`tag=10`に変更した。旧9000との設定の違いはこの1キーだけである。
+権限を増やさず`tag=10`に変更し、再実行でcloneが成功した。旧9000との設定の違いはこの1キーだけである。
 
 | キー | 値 |
 | --- | --- |
@@ -348,7 +352,8 @@ ElastiFlow・stashPadDevが各`variables.tf`の`disk_size_gb`で宣言する。
 #### 配置と別VMIDでの検証
 
 管理端末のrepo rootからscriptをファイルとして転送する。stdinでscriptを流さない。
-以下は運用者が実行する手順であり、この作業では本番操作は未実施、実機での手順は未検証である。
+2026-10-25に運用者が9001の作成とElastiFlow rootからのcloneを実機で確認した。
+以下の9900を使う汎用clone試験は未検証であり、同日の確認範囲は[VM 103の作り直し](../../files/infrastructure/terraform/elastiflow/README.md#vm-103-の作り直し)を参照する。
 
 ```bash
 scp scripts/create-proxmox-ubuntu-template.sh root@192.168.10.11:/root/create-proxmox-ubuntu-template.sh
@@ -393,8 +398,19 @@ gateway・ElastiFlow・stashPadDevの既存VMはfull cloneなのでtemplateのdi
 1. 9001と検証cloneの結果を保存し、9000が対象の停止templateであることと、他のclone操作が無いことを確認する。
 2. 9000の設定・volume情報を保存し、削除の明示承認を得てからpve1のroot consoleで`qm destroy 9000`を行う。
 3. `bash /root/create-proxmox-ubuntu-template.sh --vmid 9000 --storage vmpool`を実行し、すべての照合が`OK`であることを確認する。
-4. 結果と実施日を記録し、不要になった9001・検証cloneだけを運用者が確認して手動削除する。
+4. destroyで`/vms/9000`のACLも消えるため、clone用ACLを付け直す。
+
+   ```bash
+   pveum acl modify /vms/9000 --user terraform@pve --role HomelabTerraformClone --propagate 0
+   ```
+
+5. 結果と実施日を記録し、不要になった9001・検証cloneだけを運用者が確認して手動削除する。
    途中で失敗した場合はscriptの表示を基に残存VM・volumeを確認し、再開前に扱いを判断する。
+
+2026-10-25はcacheを再利用して9000を作り直し、ACLを付け直してから9001を削除した
+（9001のACLもProxmoxが削除）。最終状態は101〜105・111がrunning、9000がtemplateで、
+`terraform@pve`の`/vms` ACLは101〜105・111が`HomelabTerraform`（propagate 1）、
+9000が`HomelabTerraformClone`（propagate 0）だった。
 
 ## ProxmoxのAPI権限
 
@@ -449,7 +465,7 @@ VMID 104 / 105（Hermes Agent / Runner）は2026-10-12時点では存在せず�
    gatewayをApps VMより先に戻す。Apps VMサービスへの直接tailnet接続はgatewayを経由しない。
 3. ElastiFlowを戻す。templateからTerraform/cloud-initでVMを作成した後、READMEの
    `make ansible-apply-elastiflow` でpackage・設定・固定dashboardを反映し、受信確認と
-   再実行時のchanged=0を確認する。空のVMからの通し実行は未検証。
+   再実行時のchanged=0を確認する。2026-10-25にVM 103を作り直して実機で確認した。
    router側のcollector定義は`files/infrastructure/network/config.txt`で確認する。
 4. エージェントを戻す。Agent VM / Runner VMのVM定義はTerraform、OSとサービスはAnsibleで再構築し、
    記憶とセッションはpve1の専用NFS exportへ取った日次バックアップから戻す。復号identityは運用者が

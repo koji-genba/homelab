@@ -43,11 +43,12 @@ pvesm path <qm config 103 の scsi0 に表示された volume-id>
 ## 再構築性とbackup
 
 サービスはTerraform/cloud-initによるVM作成後、[専用Ansible root](../../ansible/elastiflow/)で
-版固定したpackage・設定・dashboard importを宣言します。空のVMからの通し実行は**未検証**です。
-template 9000の作成の固定と合わせて、残る再構築の穴は[#87](https://github.com/koji-genba/homelab/issues/87)で追跡しています。
+版固定したpackage・設定・dashboard importを宣言します。
+2026-10-25に運用者がVM 103を作り直し、空のVMからの構成・sFlow受信・再実行時の`changed=0`を実機で確認しました。
+template 9000も同日にscriptで作り直しました（[ホスト復旧](../../../../docs/operations/proxmox-host-recovery.md#template-vm-9000)）。
 2026-10-12に、運用者は過去のフローデータは不要と判断し、VM backupを取らないと決めました。
 VMを失ったら作り直し、フローは空のindexから取り込み直します。
-repoからの再構築性が完全だからではなく、失ってよいという判断によるものです。
+この決定は再構築の実証前に、失ってよいという判断で行ったものです。
 VM全体の評価と方針は[現行アーキテクチャ](../../../../docs/architecture/target-state.md#再構築性とbackupの方針)を参照してください。
 
 ## 実機確認（2026-10-12）
@@ -147,8 +148,7 @@ guestへの追加設定は別途必要です。
 
 2026-10-25に現物から採取した版・構成はUbuntu 24.04 amd64、Elasticsearch/Kibana **8.19.22**、
 `flowcoll` **7.26.2**です。これを[専用rootのgroup_vars](../../ansible/elastiflow/group_vars/elastiflow.yml)に固定しました。
-以下はAnsibleで宣言した手順であり、**空のVMからの通し実行は未検証**です。
-本番の適用履歴はrepoだけから判断せず、VM 103の再作成・実証は別途承認した作業枠で行います。
+2026-10-25にVM 103の再作成後、この専用Ansibleによる構成と再実行時の`changed=0`を実機で確認しました。
 
 cloud-init完了後、管理端末で既存のSSH-agentとホスト鍵確認を準備し、repository rootから実行します。
 秘密鍵をinventoryへ書き込まず、対象がVMID 103の `192.168.10.103` であることを確認してください。
@@ -224,7 +224,8 @@ index件数の増加・dashboard表示・FQDN/共有リンク/許可外403も確
 
 ## VM 103 の作り直し
 
-この手順は**実機では未検証（2026-10-25 時点）**です。停止・破棄を伴うため、承認した作業枠で行います。
+2026-10-25に運用者がこの手順でVM 103を作り直し、実機で確認しました。
+停止・破棄を伴うため、承認した作業枠で行います。
 Makeのコマンドはrepository rootで実行します。認証は上の手順どおり
 `TF_VAR_proxmox_api_token` を管理端末の環境変数へ一時注入し、コマンドにtokenの値を書きません。
 
@@ -267,8 +268,14 @@ Makeのコマンドはrepository rootで実行します。認証は上の手順�
    ```
 
 6. **cloud-initとSSHの準備**: cloud-init完了を待ちます。SSHのhost keyが変わるため、
-   `known_hosts` の古い `192.168.10.103` の行を削除し、console等の信頼できる経路で
-   fingerprintを照合してから新しい鍵を登録します。
+   pve1のroot consoleからguest agent経由で公開鍵を取得します。
+
+   ```bash
+   qm guest exec 103 -- cat /etc/ssh/ssh_host_ed25519_key.pub
+   ```
+
+   管理端末で `ssh-keyscan -t ed25519 192.168.10.103` の公開鍵の種類・本体を上の出力と照合します。
+   一致を確認してから `known_hosts` の古い `192.168.10.103` の行を削除し、新しい鍵を登録します。
 7. **専用Ansibleを2回実行**: 初回で構成し、2回目は `changed=0` を確認します。
 
    ```bash
@@ -280,6 +287,21 @@ Makeのコマンドはrepository rootで実行します。認証は上の手順�
    `elasticsearch`・`kibana`・`flowcoll` の3 serviceがactiveであることを確認します。
    sFlow受信後、indexの `docs.count` が時間とともに増えること、dashboardが36件あること、
    `https://elastiflow.kojigenba-srv.com` の表示を確認します。
+
+### 再構築の実機確認（2026-10-25）
+
+運用者がVMだけをdestroyし、`/vms/103`のACLを付け直して9001からcreateしました。
+初回はtemplateのtagなしnet0が原因で`SDN.Use`のHTTP 403となり、`tag=10`に変更後44秒でcreateが成功しました。
+SSH host keyはguest agentとssh-keyscanの出力を照合して登録し、cloud-initは`status: done`でした。
+初回Ansibleはdashboard importのcontroller側ファイル参照で停止（`changed=21`, `failed=1`）しましたが、VM上のcurlへ修正済み（`ff202c7`）で、再実行は`changed=2`, `failed=0`、さらにもう1回は`changed=0`, `failed=0`でした。
+
+- Elasticsearch / Kibana 8.19.22（両方apt hold）、flowcoll 7.26.2、3 serviceのactive / enabledを確認しました。
+- Elasticsearchはgreen、Kibana 8.19.22はavailableでした。saved objectsはdashboard 36 / visualization 365 / map 2 / search 2 / index-pattern 3でした。
+- flowの`docs.count`は120秒で895 → 1111に増え、sFlow受信を確認しました。管理端末から`https://elastiflow.kojigenba-srv.com/api/status`は200でした。
+- destroy / create後にstate-backupをpushし、最後のplanは`-var`なし（既定の`template_vm_id=9000`）で`No changes`でした。`clone.vm_id`は`ignore_changes`対象です。
+
+過去のフローデータとKibanaのdashboardへの変更は方針どおり失われました。
+共有リンク / `server.publicBaseUrl`は未検証です。Homepage / GatusにElastiFlow監視はありません。
 
 ## セキュリティ上の注意
 

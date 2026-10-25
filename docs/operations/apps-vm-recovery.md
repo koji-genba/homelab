@@ -112,10 +112,11 @@ Agent / RunnerのREADMEには2026-10-18のVMID 104 / 105用ACL・専用token準�
   従来借用していたElastiFlowのtfvarsから`ssh_public_key`の1行だけを写して作成した。
   init時の古いprovider symlinkの対処は[stashPadDev README](../../files/infrastructure/terraform/stashpad-dev/README.md#トラブルシューティング)を参照する。
 
-今回の移行について未検証なのは、新tokenでtemplate 9000からVMを新規cloneする操作
-（`HomelabTerraformClone`の実使用）、role・ACLの最小権限性、gateway / ElastiFlow / stashPadDevの
-再構築の通し確認。planのrefresh成功はclone・再構築の確認には含めない。
-ElastiFlowのOutputs差分は`b11bc12`以来applyしていないためで、このPRとは無関係。
+2026-10-25にElastiFlow rootで新tokenと`HomelabTerraformClone`を使い、検証用template 9001から
+VM 103を新規cloneして専用Ansibleまで実機で確認した（[検証記録](../../files/infrastructure/terraform/elastiflow/README.md#再構築の実機確認2026-10-25)）。
+その後template 9000も同じscriptで作り直した。gateway / stashPadDevのrootでのclone・再構築と、
+role・ACLの最小権限性は未検証。planのrefresh成功はclone・再構築の確認には含めない。
+移行時に残っていたElastiFlowのOutputs差分も、同日の再構築後のplanでは`No changes`となった。
 
 ### 用意が必要なもの
 
