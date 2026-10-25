@@ -303,7 +303,7 @@ Apps VMにはtemplateが不要である。gateway・ElastiFlow・stashPadDevは�
 `template_vm_id`（各`variables.tf`のdefault `9000`）を使う。
 2026-10-25のread-only採取で現物の設定と元imageを特定し、
 [`scripts/create-proxmox-ubuntu-template.sh`](../../scripts/create-proxmox-ubuntu-template.sh)に固定した。
-**このscriptによる実機での作成・cloneは未検証**である。9000を削除する前に、必ず別VMIDで検証する。
+**tag=10への変更後の実機での作成・cloneは未検証**である。9000を削除する前に、必ず別VMIDで検証する。
 
 採用imageはUbuntu 24.04 amd64の`release-20260518`である。
 
@@ -322,19 +322,22 @@ pve1に残っていた`/var/lib/vz/template/iso/noble-server-cloudimg-amd64.img`
 そのファイルがありhashが合えば再利用し、無ければ同じdirectoryの一時ファイルへdownloadし、照合後にrenameする。
 hashが合わないcacheまたはdownload途中のファイルは削除して停止する。
 
-再現する設定は次のとおり。MACとstorageが割り当てるdisk番号は固定しない。
+旧9000を基にした設定は次のとおり。MACとstorageが割り当てるdisk番号は固定しない。
+旧9000（2026-05作成）のnet0はtagなしだった。2026-10-25に9001からVM 103へのTerraform cloneが
+`HTTP 403: Permission check failed (/sdn/zones/localnetwork/vmbr0, SDN.Use)`で失敗したため、
+権限を増やさず`tag=10`に変更した。旧9000との設定の違いはこの1キーだけである。
 
 | キー | 値 |
 | --- | --- |
 | name / memory / cores | `ubuntu-2404-cloudinit` / `2048` / `2` |
 | cpu / machine / scsihw | `host` / `q35` / `virtio-scsi-pci` |
-| net0 | `virtio,bridge=vmbr0`（tagなし） |
+| net0 | `virtio,bridge=vmbr0,tag=10` |
 | scsi0 | 指定storageのbase disk、`discard=on,size=3584M,ssd=1`（raw、3758096384 bytes） |
 | ide2 / boot | 指定storageのcloud-init drive（`media=cdrom`） / `order=scsi0` |
 | serial0 / vga / template | `socket` / `serial0` / `1` |
 | ostype / agent / bios / citype / onboot | 未設定 |
 
-clone側のrootが`ostype`と`agent`を設定する。今回は現物再現を優先し、
+clone側のrootが`ostype`と`agent`を設定する。上記net0の例外以外は現物再現を優先し、
 `virtio-scsi-single`への変更（clone側の`iothread`との整合など）は行っていない。
 採取時のPVEはpve-manager 9.2.3 / qemu-server 9.1.16で、`qm create/set`の`import-from`対応を確認した。
 scriptは`qm create` → `qm set --scsi0 <storage>:0,import-from=...` → cloud-init / boot設定 →

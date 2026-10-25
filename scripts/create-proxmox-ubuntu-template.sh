@@ -135,9 +135,10 @@ PY
 stage=create
 check_vmid
 creation_attempted=1
+# Untagged bridge SDN.Use is required at clone time; use VLAN 10 to match the ACL.
 qm create "$vmid" --name ubuntu-2404-cloudinit \
   --memory 2048 --cores 2 --cpu host --machine q35 \
-  --net0 virtio,bridge=vmbr0 --scsihw virtio-scsi-pci \
+  --net0 virtio,bridge=vmbr0,tag=10 --scsihw virtio-scsi-pci \
   --serial0 socket --vga serial0
 stage=import
 qm set "$vmid" --scsi0 "${storage}:0,import-from=${image_path},discard=on,ssd=1"
@@ -161,7 +162,7 @@ expected = {
     "memory": "2048", "name": "ubuntu-2404-cloudinit", "scsihw": "virtio-scsi-pci",
     "serial0": "socket", "template": "1", "vga": "serial0",
     "ide2": f"{storage}:vm-{vmid}-cloudinit,media=cdrom",
-    "net0": "virtio,bridge=vmbr0",
+    "net0": "virtio,bridge=vmbr0,tag=10",
     "scsi0": f"{storage}:base-{vmid}-disk-N,discard=on,size=3584M,ssd=1",
 }
 failed = False

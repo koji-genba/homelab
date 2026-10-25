@@ -144,7 +144,7 @@ ElastiFlowのOutputs差分は`b11bc12`以来applyしていないためで、こ�
 | `/storage/local` | `HomelabTerraform` / 0 | image download / import、snippetのstorage確認 `Datastore.Audit`, `Datastore.AllocateTemplate`, `Datastore.AllocateSpace`。既存の`Datastore.Allocate`も維持。snippet実体の転送は別途root SSH |
 | `/storage/vmpool` | `HomelabTerraform` / 0 | full clone、OS / data disk割当・resize、cloud-init drive `Datastore.Audit`, `Datastore.AllocateSpace`。既存の`Datastore.Allocate`, `Datastore.AllocateTemplate`も維持 |
 | `/nodes/pve1` | `HomelabTerraform` / 0 | node / network / storage情報取得、image download / import関連 `Sys.Audit`, `Sys.AccessNetwork`, `Sys.Modify` |
-| `/sdn/zones/localnetwork`、`/sdn/zones/localnetwork/vmbr0/10` | `HomelabTerraform` / 0 | 全VMのVLAN 10 NIC割当 `SDN.Use` |
+| `/sdn/zones/localnetwork`、`/sdn/zones/localnetwork/vmbr0/10` | `HomelabTerraform` / 0 | 全VMのVLAN 10 NIC割当 `SDN.Use`。templateのNICもVLAN 10なので、cloneでもtagなしbridgeの権限は不要 |
 
 cloneの権限判定は[Proxmox公式のAPI実装説明](https://lore.proxmox.com/all/1686149104.s7kd1zg63z.astroid%40yuna.none/t/)
 （clone元`VM.Clone`、clone先`VM.Allocate`、storage `Datastore.AllocateSpace`、bridge `SDN.Use`）を参照。
