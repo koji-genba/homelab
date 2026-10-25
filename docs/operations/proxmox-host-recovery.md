@@ -392,7 +392,8 @@ VMID 104 / 105（Hermes Agent / Runner）は2026-10-12時点では存在せず�
    管理端末で与える。手順は[Hermes Agent運用](hermes-agent.md)と
    [Hermes Agentバックアップ運用](hermes-agent-backup.md)を正とする。Proxmoxのtoken/ACLは他のVMと同様に
    手動で用意する。
-5. 開発作業を再開する場合だけstashPadDevを戻す。
+5. 開発作業を再開する場合だけstashPadDevを戻す。VM作成後は
+   [READMEの開発環境の再構築](../../files/infrastructure/terraform/stashpad-dev/README.md#開発環境の再構築)に従う（手順は実機未検証）。
 
 gateway等のraw apply後の`make state-backup`は各READMEに従う。
 既存resourceと復元stateを照合し、意図しないdestroy / replaceがあるplanを適用しない。

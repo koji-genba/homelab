@@ -41,7 +41,7 @@ ZFSスナップショット、レプリケーション、NFSサーバー自体�
 | Apps VM（101） | できる。Terraform → Ansible → Compose。tailnet登録とProxmox権限は文書化された手作業。ただし現行11 projectsでの通し再構築は未実証 | AdGuardの統計・query log、Sambaのログ、Gatusの履歴、sparkDashのunit登録（[再登録手順](../operations/sparkdash.md#永続化backup復旧)あり） | 取らない |
 | Tailscale gateway（102） | できる。template 9000からcloneし、手動登録 → Ansibleでprefs適用 → Terraform / 管理画面でroute承認を行う（Ansible手順は実機未検証）。templateの作成が固定されていない点は穴 | nodeのidentity（再登録が必要） | 取らない |
 | ElastiFlow（103） | サービスは作り直せるが、`install.sh`の実行・dashboardの取り込みに手作業が残り、dashboardの取得元も固定されていない（[詳細](../../files/infrastructure/terraform/elastiflow/README.md#再構築性とbackup)） | 過去のフローデータ、Kibanaのdashboardへの変更 | 取らない（過去のフローは不要。VMを作り直し、空のindexから取り込み直す） |
-| stashPadDev（111） | できない。開発環境がrepoに宣言されていない（[詳細](../../files/infrastructure/terraform/stashpad-dev/README.md#再構築性とbackup)） | VMの中にしか無い作業、手作業で入れた開発環境 | 取らない（重要ではないUbuntuの開発用VM。VM内だけの作業は運用者が別途pushする） |
+| stashPadDev（111） | 2026-10-25に[READMEで開発環境を宣言](../../files/infrastructure/terraform/stashpad-dev/README.md#開発環境の再構築)。手順は実機で通し実行しておらず未検証。template 9000の固定は別の穴として残る | VMの中にしか無い作業、宣言外の追加ツールや設定 | 取らない（重要ではないUbuntuの開発用VM。VM内だけの作業は運用者が別途pushする） |
 | Hermes Agent VM（104） | 実装上は可能（実機未検証）。Terraform → Ansible。記憶DBとHermesデータはVM内の専用データディスクにあり、[日次バックアップ](../operations/hermes-agent-backup.md)から戻せる | 直近バックアップ以降の記憶の更新 | 取らない（Proxmox VM backupは取らず、アプリケーションレベルの日次バックアップをpve1のNFS exportへage暗号化して保存する。復号identityはVMに置かない） |
 | Hermes Runner VM（105） | 実装上は可能（実機未検証）。Terraform → Ansible。実行accountとChromiumは宣言から再作成する | VM内だけの作業ツリー（キャッシュを除きAgentのバックアップに含める） | 取らない（実行・ブラウザ専用。Discord token・記憶DB・管理鍵を置かない設計） |
 | template 9000 | 作成例はあるが固定されていない（[ホスト復旧](../operations/proxmox-host-recovery.md#template-vm-9000)） | — | 取らない（作成の固定は#87で追跡） |
