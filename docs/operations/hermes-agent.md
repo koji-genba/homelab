@@ -471,6 +471,19 @@ Agent VM側の値はrole `agent_stack`が`/etc/homelab/secrets/*.env`へroot 060
   別ゲートによりfalseでも保留され、`/memory pending`から確認する。
   この承認ゲートはHindsightのretain/自動retainを止めない。Hindsight側はcustom抽出とSOULの方針で守り、
   誤記憶があれば元発話と照合してbank修復・再構築を判断する。
+- 2026-10-25: コマンド承認を`approvals.mode: smart`へ変更し、ローカルGLM guard（thinking off）で一次判定する。
+  manualでは無害な`python -c`・heredoc・`bash -lc`や全`execute_code`も承認対象となり、
+  2026-10-19〜2026-10-25にDiscord承認ボタンが33回押された。thinking offは判定が約0.5秒と速く、運用者の出力上限なしの直接リプレイでは
+  thinking onは1.5〜9秒かかり、offでESCALATEとなる`curl | bash`をAPPROVEし、SSH鍵POSTもDENYではなく
+  ESCALATEとしたためoffにする。上流guardは16 tokensを指定するが、pinned imageのcustom経路は
+  `max_tokens`を送信しないため、本番で16 tokensを推論に使い切ることが理由ではない。
+  明確に安全な操作は通し、危険な操作は拒否する。認証情報・Hermes状態の読み取り/送信、ローカルデータの外部送信、
+  インターネットから取得したコードの実行は`smart_policy`で人へ回す方針とし、不確実・失敗時もDiscordで確認する。
+  この方針は上流detectorがフラグを立てたコマンドに対するもので、全コマンドの検査を保証しない。cron・無人実行は自動承認しない。
+  上流detectorが検出しない操作（`curl -d "$(cat ...)"`でのSSH鍵POST、`cat ~/.hermes/.env`、tarからuploadへのpipe等）は
+  manualでも承認へ届かず、modeや`smart_policy`では保護されないため、その保護はRunnerの隔離（非rootユーザー・LAN遮断）とRunnerに何を置くかに依存する。
+  Discordの「Always Allow」は使わない。危険カテゴリ全体を`config.yaml`へ保存するため、次回Ansible applyで
+  差し戻され、applyの冪等性も崩れる。永続的な例外はテンプレートへ記述する。
 - 記憶はHindsightの固定bank `personal`に保存し、全Discordチャンネルで共有する。明示された事実と推測の
   区別はbankのmission/disposition、custom抽出、`SOUL.md`の方針で促す。LLMの出力をコードで保証するものではない。
   `retain_extraction_mode=custom` / `retain_custom_instructions`で本人の明示発話だけを個人の事実として抽出し、
@@ -557,6 +570,7 @@ secret bundleの復号確認は別枠で`make secrets-decrypt-check-agent`（ide
   ローカル結合試験では実際の抽出・統合スキーマを処理できた。ただし初期consolidationで出力上限に当たり、
   reasoning effortと有限の出力上限を調整し救済した。無人で常に完走することや記憶の正確性までは保証しない。
 - `memory.write_approval: false`、`skills.write_approval: true`は2026-10-17にユーザー決定済み。
+  2026-10-25のコマンド承認は`smart`（GLM guard、thinking off）へ変更。方針・Always Allow禁止は「記憶の運用」を参照。
   context_length・出力上限等のその他ユーザー確認項目は未決であり、決定後に設定とこの文書を更新する。
 - AdGuardはHugging Faceのxet CDNをNXDOMAIN化する。回避はモデル事前取得コンテナのresolver変更だけで行い、
   AdGuard設定・TEI実行時の通信は変更しない。

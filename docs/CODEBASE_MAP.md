@@ -439,6 +439,7 @@ RAYON/OMP/MKL threads・tokenization workers各6、embeddingは4 CPU / 8 GiBと�
 rerankerはbatch 4制約で6 CPUを超えてもほぼ伸びず、新配分の会話応答性は本番適用後に再計測する。
 `memory.write_approval: false`、`skills.write_approval: true`も決定済み。前者は組み込みMEMORY.md/USER.mdのゲートで、
 Hindsight自動retainには適用されない。Hindsight側はcustom抽出とSOULで方針を与える。本番適用は2026-10-18に実施済み。
+2026-10-25: コマンド承認は`approvals.mode: smart`、ローカルGLM guard（`auxiliary.approval`、thinking off）で一次判定し、不確実・失敗時はDiscordで人が確認する。
 
 
 WS16 (2026-10-17): both TEI services pin the cpu-1.9.4 OCI index digest (`2538ea1c…`) for the known queue-panic mitigation.

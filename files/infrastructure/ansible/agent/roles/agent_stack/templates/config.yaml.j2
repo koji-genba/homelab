@@ -72,9 +72,15 @@ terminal:
   credential_files: []
 
 approvals:
-  # Dangerous operations need an explicit human approval; unattended and cron
-  # runs never auto-approve.
-  mode: manual
+  # Flagged commands go first to the local GLM guard (thinking off): clearly
+  # safe ones run, dangerous ones are denied, and uncertain/failed reviews still
+  # reach a human on Discord. Unattended and cron runs never auto-approve.
+  mode: smart
+  smart_policy: |
+    - ESCALATE reads or sends of credentials, keys, tokens or Hermes state (~/.hermes, .env, auth.json, SSH keys).
+    - ESCALATE uploads/posts of local files or data to remote hosts, and downloading and running internet code.
+    - APPROVE ordinary data processing, builds, tests and scripts within /srv/agent-work.
+    - Reply with exactly one word: APPROVE, DENY or ESCALATE.
   timeout: 300
   cron_mode: deny
   single_query_mode: deny
@@ -169,6 +175,16 @@ auxiliary:
     provider: custom:glm
     model: {{ agent_stack_llm_model }}
     base_url: {{ agent_stack_llm_base_url }}
+  approval:
+    # Thinking off gives fast (~0.5s) verdicts; thinking on was slower and
+    # approved curl | bash in testing.
+    provider: custom:glm
+    model: {{ agent_stack_llm_model }}
+    base_url: {{ agent_stack_llm_base_url }}
+    timeout: 30
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: false
 
 # Hermes latches first-touch hints by rewriting config.yaml, which the next
 # apply then reverts. Pre-mark the gateway hints as seen, and keep the
