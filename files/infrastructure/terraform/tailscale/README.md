@@ -40,6 +40,49 @@ make tailscale-plan MANAGE_TAILNET=true ENABLE_ADGUARD_DNS=true ADGUARD_READY=tr
 照合する。`autoApprovers.routes`の各項目は既にadvertise済みの`advertised_routes` inventoryと一致しなければ
 ならず、Terraformが新しいrouteを作成・承認することはない。
 
+## ACL全文の復旧用コピー（2026-10-25）
+
+review済みACL全文を`files/infrastructure/secrets/tailscale/acl-policy.sops.json`へSOPSのbinary形式で
+暗号化してrepoに保存する。
+通常のSOPS JSON形式ではkey名が平文で残り、ACLのkeyにはhostname・CIDR・tagが入りうるため、
+全文をblobとして暗号化するbinary形式を使う。既存の`AGE_RECIPIENT`と`AGE_IDENTITY_FILE`を使い、
+creation_rulesは追加しない。鍵の保管は[secret手順](../../secrets/README.md)に従う。
+
+### 復旧用コピーの更新
+
+ACLを変えるたびに更新する。consoleでの緊急変更後も、最新export全文をreviewし、ignore対象の
+`acl-policy.live.json`へmode `0600`で保存する。厳密なJSONであることを確認し、内容をlogやPRへ貼らない。
+既存の暗号文を消してから暗号化する（初回は削除不要）。古い版はGitの履歴に残る。
+
+```sh
+rm files/infrastructure/secrets/tailscale/acl-policy.sops.json
+make tailscale-acl-encrypt AGE_RECIPIENT="$AGE_RECIPIENT" \
+  ACL_POLICY_FILE=files/infrastructure/terraform/tailscale/acl-policy.live.json
+AGE_IDENTITY_FILE=/secure/path/age-identity.txt make tailscale-acl-decrypt \
+  ACL_POLICY_FILE=files/infrastructure/terraform/tailscale/acl-policy.live.json
+make secrets-scan
+```
+
+`tailscale-acl-encrypt`は既存暗号文を上書きせず、mode `0600`で作成する。
+`tailscale-acl-decrypt`はlive.jsonが有れば上書きせず、復号結果とのbyte単位の「一致 / 不一致」だけを表示する。
+不一致や復号失敗はerrorで停止する。一致を確認した暗号文だけをPRに含め、commit messageにexportの取得日を書く。
+復旧コピーとconsoleの自動drift検知は行わない。
+
+### 復元
+
+管理端末で既存identityを復旧し、次を実行する。live.jsonが無ければmode `0600`で作成し、
+失敗時には部分ファイルを残さない。symlinkやrepo外の出力先は拒否する。
+
+```sh
+AGE_IDENTITY_FILE=/secure/path/age-identity.txt make tailscale-acl-decrypt \
+  ACL_POLICY_FILE=files/infrastructure/terraform/tailscale/acl-policy.live.json
+```
+
+既存tailnetなら、復旧コピーを最新のadmin console exportと照合してからimport / planする。
+差分があれば意図を確認し、採用する全文をreviewする。新しいtailnetなら旧user・tag・route等の有効性を
+再確認する。import順序とgateは以下に従い、planをreviewする。import / plan / applyは別途承認された
+本番作業として実施する。ACL全文だけでは端末登録やDNSまで復元できない。
+
 ## 既存resourceのimport順序
 
 provider v0.29.2のimport IDはMake targetで固定している。以下は初回向けの各helperの呼出例である。
