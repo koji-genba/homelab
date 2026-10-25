@@ -100,15 +100,25 @@ updates:
     groups:
       toolbox-python:
         patterns: ["*"]
+  # Review provider bumps together across all six Proxmox roots:
+  # apps-vm, agent-vm, runner-vm, elastiflow, tailscale-gateway and stashpad-dev.
   - package-ecosystem: terraform
     directory: /files/infrastructure/terraform/apps-vm
     schedule: {interval: weekly}
-  # Review provider bumps together across apps-vm, agent-vm and runner-vm.
   - package-ecosystem: terraform
     directory: /files/infrastructure/terraform/agent-vm
     schedule: {interval: weekly}
   - package-ecosystem: terraform
     directory: /files/infrastructure/terraform/runner-vm
+    schedule: {interval: weekly}
+  - package-ecosystem: terraform
+    directory: /files/infrastructure/terraform/elastiflow
+    schedule: {interval: weekly}
+  - package-ecosystem: terraform
+    directory: /files/infrastructure/terraform/tailscale-gateway
+    schedule: {interval: weekly}
+  - package-ecosystem: terraform
+    directory: /files/infrastructure/terraform/stashpad-dev
     schedule: {interval: weekly}
   - package-ecosystem: terraform
     directory: /files/infrastructure/terraform/tailscale
