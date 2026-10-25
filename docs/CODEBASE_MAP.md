@@ -91,7 +91,7 @@ homelab/
 ├── Makefile                      # ONLY entry point: terraform/ansible/tailscale/state/secrets/rollback/fixtures
 ├── .gitignore                    # secrets/state/plans; k8s protection rules retained after cleanup
 ├── .github/
-│   ├── dependabot.yml            # weekly: 12 docker-compose + 6 docker + 4 terraform + actions; monthly: grouped toolbox pip; upstream Apps ignored until tag+digest
+│   ├── dependabot.yml            # weekly: 12 docker-compose + 6 docker + 7 terraform + actions; monthly: grouped toolbox pip; upstream Apps ignored until tag+digest
 │   └── workflows/
 │       ├── validate.yml          # CI gate (PR + push main): ~20 make targets
 │       ├── caddy-image.yml       # build/push ghcr.io/koji-genba/caddy-cloudflare
@@ -195,13 +195,13 @@ State uses the **default local backend per root** (`terraform.tfstate`, gitignor
 
 | Root | Provider | Provisions | Notes |
 |---|---|---|---|
-| `apps-vm` | bpg/proxmox 0.112.0 | Apps VM (VMID 101, 4c/12G/40G, `192.168.10.101`, VLAN 10) from pinned Debian trixie cloud image + cloud-init snippet | `ignore_changes=[initialization[0].user_data_file_id]` (guarded by a CI fixture); optional VLAN-11 NIC `legacy_service_nic=false`; needs ssh-agent for root@pve ops |
+| `apps-vm` | bpg/proxmox 0.117.0 | Apps VM (VMID 101, 4c/12G/40G, `192.168.10.101`, VLAN 10) from pinned Debian trixie cloud image + cloud-init snippet | `ignore_changes=[initialization[0].user_data_file_id]` (guarded by a CI fixture); optional VLAN-11 NIC `legacy_service_nic=false`; needs ssh-agent for root@pve ops |
 | `tailscale` | tailscale 0.29.2 | tailnet ACL + DNS (AdGuard nameserver `100.86.147.127`, `use_with_exit_node`) + optional subnet-router | gated by `manage_tailnet`, `enable_adguard_dns`, `adguard_ready`, `acl_policy_file`; ACL/DNS are imported, router is not; DNS has `prevent_destroy` |
-| `tailscale-gateway` | bpg/proxmox ~>0.81 | VM 102, `192.168.10.102`, template-clone (VMID 9000) | registration manual; prefs via dedicated gateway Ansible (live unverified); approval via Terraform opt-in or admin console |
+| `tailscale-gateway` | bpg/proxmox 0.117.0 | VM 102, `192.168.10.102`, template-clone (VMID 9000) | registration manual; prefs via dedicated gateway Ansible (live unverified); approval via Terraform opt-in or admin console |
 | `agent-vm` | bpg/proxmox | Hermes Agent VM (VMID 104, initial 12 vCPU / 24 GiB / 40 GiB OS + 100 GiB data disk, `192.168.10.104`, VLAN 10; 2026-10-17 WS14 user decision) from its own pinned Debian 13 cloud image | not on the tailnet; `ignore_changes=[initialization[0].user_data_file_id]`; Proxmox user/role/ACL manual; Ansible-only runtime |
 | `runner-vm` | bpg/proxmox | Hermes Runner VM (VMID 105, 8 vCPU / 16 GiB / 40 GiB OS + 150 GiB work disk, `192.168.10.105`, VLAN 10) | separate cloud image `file_name`; no Docker, no Discord token/memory DB/management keys |
-| `elastiflow` | bpg/proxmox ~>0.81 | VM 103, `192.168.10.103`; `install.sh` sets up unauthenticated ES/Kibana + flow collector | sFlow collector `:6343`; UI `https://elastiflow.kojigenba-srv.com` via Apps Caddy (trusted-only), LAN fallback `http://192.168.10.103:5601` |
-| `stashpad-dev` | bpg/proxmox ~>0.81 | VM 111 `.41` (out of scope) | Gitignored per-root state/tfvars |
+| `elastiflow` | bpg/proxmox 0.117.0 | VM 103, `192.168.10.103`; `install.sh` sets up unauthenticated ES/Kibana + flow collector | sFlow collector `:6343`; UI `https://elastiflow.kojigenba-srv.com` via Apps Caddy (trusted-only), LAN fallback `http://192.168.10.103:5601` |
+| `stashpad-dev` | bpg/proxmox 0.117.0 | VM 111 `.41` (out of scope) | Gitignored per-root state/tfvars |
 
 `apps-vm`: `snippet_datastore_id` must support both `Import` (cloud image) and snippets; keep `debian_cloud_image_url` and its SHA-512 checksum in sync.
 
@@ -211,7 +211,7 @@ Older roots (`elastiflow`, `tailscale-gateway`, `stashpad-dev`) full-clone `temp
 
 See [rebuildability and backup policy](architecture/target-state.md#再構築性とbackupの方針) for the VM assessment: the operator decided on 2026-10-12 that no VM will be backed up. For ElastiFlow and stashPadDev, this reflects acceptance of their loss, rather than repo rebuildability; the linked policy records the reasons and handling of their data. Remaining rebuild gaps are tracked in [#87](https://github.com/koji-genba/homelab/issues/87). The policy assumes the required recovery material and NFS data are available; protection of data on pve1's ZFS pools is a separate concern.
 
-All seven roots are fmt/validated in CI. The three added Proxmox validate targets use `init -backend=false -input=false` and need no secrets or live API access. Generic `terraform-validate` retains its `terraform-init` prerequisite; plan/apply prerequisites are unchanged. The agent/runner roots use `-backend=false` (no remote state access) and are tracked by Dependabot separately.
+All seven roots are fmt/validated in CI. The three added Proxmox validate targets use `init -backend=false -input=false` and need no secrets or live API access. Generic `terraform-validate` retains its `terraform-init` prerequisite; plan/apply prerequisites are unchanged. The agent/runner roots also use `-backend=false` (no remote state access). All six Proxmox roots pin bpg/proxmox to `0.117.0` and are tracked by Dependabot separately, with provider bumps reviewed together.
 
 ### 3.4 Compose stacks (`files/services/compose/`) — ~13.9k tokens including configs; `files/services/images/` — ~1.5k tokens
 
