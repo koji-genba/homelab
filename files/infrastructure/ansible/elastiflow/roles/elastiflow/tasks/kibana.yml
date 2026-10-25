@@ -1,0 +1,17 @@
+---
+# Retain package logging and pid settings; manage only these two scalar keys.
+- name: Remove duplicate Kibana override keys
+  ansible.builtin.replace:
+    path: /etc/kibana/kibana.yml
+    regexp: '(?m)^[ \t]*{{ item.key | regex_escape }}:[^\n]*\n(?=[\s\S]*^[ \t]*{{ item.key | regex_escape }}:)'
+    replace: ''
+  loop: "{{ elastiflow_kibana_settings | dict2items }}"
+  notify: Restart Kibana
+
+- name: Set Kibana override keys
+  ansible.builtin.lineinfile:
+    path: /etc/kibana/kibana.yml
+    regexp: '^[ \t]*{{ item.key | regex_escape }}:'
+    line: '{{ item.key }}: {{ item.value }}'
+  loop: "{{ elastiflow_kibana_settings | dict2items }}"
+  notify: Restart Kibana

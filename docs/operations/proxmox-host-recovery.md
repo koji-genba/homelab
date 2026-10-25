@@ -301,38 +301,116 @@ cloud-init snippetは各ルートの`main.tf`が生成する。ここでは置�
 
 Apps VMにはtemplateが不要である。gateway・ElastiFlow・stashPadDevは各`main.tf`の`clone`で
 `template_vm_id`（各`variables.tf`のdefault `9000`）を使う。
-2026-10-12に`qm list`でVM 9000は`ubuntu-2404-cloudinit`、2048 MB、boot disk 3.5 G、
-停止中のtemplateだった。詳細な`qm config 9000`は未確認のため、再構築前に採取する。
-以下は[6月版のtemplate作成例](../archive/proxmox-rebuild.md#step-7-vm-テンプレート作成-vmid-9000)を基にした作成例であり、
-現在のtemplateのimage hashや詳細設定を再現するものではない。rolling URLなので取得日とimageのhashを復旧記録へ残す。
+2026-10-25のread-only採取で現物の設定と元imageを特定し、
+[`scripts/create-proxmox-ubuntu-template.sh`](../../scripts/create-proxmox-ubuntu-template.sh)に固定した。
+同日、運用者が9001を作成し、net0を`tag=10`へ変更してElastiFlow rootからVM 103へのcloneを確認した後、
+scriptで9000を作り直して9001を削除した。9000のキー照合はすべて`OK`、diskはraw / 3758096384 bytesだった。
+gateway / stashPadDevのrootからのcloneは未検証である。9000を削除する前に、必ず別VMIDで検証する。
 
-```bash
-mkdir -p /var/lib/vz/template/iso
-cd /var/lib/vz/template/iso
-wget https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
-sha256sum noble-server-cloudimg-amd64.img
-qm create 9000 \
-  --name ubuntu-2404-cloudinit \
-  --memory 2048 --cores 2 --cpu host --machine q35 \
-  --net0 virtio,bridge=vmbr0 --scsihw virtio-scsi-pci \
-  --serial0 socket --vga serial0
-qm importdisk 9000 noble-server-cloudimg-amd64.img vmpool
-qm config 9000
-```
+採用imageはUbuntu 24.04 amd64の`release-20260518`である。
 
-`qm config 9000`でimportされたvolume-idを確認してからdiskを接続する。
-次の`vm-9000-disk-0`は旧版の例であり、実際のvolume-idへ置き換える。
+- 固定URL: <https://cloud-images.ubuntu.com/releases/noble/release-20260518/ubuntu-24.04-server-cloudimg-amd64.img>
+- SHA-256: `53fdde898feed8b027d94baa9cfe8229867f330a1d9c49dc7d84465ee7f229f7`
+- download size: 627923968 bytes、元qcow2のvirtual-size: 3758096384 bytes（3584 MiB）
+- 2026-10-25に`SHA256SUMS.gpg`のGood signatureを確認した。採用時の署名鍵fingerprintは
+  `D2EB44626FDDC30B513D5BB71A5D6C4C7DB87C81`。image更新時も署名を確認してからURL・hashを一緒に変更する。
+- 固定URLは`http://cloud-images-archive.ubuntu.com/releases/noble/release-20260518/ubuntu-24.04-server-cloudimg-amd64.img`へ
+  redirectされる。scriptはHTTPへのredirectを許可し、毎回repo固定のSHA-256で内容を照合する。
+  2026-10-25はarchiveから598 MBの取得に52分（約196 KB/s）かかったため、約50分以上の取得時間を見込む。
+  upstream消失時に備え、image・SHA256SUMS・署名を別途保管する。rolling imageへ切り替えない。
 
-```bash
-qm set 9000 --scsi0 vmpool:vm-9000-disk-0,discard=on,ssd=1
-qm set 9000 --ide2 vmpool:cloudinit
-qm set 9000 --boot order=scsi0
-qm template 9000
-qm config 9000
-```
+pve1に残っていた`/var/lib/vz/template/iso/noble-server-cloudimg-amd64.img`は上記hashと一致し、
+9000.confのmtimeは2026-05-24だった。scriptはこの既存ファイルには触れず、
+`/var/lib/vz/template/iso/ubuntu-24.04-server-cloudimg-amd64-release-20260518.img`を使う。
+pve1に同じhashのimageがあれば、上記cache名へコピーして使える。
+そのファイルがありhashが合えば再利用し、無ければ同じdirectoryの一時ファイルへdownloadし、照合後にrenameする。
+hashが合わないcacheまたはdownload途中のファイルは削除して停止する。
 
+旧9000を基にした設定は次のとおり。MACとstorageが割り当てるdisk番号は固定しない。
+旧9000（2026-05作成）のnet0はtagなしだった。2026-10-25に9001からVM 103へのTerraform cloneが
+`HTTP 403: Permission check failed (/sdn/zones/localnetwork/vmbr0, SDN.Use)`で失敗したため、
+権限を増やさず`tag=10`に変更し、再実行でcloneが成功した。旧9000との設定の違いはこの1キーだけである。
+
+| キー | 値 |
+| --- | --- |
+| name / memory / cores | `ubuntu-2404-cloudinit` / `2048` / `2` |
+| cpu / machine / scsihw | `host` / `q35` / `virtio-scsi-pci` |
+| net0 | `virtio,bridge=vmbr0,tag=10` |
+| scsi0 | 指定storageのbase disk、`discard=on,size=3584M,ssd=1`（raw、3758096384 bytes） |
+| ide2 / boot | 指定storageのcloud-init drive（`media=cdrom`） / `order=scsi0` |
+| serial0 / vga / template | `socket` / `serial0` / `1` |
+| ostype / agent / bios / citype / onboot | 未設定 |
+
+clone側のrootが`ostype`と`agent`を設定する。上記net0の例外以外は現物再現を優先し、
+`virtio-scsi-single`への変更（clone側の`iothread`との整合など）は行っていない。
+採取時のPVEはpve-manager 9.2.3 / qemu-server 9.1.16で、`qm create/set`の`import-from`対応を確認した。
+scriptは`qm create` → `qm set --scsi0 <storage>:0,import-from=...` → cloud-init / boot設定 →
+`qm template`の順に実行し、`qm config`の表示・キーごとの一致判定（MACを除く）とdiskのraw / size照合を行う。
 template自体は起動しない。VMごとのdisk sizeはApps VM・gatewayが各`main.tf`、
 ElastiFlow・stashPadDevが各`variables.tf`の`disk_size_gb`で宣言する。
+
+#### 配置と別VMIDでの検証
+
+管理端末のrepo rootからscriptをファイルとして転送する。stdinでscriptを流さない。
+2026-10-25に運用者が9001の作成とElastiFlow rootからのcloneを実機で確認した。
+以下の9900を使う汎用clone試験は未検証であり、同日の確認範囲は[VM 103の作り直し](../../files/infrastructure/terraform/elastiflow/README.md#vm-103-の作り直し)を参照する。
+
+```bash
+scp scripts/create-proxmox-ubuntu-template.sh root@192.168.10.11:/root/create-proxmox-ubuntu-template.sh
+```
+
+その後pve1のroot consoleで実行する（Bash、Python 3、curl、sha256sum、flock、PVE標準コマンドが必要）。
+`--vmid`は必須、`--storage`の既定は`vmpool`。現物どおりraw diskを作れるstorageを使う。
+
+```bash
+bash /root/create-proxmox-ubuntu-template.sh --vmid 9001 --storage vmpool
+```
+
+scriptはcluster全体のQEMU/LXCを照会し、既存VMIDを拒否する。照会失敗・不正な応答でも停止する。
+VMIDの空きは実行時に再確認する（2026-10-25の採取時には9001、9900は空いていた）。
+途中で失敗しても作りかけのVMやvolumeは自動削除せず、失敗した工程と設定・volumeの確認結果を表示する。
+表示も失敗した場合は手動で確認し、残存物の扱いを判断する。同じIDでの再実行やforce上書きはできない。
+
+9001のキー照合がすべて`OK`になってから、空きVMIDを選びfull cloneを試す。
+以下の9900は例なので、使用中なら別IDを選ぶ。
+
+```bash
+qm clone 9001 9900 --full 1 --storage vmpool --name ubuntu-template-test
+```
+
+検証cloneには3 root相当のCPU / RAM / disk拡張、agent、cloud-init、VLAN / DNS設定を適用し、
+専用の検証用IP・鍵を使って起動する。本番IPやtailnet登録は流用しない。
+Ubuntu 24.04、`cloud-init status --wait`、`ubuntu` userのsudo、package導入、guest agent応答、
+disk拡張、network / DNS、serial console、再起動を確認する。
+gatewayの本番route広告・exit node承認は行わない。検証結果と後片付けの対象VMIDを記録する。
+
+#### 既存9000を同じVMIDで作り直す場合
+
+9001の作成とclone検証が成功するまで9000を消さない。削除・再作成は本番操作なので、実施時に明示承認を得る。
+gateway・ElastiFlow・stashPadDevの既存VMはfull cloneなのでtemplateのdiskに依存しない。
+根拠は各`main.tf`の`clone.full = true`と`lifecycle.ignore_changes`の`clone[0].vm_id`である
+（[gateway](../../files/infrastructure/terraform/tailscale-gateway/main.tf)、
+[ElastiFlow](../../files/infrastructure/terraform/elastiflow/main.tf)、
+[stashPadDev](../../files/infrastructure/terraform/stashpad-dev/main.tf)）。
+同じ9000の再作成やclone参照IDだけの変更は既存VMのTerraform差分にならず、既存guestのOSも更新しない。
+他の設定差分が無いことまで保証するものではなく、将来の新規作成・再作成には新templateを使う。
+
+1. 9001と検証cloneの結果を保存し、9000が対象の停止templateであることと、他のclone操作が無いことを確認する。
+2. 9000の設定・volume情報を保存し、削除の明示承認を得てからpve1のroot consoleで`qm destroy 9000`を行う。
+3. `bash /root/create-proxmox-ubuntu-template.sh --vmid 9000 --storage vmpool`を実行し、すべての照合が`OK`であることを確認する。
+4. destroyで`/vms/9000`のACLも消えるため、clone用ACLを付け直す。
+
+   ```bash
+   pveum acl modify /vms/9000 --user terraform@pve --role HomelabTerraformClone --propagate 0
+   ```
+
+5. 結果と実施日を記録し、不要になった9001・検証cloneだけを運用者が確認して手動削除する。
+   途中で失敗した場合はscriptの表示を基に残存VM・volumeを確認し、再開前に扱いを判断する。
+
+2026-10-25はcacheを再利用して9000を作り直し、ACLを付け直してから9001を削除した
+（9001のACLもProxmoxが削除）。最終状態は101〜105・111がrunning、9000がtemplateで、
+`terraform@pve`の`/vms` ACLは101〜105・111が`HomelabTerraform`（propagate 1）、
+9000が`HomelabTerraformClone`（propagate 0）だった。
 
 ## ProxmoxのAPI権限
 
@@ -385,7 +463,9 @@ VMID 104 / 105（Hermes Agent / Runner）は2026-10-12時点では存在せず�
 2. gatewayを戻す。template 9000が必要で、Terraform後の手動tailnet登録 → Ansible prefs適用（未検証）→ route / exit node承認は
    gateway READMEに従う。宅外からホストを管理する経路が先に必要なら、template準備後に
    gatewayをApps VMより先に戻す。Apps VMサービスへの直接tailnet接続はgatewayを経由しない。
-3. ElastiFlowを戻す。templateからVMを作成した後、READMEの`install.sh`、dashboard、受信確認を行う。
+3. ElastiFlowを戻す。templateからTerraform/cloud-initでVMを作成した後、READMEの
+   `make ansible-apply-elastiflow` でpackage・設定・固定dashboardを反映し、受信確認と
+   再実行時のchanged=0を確認する。2026-10-25にVM 103を作り直して実機で確認した。
    router側のcollector定義は`files/infrastructure/network/config.txt`で確認する。
 4. エージェントを戻す。Agent VM / Runner VMのVM定義はTerraform、OSとサービスはAnsibleで再構築し、
    記憶とセッションはpve1の専用NFS exportへ取った日次バックアップから戻す。復号identityは運用者が

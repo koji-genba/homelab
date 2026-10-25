@@ -1,0 +1,6 @@
+---
+- name: Configure ElastiFlow VM
+  hosts: elastiflow
+  become: true
+  roles:
+    - elastiflow

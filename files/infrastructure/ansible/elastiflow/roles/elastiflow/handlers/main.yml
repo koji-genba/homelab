@@ -1,0 +1,19 @@
+---
+- name: Refresh Elastic repository metadata
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: Restart Elasticsearch
+  ansible.builtin.systemd_service:
+    name: elasticsearch
+    state: restarted
+
+- name: Restart Kibana
+  ansible.builtin.systemd_service:
+    name: kibana
+    state: restarted
+
+- name: Restart flow collector
+  ansible.builtin.systemd_service:
+    name: flowcoll
+    state: restarted

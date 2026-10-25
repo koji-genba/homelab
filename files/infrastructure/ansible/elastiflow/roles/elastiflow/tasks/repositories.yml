@@ -1,0 +1,31 @@
+---
+- name: Install repository and collector prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - gnupg
+      - apt-transport-https
+      - libpcap-dev
+      - python3-debian
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Download Elastic repository signing key
+  ansible.builtin.get_url:
+    url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+    dest: /usr/share/keyrings/elastic.asc
+    mode: '0644'
+
+# Replace the old installer's .gpg entry instead of adding a conflicting
+# signed-by definition for the same repository.
+- name: Register Elastic 8.x repository
+  ansible.builtin.copy:
+    content: |
+      deb [signed-by=/usr/share/keyrings/elastic.asc] https://artifacts.elastic.co/packages/8.x/apt stable main
+    dest: /etc/apt/sources.list.d/elastic-8.x.list
+    mode: '0644'
+  notify: Refresh Elastic repository metadata
+
+- name: Apply repository metadata change before package installation
+  ansible.builtin.meta: flush_handlers
