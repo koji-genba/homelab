@@ -447,7 +447,9 @@ VMID 104 / 105（Hermes Agent / Runner）は2026-10-12時点では存在せず�
 2. gatewayを戻す。template 9000が必要で、Terraform後の手動tailnet登録 → Ansible prefs適用（未検証）→ route / exit node承認は
    gateway READMEに従う。宅外からホストを管理する経路が先に必要なら、template準備後に
    gatewayをApps VMより先に戻す。Apps VMサービスへの直接tailnet接続はgatewayを経由しない。
-3. ElastiFlowを戻す。templateからVMを作成した後、READMEの`install.sh`、dashboard、受信確認を行う。
+3. ElastiFlowを戻す。templateからTerraform/cloud-initでVMを作成した後、READMEの
+   `make ansible-apply-elastiflow` でpackage・設定・固定dashboardを反映し、受信確認と
+   再実行時のchanged=0を確認する。空のVMからの通し実行は未検証。
    router側のcollector定義は`files/infrastructure/network/config.txt`で確認する。
 4. エージェントを戻す。Agent VM / Runner VMのVM定義はTerraform、OSとサービスはAnsibleで再構築し、
    記憶とセッションはpve1の専用NFS exportへ取った日次バックアップから戻す。復号identityは運用者が

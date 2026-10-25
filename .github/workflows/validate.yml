@@ -46,6 +46,10 @@ jobs:
         run: |
           make ansible-lint-gateway
           make ansible-check-gateway
+      - name: ElastiFlow Ansible lint and syntax check
+        run: |
+          make ansible-lint-elastiflow
+          make ansible-check-elastiflow
       - name: Ansible bootstrap path regression
         run: make ansible-bootstrap-paths-test
       - name: Gateway advertisement and Terraform approval contract

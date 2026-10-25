@@ -1,0 +1,26 @@
+---
+# Versions observed on VM 103 on 2026-10-25.
+elastiflow_elastic_version: "8.19.22"
+elastiflow_collector_version: "7.26.2"
+elastiflow_collector_url: >-
+  https://elastiflow-releases.s3.us-east-2.amazonaws.com/flow-collector/flow-collector_{{ elastiflow_collector_version }}_linux_amd64.deb
+# Upstream .deb.sha256, retrieved on 2026-10-25.
+elastiflow_collector_sha256: d31483d1e709d1bec95c4c02ccbdcad3fafea5991bcfb72600e35a85a872d0c3
+elastiflow_heap: 12g
+# Kibana >= 8.14, CODEX. Counts match the 2026-10-25 live inventory:
+# dashboard 36, visualization 365, map 2, search 2, index-pattern 3.
+elastiflow_dashboard_commit: 2c73f16bfd583fef65304013025d1dad048489e5
+elastiflow_dashboard_url: >-
+  https://raw.githubusercontent.com/elastiflow/elastiflow_for_elasticsearch/{{ elastiflow_dashboard_commit }}/kibana/flow/kibana-8.14.x-flow-codex.ndjson
+elastiflow_dashboard_sha256: a1bba837335ae633e3fbe5e8a3ebfc052ff06861b2a585b6a406277312ac96b4
+elastiflow_kibana_settings:
+  server.host: '"0.0.0.0"'
+  elasticsearch.hosts: '["http://127.0.0.1:9200"]'
+elastiflow_flowcoll_settings:
+  EF_LICENSE_ACCEPTED: 'true'
+  EF_PROCESSOR_POOL_SIZE: '2'
+  EF_OUTPUT_ELASTICSEARCH_ENABLE: 'true'
+  EF_OUTPUT_ELASTICSEARCH_ADDRESSES: '"127.0.0.1:9200"'
+  EF_OUTPUT_ELASTICSEARCH_TLS_ENABLE: 'false'
+  EF_OUTPUT_ELASTICSEARCH_INDEX_TEMPLATE_SHARDS: '1'
+  EF_OUTPUT_ELASTICSEARCH_INDEX_TEMPLATE_REPLICAS: '0'

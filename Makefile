@@ -24,6 +24,12 @@ GATEWAY_ANSIBLE_ROOT ?= files/infrastructure/ansible/gateway
 GATEWAY_ANSIBLE_INVENTORY ?= $(GATEWAY_ANSIBLE_ROOT)/inventory/hosts.yml
 GATEWAY_ANSIBLE_CONFIG ?= $(GATEWAY_ANSIBLE_ROOT)/ansible.cfg
 GATEWAY_ANSIBLE_ARGS ?=
+# ElastiFlow native packages and dashboards, separate from Apps reconcile.
+ELASTIFLOW_ANSIBLE_ROOT ?= files/infrastructure/ansible/elastiflow
+ELASTIFLOW_ANSIBLE_INVENTORY ?= $(ELASTIFLOW_ANSIBLE_ROOT)/inventory/hosts.yml
+ELASTIFLOW_ANSIBLE_CONFIG ?= $(ELASTIFLOW_ANSIBLE_ROOT)/ansible.cfg
+ELASTIFLOW_ANSIBLE_ARGS ?=
+TERRAFORM_PLAN_ARGS ?=
 TERRAFORM_PLAN_NAME := terraform.tfplan
 TAILSCALE_PLAN_NAME := terraform.tfplan
 TERRAFORM_PLAN_FILE := $(TERRAFORM_ROOT)/$(TERRAFORM_PLAN_NAME)
@@ -83,6 +89,7 @@ TOOLBOX_PROXMOX_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_PROXMOX_ENV) $(TOOLBOX_IMAGE
 TOOLBOX_TAILSCALE_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_TAILSCALE_ENV) $(TOOLBOX_IMAGE)
 
 .PHONY: toolbox-build toolbox-requirements terraform-init terraform-fmt terraform-validate terraform-validate-tailscale terraform-validate-agent-vm terraform-validate-runner-vm terraform-validate-elastiflow terraform-validate-tailscale-gateway terraform-validate-stashpad-dev terraform-plan terraform-apply
+.PHONY: ansible-lint-elastiflow ansible-check-elastiflow ansible-apply-elastiflow
 .PHONY: ansible-lint ansible-check ansible-apply ansible-lint-agent ansible-check-agent ansible-apply-agent ansible-lint-gateway ansible-check-gateway ansible-apply-gateway gateway-routes-test ansible-bootstrap-paths-test compose-reconcile-fixture terraform-apps-vm-lifecycle-test terraform-agent-runner-vm-lifecycle-test toolbox-uid-test cloud-init-test agent-vm-cloud-init-test runner-vm-cloud-init-test runner-privilege-fixture runner-firewall-fixture agent-runner-scope-fixture agent-dnat-guard-fixture compose-config adguard-config-check gatus-config-check mover-test shellcheck secrets-scan preflight
 .PHONY: state-backup-preflight state-backup-preflight-test state-backup state-backup-push state-restore state-restore-test state-backup-test rollback-app
 .PHONY: secrets-encrypt secrets-decrypt-check secrets-encrypt-agent secrets-decrypt-check-agent
@@ -194,7 +201,7 @@ tailscale-import-router: tailscale-init
 	$(MAKE) tailscale-plan MANAGE_TAILNET=true MANAGE_SUBNET_ROUTER=true ENABLE_ADGUARD_DNS="$(ENABLE_ADGUARD_DNS)" ADGUARD_READY="$(ADGUARD_READY)" ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
 
 terraform-plan: terraform-validate
-	$(TOOLBOX_PROXMOX_RUN) terraform -chdir=$(TERRAFORM_ROOT) plan -input=false -out=$(TERRAFORM_PLAN_NAME)
+	$(TOOLBOX_PROXMOX_RUN) terraform -chdir=$(TERRAFORM_ROOT) plan -input=false -out=$(TERRAFORM_PLAN_NAME) $(TERRAFORM_PLAN_ARGS)
 	chmod 0600 "$(TERRAFORM_PLAN_FILE)"
 
 terraform-apply: terraform-validate
@@ -236,6 +243,16 @@ ansible-check-gateway:
 # Live operation, manual only. GATEWAY_ANSIBLE_ARGS=--check previews prefs.
 ansible-apply-gateway:
 	$(TOOLBOX_RUN) env ANSIBLE_CONFIG=$(GATEWAY_ANSIBLE_CONFIG) ansible-playbook -i $(GATEWAY_ANSIBLE_INVENTORY) $(GATEWAY_ANSIBLE_ROOT)/site.yml $(GATEWAY_ANSIBLE_ARGS)
+
+# ElastiFlow root. Apply is a manual live operation; CI runs static checks only.
+ansible-lint-elastiflow:
+	$(TOOLBOX_RUN) env ANSIBLE_CONFIG=$(ELASTIFLOW_ANSIBLE_CONFIG) ansible-lint $(ELASTIFLOW_ANSIBLE_ROOT)/site.yml
+
+ansible-check-elastiflow:
+	$(TOOLBOX_RUN) env ANSIBLE_CONFIG=$(ELASTIFLOW_ANSIBLE_CONFIG) ansible-playbook -i $(ELASTIFLOW_ANSIBLE_INVENTORY) $(ELASTIFLOW_ANSIBLE_ROOT)/site.yml --syntax-check
+
+ansible-apply-elastiflow:
+	$(TOOLBOX_RUN) env ANSIBLE_CONFIG=$(ELASTIFLOW_ANSIBLE_CONFIG) ansible-playbook -i $(ELASTIFLOW_ANSIBLE_INVENTORY) $(ELASTIFLOW_ANSIBLE_ROOT)/site.yml $(ELASTIFLOW_ANSIBLE_ARGS)
 
 gateway-routes-test:
 	./scripts/tests/gateway-routes-fixture.sh

@@ -16,9 +16,9 @@ output "sflow_collector_target" {
 output "next_steps" {
   description = "Next configuration steps"
   value = [
-    "1. SSH to VM: ssh ubuntu@${split("/", var.ip_address)[0]}",
-    "2. Run the setup script: scp install.sh ubuntu@${split("/", var.ip_address)[0]}:/tmp/ && ssh ubuntu@${split("/", var.ip_address)[0]} sudo bash /tmp/install.sh",
+    "1. Wait for cloud-init completion on VM ${split("/", var.ip_address)[0]} and prepare SSH-agent / known_hosts",
+    "2. From repository root, run make ansible-apply-elastiflow (packages, configuration and pinned dashboards)",
     "3. Configure sFlow export on IX2215 (see ../../network/README.md)",
-    "4. Open Kibana at https://elastiflow.kojigenba-srv.com and import the ElastiFlow dashboards",
+    "4. Open https://elastiflow.kojigenba-srv.com and verify ingestion / dashboards; re-run Ansible to check changed=0",
   ]
 }

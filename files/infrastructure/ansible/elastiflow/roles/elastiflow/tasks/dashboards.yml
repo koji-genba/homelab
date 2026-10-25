@@ -1,0 +1,67 @@
+---
+- name: Create dashboard state directory
+  ansible.builtin.file:
+    path: /var/lib/homelab-elastiflow
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Check dashboard checksum marker
+  ansible.builtin.stat:
+    path: "/var/lib/homelab-elastiflow/dashboard.sha256"
+  register: elastiflow_dashboard_marker
+
+- name: Read last imported dashboard checksum
+  ansible.builtin.slurp:
+    src: /var/lib/homelab-elastiflow/dashboard.sha256
+  register: elastiflow_dashboard_marker_content
+  when: elastiflow_dashboard_marker.stat.exists
+
+- name: Check whether Kibana contains dashboards
+  ansible.builtin.uri:
+    url: http://127.0.0.1:5601/api/saved_objects/_find?type=dashboard&per_page=1
+  register: elastiflow_saved_dashboards
+
+- name: Import pinned dashboards when needed
+  when: >-
+    (elastiflow_dashboard_marker_content.content | default('') | b64decode | trim) != elastiflow_dashboard_sha256
+    or elastiflow_saved_dashboards.json.total == 0
+  block:
+    - name: Download upstream dashboard export
+      ansible.builtin.get_url:
+        url: "{{ elastiflow_dashboard_url }}"
+        dest: /var/lib/homelab-elastiflow/flow-codex.ndjson
+        checksum: "sha256:{{ elastiflow_dashboard_sha256 }}"
+        mode: '0644'
+
+    - name: Import saved objects into the default space
+      ansible.builtin.uri:
+        url: http://127.0.0.1:5601/api/saved_objects/_import?overwrite=true
+        method: POST
+        headers:
+          kbn-xsrf: 'true'
+        body_format: form-multipart
+        body:
+          file:
+            filename: /var/lib/homelab-elastiflow/flow-codex.ndjson
+            mime_type: application/ndjson
+            # Kibana expects NDJSON bytes, not a base64 file part.
+            multipart_encoding: 7or8bit
+        return_content: true
+        timeout: 120
+      register: elastiflow_dashboard_import
+      changed_when: true
+      failed_when: >-
+        elastiflow_dashboard_import.status != 200 or
+        not (elastiflow_dashboard_import.json.success | default(false)) or
+        (elastiflow_dashboard_import.json.successCount | default(0)) != 408 or
+        (elastiflow_dashboard_import.json.errors | default([]) | length) > 0
+
+    - name: Record successful dashboard import
+      ansible.builtin.copy:
+        content: "{{ elastiflow_dashboard_sha256 }}\n"
+        dest: "/var/lib/homelab-elastiflow/dashboard.sha256"
+        owner: root
+        group: root
+        mode: '0644'

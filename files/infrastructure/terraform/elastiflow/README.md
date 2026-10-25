@@ -1,6 +1,6 @@
 # ElastiFlow構築
 
-TerraformでProxmox VE上にElastiFlow（ネットワークフロー分析）用のVMを構築します。
+Terraform/cloud-initでProxmox VE上にVMを作成し、専用Ansible rootでElastiFlow（ネットワークフロー分析）を構成します。
 
 ## 概要
 
@@ -42,9 +42,9 @@ pvesm path <qm config 103 の scsi0 に表示された volume-id>
 
 ## 再構築性とbackup
 
-サービスはTerraformによるVM作成、`install.sh`の実行、dashboardの取り込みで作り直せますが、
-scriptの実行とdashboardの取り込みには手作業が残り、dashboardの取得元も固定されていません。
-template 9000の作成の固定と合わせて、再構築の穴は[#87](https://github.com/koji-genba/homelab/issues/87)で追跡しています。
+サービスはTerraform/cloud-initによるVM作成後、[専用Ansible root](../../ansible/elastiflow/)で
+版固定したpackage・設定・dashboard importを宣言します。空のVMからの通し実行は**未検証**です。
+template 9000の作成の固定と合わせて、残る再構築の穴は[#87](https://github.com/koji-genba/homelab/issues/87)で追跡しています。
 2026-10-12に、運用者は過去のフローデータは不要と判断し、VM backupを取らないと決めました。
 VMを失ったら作り直し、フローは空のindexから取り込み直します。
 repoからの再構築性が完全だからではなく、失ってよいという判断によるものです。
@@ -69,10 +69,11 @@ Caddy経由のアクセスを保護するのはこの接続元制限です。
 LANからのフォールバックは `http://192.168.10.103:5601` です。直IP経由にはCaddyの制限がかかりません。
 判断は[ADR-0009](../../../../docs/adr/0009-elastiflow-caddy-fqdn.md)を参照してください。
 
-`/etc/kibana/kibana.yml` はAppsのAnsible管理外で、`install.sh`による手動導入後のVM設定です。
-共有リンク等の絶対URL用に `server.publicBaseUrl: "https://elastiflow.kojigenba-srv.com"` を
-設定する作業は任意の手動作業とし、必要性は反映後に共有リンク・redirectの動作を確認して判断します。
-設定を変更する場合はKibanaの再起動が必要です。
+`/etc/kibana/kibana.yml` はpackage既定のlogging・pid設定を残し、ElastiFlow専用Ansibleで
+`server.host` と `elasticsearch.hosts` の2キーだけを重複除去＋lineinfileで管理します。
+共有リンク等の絶対URL用の `server.publicBaseUrl` は現時点では宣言していません。
+必要性は共有リンク・redirectの動作を確認して判断し、追加する場合はAnsibleの管理対象キーに加えて
+`make ansible-apply-elastiflow` で反映します（handlerでKibanaを再起動）。
 
 ### FQDN変更の反映と確認
 
@@ -142,29 +143,50 @@ terraform apply
 対象にします。snippet内容・template ID・tagsを変更しても、それだけでは既存VMのこれらの設定を更新しません。
 guestへの追加設定は別途必要です。
 
-### 3. アプリケーションのセットアップ
+### 3. アプリケーションのセットアップ（専用Ansible）
 
-VM作成後、`install.sh` をVM内で実行してElasticsearch/Kibana/flow-collectorをインストールします。
+2026-10-25に現物から採取した版・構成はUbuntu 24.04 amd64、Elasticsearch/Kibana **8.19.22**、
+`flowcoll` **7.26.2**です。これを[専用rootのgroup_vars](../../ansible/elastiflow/group_vars/elastiflow.yml)に固定しました。
+以下はAnsibleで宣言した手順であり、**空のVMからの通し実行は未検証**です。
+本番の適用履歴はrepoだけから判断せず、VM 103の再作成・実証は別途承認した作業枠で行います。
+
+cloud-init完了後、管理端末で既存のSSH-agentとホスト鍵確認を準備し、repository rootから実行します。
+秘密鍵をinventoryへ書き込まず、対象がVMID 103の `192.168.10.103` であることを確認してください。
 
 ```bash
-scp install.sh ubuntu@192.168.10.103:/tmp/
-ssh ubuntu@192.168.10.103 sudo bash /tmp/install.sh
+make ansible-lint-elastiflow
+make ansible-check-elastiflow
+# 本番操作。承認した作業枠で実行する。
+make ansible-apply-elastiflow
+# 再実行して changed=0 を確認する。
+make ansible-apply-elastiflow
 ```
 
-SSH秘密鍵を明示する場合:
+`ansible-check-elastiflow` はsyntax-checkのみです。`ELASTIFLOW_ANSIBLE_ARGS=--check` は既存VMの
+変更予告に使えますが、空のVMでは未作成の設定・service等に依存するため、初回構築の代替検証にはなりません。
+Appsのapply/reconcileやcloud-initにはアプリ構成を混ぜません。
 
-```bash
-scp -i ~/.ssh/k8s_ed25519 install.sh ubuntu@192.168.10.103:/tmp/
-ssh -i ~/.ssh/k8s_ed25519 ubuntu@192.168.10.103 sudo bash /tmp/install.sh
-```
+宣言する内容:
 
-スクリプトの内容:
-- Elasticsearch/Kibana（Elastic 8.x apt repo）をインストールし、単一ノード構成・ヒープ12GBに設定
-- ElastiFlow flow-collectorの.debをダウンロード・インストールし、Elasticsearch出力を有効化（単一ノード向けに shards=1 / replicas=0）
-- Elasticsearch向けに `vm.max_map_count=262144` をVM内で永続化
-- 受信ポートはデフォルトのまま（UDP 2055/4739/6343/9995 = NetFlow/IPFIX/sFlow/NetFlow(alt)）
+- Elastic 8.x apt repoからElasticsearch/Kibanaを同じ **8.19.22** でinstallし、両方をapt hold。
+  版更新時もgroup_varsを変更し、Ansibleがheld packageの版変更とholdを管理します。
+- collectorは旧scriptと同じ[配布URL](https://elastiflow-releases.s3.us-east-2.amazonaws.com/flow-collector/flow-collector_7.26.2_linux_amd64.deb)から取得。
+  期待SHA256は同URLの[.sha256](https://elastiflow-releases.s3.us-east-2.amazonaws.com/flow-collector/flow-collector_7.26.2_linux_amd64.deb.sha256)を2026-10-25に取得してgroup_varsへ記録しました。
+- ESはsingle-node、`network.host: 0.0.0.0`、`xpack.security.enabled: false`、
+  `indices.query.bool.max_clause_count: 8192`、`search.max_buckets: 250000`、heap 12g
+  （`jvm.options.d/heap.options`）。生成されたsecurity/TLS設定は管理templateで置換し、
+  旧scriptと同じ6つのTLS secure setting名だけkeystoreから除去します（値は読みません）。
+- Kibanaは `server.host: 0.0.0.0`、`elasticsearch.hosts: ["http://127.0.0.1:9200"]`。
+- `vm.max_map_count=262144` をVM内で永続化。flowcoll.ymlはpackage既定を残し、
+  `EF_LICENSE_ACCEPTED=true`、`EF_PROCESSOR_POOL_SIZE=2`、`EF_OUTPUT_ELASTICSEARCH_ENABLE=true`、
+  `EF_OUTPUT_ELASTICSEARCH_ADDRESSES="127.0.0.1:9200"`、`EF_OUTPUT_ELASTICSEARCH_TLS_ENABLE=false`、
+  `EF_OUTPUT_ELASTICSEARCH_INDEX_TEMPLATE_SHARDS=1`、`EF_OUTPUT_ELASTICSEARCH_INDEX_TEMPLATE_REPLICAS=0` の7キーのみ管理。
+  受信ポートはpackage既定（UDP 2055/4739/6343/9995）のままです。
+- 設定変更はhandlerで再起動。ESのcluster health（yellow/green）、Kibanaのavailableを
+  各60回・5秒間隔で待ち、時間切れは失敗にします。その後dashboardをimportします。
 
-`install.sh` 冒頭の `FLOWCOLL_VERSION` は最新版に随時更新してください（[Linux install docs](https://docs.elastiflow.com/flowcoll/installation/install_linux)参照）。
+Community版ではlicense key / account IDは不要で、2026-10-25の現物にもありません。
+将来秘密を入れる場合は専用SOPS入力からVMのroot限定ファイルへ `no_log` で配置し、Terraform/cloud-initへ渡しません。
 
 ### 4. ルーター側（IX2215）でsFlowエクスポートを設定
 
@@ -172,11 +194,21 @@ ssh -i ~/.ssh/k8s_ed25519 ubuntu@192.168.10.103 sudo bash /tmp/install.sh
 [config.txt](../../network/config.txt)にはagent `192.168.10.1`、collector `192.168.10.103`が定義済みです。
 実機への反映状態とcollector側の受信は別途確認してください。
 
-### 5. Kibanaダッシュボードのインポート
+### 5. Kibanaダッシュボードのインポート（Ansible内）
 
-1. 管理端末のブラウザで `https://elastiflow.kojigenba-srv.com` を開く（Caddy/DNSの反映前やLANからのフォールバックは `http://192.168.10.103:5601`）
-2. ElastiFlowのKibana用ダッシュボードファイルをダウンロード（[docs](https://docs.elastiflow.com/)のバージョンに合ったもの）
-3. Stack Management → Saved Objects → Import からインポート
+Kibana 8.14以降用のCODEX版 `kibana/flow/kibana-8.14.x-flow-codex.ndjson` を
+upstream commit [`2c73f16bfd583fef65304013025d1dad048489e5`](https://github.com/elastiflow/elastiflow_for_elasticsearch/commit/2c73f16bfd583fef65304013025d1dad048489e5)
+のraw URLとSHA256で固定しています。type別件数はdashboard 36、visualization 365、map 2、search 2、
+index-pattern 3（計408、export-detailsを除く）で、2026-10-25の現物と一致しました。
+件数の一致は個々のsaved objectの内容が同一であることまでは保証しません。
+
+EULAの再配布制限に従いndjsonはrepoに置きません。VMで直接取得し、checksum検証後、
+Kibana saved objects import APIでdefault Spaceに `overwrite=true` で取り込みます。
+成功・408件・errorsなしを確認したときだけ `/var/lib/homelab-elastiflow/dashboard.sha256` にchecksumを記録し、
+markerが無い場合、固定SHA256が変わった場合、またはdashboardが0件の場合だけimportします。
+markerがあれば通常の再実行では上書きしません。部分的な削除から再importする場合は、
+影響を確認してこのmarkerを削除し、専用applyを実行します。
+版更新ではpackage版だけでなくdashboardの対応版・commit・checksum・期待件数も併せてレビューします。
 
 ### 6. 動作確認
 
@@ -187,10 +219,71 @@ curl -s http://127.0.0.1:9200/_cat/indices?v | grep elastiflow
 ```
 
 IX2215側の設定反映後、`elastiflow-*` インデックスにデータが増え始めることを確認します。
+再構築の実証では、package版・apt hold・2回目のchanged=0・再起動後の自動起動・sFlow受信・
+index件数の増加・dashboard表示・FQDN/共有リンク/許可外403も確認してください。
+
+## VM 103 の作り直し
+
+この手順は**実機では未検証（2026-10-25 時点）**です。停止・破棄を伴うため、承認した作業枠で行います。
+Makeのコマンドはrepository rootで実行します。認証は上の手順どおり
+`TF_VAR_proxmox_api_token` を管理端末の環境変数へ一時注入し、コマンドにtokenの値を書きません。
+
+1. **作り直す前の確認**: 過去のフローデータとKibanaのdashboardへの変更が消えることを承知したうえで、
+   [既存のstate手順](#terraform-state)どおりTerraform stateをbackupします。VM backupは取りません。
+2. **VMだけをdestroy**: 保存されるplanがVM 103だけをdestroyする内容であることを確認してからapplyします。
+   `-target` はcloud-init snippetのfile resourceを残すために使います。
+
+   ```bash
+   make terraform-plan TERRAFORM_ROOT=files/infrastructure/terraform/elastiflow TERRAFORM_PLAN_ARGS='-destroy -target=proxmox_virtual_environment_vm.elastiflow'
+   # planを確認してから実行する。
+   make terraform-apply TERRAFORM_ROOT=files/infrastructure/terraform/elastiflow
+   ```
+
+3. **VMのACLを付け直す**: ProxmoxはVMをdestroyすると `/vms/103` のACLエントリも削除するため、
+   createの前にpve1のrootで次を実行します。
+   [destroy時のACL削除の注意](../../../../docs/operations/apps-vm-recovery.md#罠-destroyはaclを道連れに削除する)には、
+   2026-09-06に同じ原因でcreateが403になった記録があります。
+
+   ```bash
+   pveum acl modify /vms/103 --user terraform@pve --role HomelabTerraform --propagate 1
+   ```
+
+4. **別のtemplateを使う場合**: 例として検証用9001から作る場合は、pve1のrootでそのtemplateにも
+   clone用ACLを付け、次のcreate planに `TERRAFORM_PLAN_ARGS='-var template_vm_id=9001'` を渡します。
+   別のIDを使う場合も `/vms/<id>` と `template_vm_id=<id>` を合わせます。
+   `clone.vm_id` は `ignore_changes` 対象なので、あとでtemplate 9000を作り直しても差分になりません。
+
+   ```bash
+   pveum acl modify /vms/9001 --user terraform@pve --role HomelabTerraformClone --propagate 0
+   ```
+
+5. **create**: 通常は次のplanを実行し、VMの `1 to add` を確認してからapplyします。
+   別templateの場合はplanの末尾に上の `TERRAFORM_PLAN_ARGS='-var template_vm_id=9001'` を付けます。
+
+   ```bash
+   make terraform-plan TERRAFORM_ROOT=files/infrastructure/terraform/elastiflow
+   # planの1 to addを確認してから実行する。
+   make terraform-apply TERRAFORM_ROOT=files/infrastructure/terraform/elastiflow
+   ```
+
+6. **cloud-initとSSHの準備**: cloud-init完了を待ちます。SSHのhost keyが変わるため、
+   `known_hosts` の古い `192.168.10.103` の行を削除し、console等の信頼できる経路で
+   fingerprintを照合してから新しい鍵を登録します。
+7. **専用Ansibleを2回実行**: 初回で構成し、2回目は `changed=0` を確認します。
+
+   ```bash
+   make ansible-apply-elastiflow
+   make ansible-apply-elastiflow
+   ```
+
+8. **動作確認**: Elasticsearch/Kibana 8.19.22・flowcoll 7.26.2とElasticのapt hold、
+   `elasticsearch`・`kibana`・`flowcoll` の3 serviceがactiveであることを確認します。
+   sFlow受信後、indexの `docs.count` が時間とともに増えること、dashboardが36件あること、
+   `https://elastiflow.kojigenba-srv.com` の表示を確認します。
 
 ## セキュリティ上の注意
 
-- `install.sh` はホームラボの規模・用途に合わせ、Elasticsearchの `xpack.security.enabled` を無効化しています（認証なし）。repoの`config.txt`では、Server VLAN(10)内に加え、Trusted VLAN(20)からServer VLAN(10)への通信が`main-out`と`trusted-dyn`で許可されます。ServerからTrustedへの未要求通信は`trusted-in`で拒否されます。この許可経路からKibana/Elasticsearchに認証なしで到達する構成です。気になる場合はElastic Stack付属のセキュリティ機能を有効化するか、IX2215側のACLでVLAN10宛のTCP 5601/9200を制限してください。
+- 専用Ansibleはホームラボの規模・用途に合わせ、Elasticsearchの `xpack.security.enabled` を無効化しています（認証なし）。repoの`config.txt`では、Server VLAN(10)内に加え、Trusted VLAN(20)からServer VLAN(10)への通信が`main-out`と`trusted-dyn`で許可されます。ServerからTrustedへの未要求通信は`trusted-in`で拒否されます。この許可経路からKibana/Elasticsearchに認証なしで到達する構成です。気になる場合はElastic Stack付属のセキュリティ機能を有効化するか、IX2215側のACLでVLAN10宛のTCP 5601/9200を制限してください。
 
 ## Terraform state
 

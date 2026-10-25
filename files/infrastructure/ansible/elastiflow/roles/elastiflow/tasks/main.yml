@@ -1,0 +1,157 @@
+---
+- name: Require Ubuntu 24.04 on amd64
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.distribution == 'Ubuntu'
+      - ansible_facts.distribution_version == '24.04'
+      - ansible_facts.architecture == 'x86_64'
+
+- name: Configure package repositories
+  ansible.builtin.import_tasks: repositories.yml
+
+- name: Persist Elasticsearch map count
+  ansible.posix.sysctl:
+    name: vm.max_map_count
+    value: '262144'
+    sysctl_file: /etc/sysctl.d/99-elastiflow.conf
+    sysctl_set: true
+
+- name: Install pinned Elastic packages
+  ansible.builtin.apt:
+    name:
+      - "elasticsearch={{ elastiflow_elastic_version }}"
+      - "kibana={{ elastiflow_elastic_version }}"
+    state: present
+    allow_change_held_packages: true
+    policy_rc_d: 101
+  # The first install can print the generated bootstrap password.
+  no_log: true
+  notify:
+    - Restart Elasticsearch
+    - Restart Kibana
+
+- name: Hold Elastic packages
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop:
+    - elasticsearch
+    - kibana
+
+- name: Download pinned collector package
+  ansible.builtin.get_url:
+    url: "{{ elastiflow_collector_url }}"
+    dest: "/var/cache/flow-collector_{{ elastiflow_collector_version }}.deb"
+    checksum: "sha256:{{ elastiflow_collector_sha256 }}"
+    mode: '0644'
+
+- name: Install pinned collector package
+  ansible.builtin.apt:
+    deb: "/var/cache/flow-collector_{{ elastiflow_collector_version }}.deb"
+    policy_rc_d: 101
+  notify: Restart flow collector
+
+- name: Configure Elasticsearch without generated security and TLS settings
+  ansible.builtin.template:
+    src: elasticsearch.yml.j2
+    dest: /etc/elasticsearch/elasticsearch.yml
+    owner: root
+    group: elasticsearch
+    mode: '0660'
+  notify: Restart Elasticsearch
+
+# Only names are inspected; keystore values are never read or logged.
+- name: List Elasticsearch keystore setting names
+  ansible.builtin.command: /usr/share/elasticsearch/bin/elasticsearch-keystore list
+  register: elastiflow_keystore_names
+  changed_when: false
+  check_mode: false
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Remove generated TLS secure settings
+  ansible.builtin.command:
+    argv:
+      - /usr/share/elasticsearch/bin/elasticsearch-keystore
+      - remove
+      - "{{ item }}"
+  loop:
+    - xpack.security.http.ssl.keystore.secure_password
+    - xpack.security.http.ssl.keystore.secure_key_password
+    - xpack.security.http.ssl.truststore.secure_password
+    - xpack.security.transport.ssl.keystore.secure_password
+    - xpack.security.transport.ssl.keystore.secure_key_password
+    - xpack.security.transport.ssl.truststore.secure_password
+  when:
+    - not ansible_check_mode
+    - item in elastiflow_keystore_names.stdout_lines
+  changed_when: true
+  no_log: true
+  notify: Restart Elasticsearch
+
+- name: Configure Elasticsearch heap
+  ansible.builtin.copy:
+    content: |
+      -Xms{{ elastiflow_heap }}
+      -Xmx{{ elastiflow_heap }}
+    dest: /etc/elasticsearch/jvm.options.d/heap.options
+    owner: root
+    group: elasticsearch
+    mode: '0644'
+  notify: Restart Elasticsearch
+
+- name: Configure Kibana overrides
+  ansible.builtin.import_tasks: kibana.yml
+
+- name: Configure collector overrides
+  ansible.builtin.import_tasks: flowcoll.yml
+
+- name: Apply service configuration changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start Elasticsearch
+  ansible.builtin.systemd_service:
+    name: elasticsearch
+    enabled: true
+    state: started
+
+- name: Wait for Elasticsearch
+  ansible.builtin.uri:
+    url: http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow&timeout=5s
+    return_content: true
+  register: elastiflow_es_health
+  until:
+    - elastiflow_es_health.status | default(0) == 200
+    - not (elastiflow_es_health.json.timed_out | default(true))
+    - elastiflow_es_health.json.status | default('red') in ['green', 'yellow']
+  retries: 60
+  delay: 5
+  when: not ansible_check_mode
+
+- name: Enable and start Kibana
+  ansible.builtin.systemd_service:
+    name: kibana
+    enabled: true
+    state: started
+
+- name: Wait for Kibana
+  ansible.builtin.uri:
+    url: http://127.0.0.1:5601/api/status
+    return_content: true
+  register: elastiflow_kibana_health
+  until:
+    - elastiflow_kibana_health.status | default(0) == 200
+    - elastiflow_kibana_health.json.status.overall.level | default('unavailable') == 'available'
+  retries: 60
+  delay: 5
+  when: not ansible_check_mode
+
+- name: Enable and start flow collector
+  ansible.builtin.systemd_service:
+    name: flowcoll
+    enabled: true
+    state: started
+
+- name: Manage dashboards
+  ansible.builtin.import_tasks: dashboards.yml
+  when: not ansible_check_mode

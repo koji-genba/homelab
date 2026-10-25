@@ -116,6 +116,7 @@ homelab/
 │   ├── infrastructure/
 │   │   ├── ansible/apps/         # site.yml + 8 roles + group_vars/inventory (+ *.example)
 │   │   ├── ansible/gateway/      # registered gateway prefs: site.yml, group_vars/gateway.yml, ansible.cfg; tracked inventory/hosts.yml + example
+│   │   ├── ansible/elastiflow/   # VM 103 native packages/config + commit/checksum-pinned dashboards; separate manual apply
 │   │   ├── ansible/agent/        # Agent/Runner VM OS root: site.yml, inventories, group_vars/{all,agent,runner}, roles
 │   │   │                         #   (common, docker, firewall, agent_storage, agent_stack, agent_ops, runner)
 │   │   ├── terraform/            # apps-vm, tailscale, agent-vm, runner-vm, elastiflow, tailscale-gateway, stashpad-dev (CI-validated)
@@ -146,13 +147,14 @@ Module token estimates were measured on 2026-10-16 with the Cartographer scanner
 | Group | Targets |
 |---|---|
 | Toolbox | `toolbox-build` (also the default goal; tags `:1.0.1` locally, not the digest), `toolbox-requirements` (regenerates Python wheel pins/hashes with `TOOLBOX_IMAGE`; only the toolbox directory is mounted, no credentials) |
-| Terraform apps-vm | `terraform-init`, `terraform-fmt`, `terraform-validate`, `terraform-plan`, `terraform-apply` |
+| Terraform apps-vm | `terraform-init`, `terraform-fmt`, `terraform-validate`, `terraform-plan`, `terraform-apply`; `TERRAFORM_PLAN_ARGS` appends optional plan arguments (empty by default) |
 | Tailscale (manual, import-first) | `terraform-validate-tailscale`, `tailscale-init`, `tailscale-acl-encrypt`, `tailscale-acl-decrypt`, `tailscale-acl-preflight`, `tailscale-plan`, `tailscale-apply`, `tailscale-import-core`, `tailscale-import-acl`, `tailscale-import-dns`, `tailscale-import-router` |
 | Ansible | `ansible-lint`, `ansible-check`, `ansible-apply` |
 | Ansible, gateway prefs root | `ansible-lint-gateway`, `ansible-check-gateway` (CI); `ansible-apply-gateway` (manual; `GATEWAY_ANSIBLE_ARGS=--check` previews live state) |
 | Ansible, Hermes Agent/Runner root | `ansible-lint-agent`, `ansible-check-agent` (CI); `ansible-apply-agent` (manual, live VMs) |
 | Terraform agent-vm / runner-vm | `terraform-validate-agent-vm`, `terraform-validate-runner-vm` (CI, `-backend=false`); per-root `terraform-plan` / `terraform-apply` via `TERRAFORM_ROOT` |
 | Terraform ElastiFlow / gateway / stashPadDev | `terraform-validate-elastiflow`, `terraform-validate-tailscale-gateway`, `terraform-validate-stashpad-dev` (CI, `-backend=false`); roots selected by `ELASTIFLOW_ROOT`, `TAILSCALE_GATEWAY_ROOT`, `STASHPAD_DEV_ROOT` |
+| ElastiFlow Ansible | `ansible-lint-elastiflow`, `ansible-check-elastiflow` (CI syntax-check); manual `ansible-apply-elastiflow`, separate from Apps reconcile; `ELASTIFLOW_ANSIBLE_{ROOT,INVENTORY,CONFIG,ARGS}` |
 | CI fixtures | `gateway-routes-test`, `ansible-bootstrap-paths-test`, `terraform-apps-vm-lifecycle-test`, `toolbox-uid-test`, `cloud-init-test`, `compose-config`, `adguard-config-check`, `gatus-config-check`, `compose-reconcile-fixture`, `mover-test`, `shellcheck`, `secrets-scan`, `state-backup-test`, `state-restore-test`, `state-backup-preflight-test`, `tailscale-acl-path-test`, `tailscale-import-gates-test`, `agent-compose-config`, `agent-vm-cloud-init-test`, `runner-vm-cloud-init-test`, `terraform-agent-runner-vm-lifecycle-test`, `runner-privilege-fixture`, `runner-firewall-fixture`, `agent-runner-scope-fixture`, `agent-dnat-guard-fixture`, `agent-backup-fixture`, `agent-healthcheck-fixture`, `agent-restore-fixture`, `agent-rebuild-fixture`（restore fixtureからmodel-fetch/ops-cleanup/ops-behaviorも実行） |
 | Not in CI | `preflight` |
 | Ops | `state-backup`, `state-backup-push` (alias), `state-backup-preflight`, `state-restore`, `rollback-app` |
@@ -200,7 +202,7 @@ State uses the **default local backend per root** (`terraform.tfstate`, gitignor
 | `tailscale-gateway` | bpg/proxmox 0.117.0 | VM 102, `192.168.10.102`, template-clone (VMID 9000) | registration manual; prefs via dedicated gateway Ansible (live unverified); approval via Terraform opt-in or admin console |
 | `agent-vm` | bpg/proxmox | Hermes Agent VM (VMID 104, initial 12 vCPU / 24 GiB / 40 GiB OS + 100 GiB data disk, `192.168.10.104`, VLAN 10; 2026-10-17 WS14 user decision) from its own pinned Debian 13 cloud image | not on the tailnet; `ignore_changes=[initialization[0].user_data_file_id]`; Proxmox user/role/ACL manual; Ansible-only runtime |
 | `runner-vm` | bpg/proxmox | Hermes Runner VM (VMID 105, 8 vCPU / 16 GiB / 40 GiB OS + 150 GiB work disk, `192.168.10.105`, VLAN 10) | separate cloud image `file_name`; no Docker, no Discord token/memory DB/management keys |
-| `elastiflow` | bpg/proxmox 0.117.0 | VM 103, `192.168.10.103`; `install.sh` sets up unauthenticated ES/Kibana + flow collector | sFlow collector `:6343`; UI `https://elastiflow.kojigenba-srv.com` via Apps Caddy (trusted-only), LAN fallback `http://192.168.10.103:5601` |
+| `elastiflow` | bpg/proxmox 0.117.0 | VM 103, `192.168.10.103`; dedicated Ansible root pins unauthenticated ES/Kibana 8.19.22 + flowcoll 7.26.2 and imports pinned CODEX dashboards (empty-VM run unverified) | sFlow collector `:6343`; UI `https://elastiflow.kojigenba-srv.com` via Apps Caddy (trusted-only), LAN fallback `http://192.168.10.103:5601` |
 | `stashpad-dev` | bpg/proxmox 0.117.0 | VM 111 `.41` (out of scope) | Gitignored per-root state/tfvars |
 
 `apps-vm`: `snippet_datastore_id` must support both `Import` (cloud image) and snippets; keep `debian_cloud_image_url` and its SHA-512 checksum in sync.
