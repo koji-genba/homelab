@@ -1,0 +1,69 @@
+services:
+  hf-downloader:
+    # TODO: image PR の公開後に実在する digest を反映する。tag のままでは deploy しない。
+    image: ghcr.io/koji-genba/dagu-hf:2.22.4-hf2.3.0
+    user: "10002:10002"
+    environment:
+      DAGU_HOME: /var/lib/dagu
+      DAGU_TZ: Asia/Tokyo
+      HF_HOME: /var/lib/dagu/hf
+      HF_TOKEN_PATH: /run/secrets/hf-downloader/hf-token
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      HF_HUB_DISABLE_PROGRESS_BARS: "1"
+      HFDL_AI_ROOT: /data/ai
+      HFDL_MOUNT_TYPES: nfs,nfs4
+      HFDL_HF_BIN: /opt/hf/bin/hf
+      HFDL_LOCK_PATH: /var/lib/dagu/hf-download.lock
+    volumes:
+      - dagu-state:/var/lib/dagu
+      - ./config.yaml:/var/lib/dagu/config.yaml:ro
+      - ./base.yaml:/etc/dagu/base.yaml:ro
+      - ./dags:/etc/dagu/dags:ro
+      - ./bin:/etc/dagu/bin:ro
+      - type: bind
+        source: "${AI_MOUNT_PATH:?set AI_MOUNT_PATH}"
+        target: /data/ai
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${AI_MOUNT_PATH:?set AI_MOUNT_PATH}/models"
+        target: /data/ai/models
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${AI_MOUNT_PATH:?set AI_MOUNT_PATH}/datasets"
+        target: /data/ai/datasets
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${SECRETS_DIR:?set SECRETS_DIR}/hf-downloader"
+        target: /run/secrets/hf-downloader
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - frontend
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:uid=10002,gid=10002,mode=1777,size=128m
+    # Cover DAG cleanup (45s) plus the service shutdown wait (30s).
+    stop_grace_period: 90s
+    healthcheck:
+      test: [CMD, /opt/hf/bin/python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/v1/health', timeout=4).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  dagu-state:
+
+networks:
+  frontend:
+    name: homelab_frontend
+    external: true

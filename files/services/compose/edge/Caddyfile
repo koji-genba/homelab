@@ -81,3 +81,41 @@ sparkdash.kojigenba-srv.com {
 elastiflow.kojigenba-srv.com {
 	import admin_networks 192.168.10.103:5601
 }
+
+hf-downloader.kojigenba-srv.com {
+	@trusted remote_ip {$CADDY_TRUSTED_NETWORKS}
+	handle @trusted {
+		# v2.22.4 exposes only /api/v1. Fail closed for other API versions,
+		# MCP and terminal routes, including their read/WebSocket methods.
+		@unused path /mcp /mcp/* /api/v1/terminal /api/v1/terminal/*
+		handle @unused {
+			respond "Forbidden" 403
+		}
+		@other_api {
+			path /api/*
+			not path /api/v1/*
+		}
+		handle @other_api {
+			respond "Forbidden" 403
+		}
+		# v2.22.4 also uses GET for dequeue.
+		@read method GET HEAD OPTIONS
+		handle @read {
+			reverse_proxy hf-downloader:8080
+		}
+		# The UI updates its SSE subscriptions with POST events/stream/topics.
+		# Retry includes step Retry; request bodies are not inspected.
+		# The helper lock serializes hf even when queue order is bypassed.
+		@actions {
+			method POST
+			path_regexp hf_actions ^/api/v1/(events/stream/topics|auth/(setup|login|change-password)|dags/hf-download/(enqueue|stop-all)|dag-runs/hf-download/[A-Za-z0-9_-]+/(retry|stop))$
+		}
+		handle @actions {
+			reverse_proxy hf-downloader:8080
+		}
+		# Deny Start, start-sync, inline spec execution/enqueue, edit-retry,
+		# reschedule and every other mutation outside the allow-list above.
+		respond "Forbidden" 403
+	}
+	respond "Forbidden" 403
+}

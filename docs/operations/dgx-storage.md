@@ -144,7 +144,9 @@ dd if=/mnt/ai/models/<任意のファイル> of=/dev/null bs=1M status=progress 
 └── datasets    # 学習データ（tar.gz）
 ```
 
-単一exportなので、ここから先の構造は運用で自由に決めてよい。infrastructure側の設定は増えない。
+Apps VMの[hf-downloader](hf-downloader.md)は`models/huggingface/`と`datasets/huggingface/`へ
+uid/gid `10002:10002`で書く（file `0666` / directory `0777`）。モデル・データセットは再取得可能で、
+ai共有は既存どおりsnapshot対象外とする。それ以外の配下構造は運用で決めてよく、exportは増やさない。
 
 ## 手動反映の記録
 

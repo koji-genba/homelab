@@ -89,6 +89,7 @@ service_names = {
     "sparkdash.kojigenba-srv.com",
     "elastiflow.kojigenba-srv.com",
     "dns.kojigenba-srv.com",
+    "hf-downloader.kojigenba-srv.com",
     "homepage.kojigenba-srv.com",
     "status.kojigenba-srv.com",
 }

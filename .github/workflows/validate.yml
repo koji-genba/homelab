@@ -92,6 +92,8 @@ jobs:
         run: make gatus-config-check
       - name: Storage mover regression check
         run: make mover-test
+      - name: HF downloader input and storage regression
+        run: make hf-downloader-test
       - name: Shell lint
         run: make shellcheck
       - name: Plaintext secret and state scan
