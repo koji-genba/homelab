@@ -1,0 +1,2 @@
+# Ubuntu 24.04 / CPython 3.12 / linux/amd64. See README.md for regeneration.
+huggingface_hub==2.3.0
