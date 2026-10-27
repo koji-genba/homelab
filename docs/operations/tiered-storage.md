@@ -63,10 +63,16 @@ mergerfsを通さない直接経路として維持。大事なデータのコピ
 ### /etc/fstab（mergerfsマウント）
 
 ```
-/mnt/cache-sata:/mnt/tank-gen2/data/shared  /mnt/shared  fuse.mergerfs  defaults,cache.files=off,dropcacheonclose=false,category.create=ff,inodecalc=path-hash,func.getattr=newest,fsname=mergerfs-shared  0  0
+/mnt/cache-sata:/mnt/tank-gen2/data/shared  /mnt/shared  fuse.mergerfs  defaults,cache.files=off,dropcacheonclose=false,category.create=ff,inodecalc=path-hash,func.getattr=newest,fsname=mergerfs-shared,x-systemd.requires=zfs-mount.service  0  0
 ```
 
 `inodecalc=path-hash`: moverによってファイルがSSD→HDDに移動してもinode値が変わらない。NFS経由でstale handleが出るのを防ぐ。
+
+`x-systemd.requires=zfs-mount.service`: `zfs-mount.service`へのRequires / After依存を加え、
+ZFSより先にmergerfsがmountされるのを防ぐ。2026-10-27にpve1へ反映し、再起動で順序を確認した。
+poolの起動時importは全poolの個別`zfs-import@`を有効にする方式に揃える。
+新しいpoolを追加する場合も登録を必須とし、手順と確認範囲は
+[ホスト復旧手順](proxmox-host-recovery.md#データpoolのimportとmergerfs)を参照する。
 
 ### /etc/exports
 

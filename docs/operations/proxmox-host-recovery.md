@@ -3,7 +3,8 @@
 ホストの構成値は2026-10-12にpve1で読み取りコマンドを実行して確認した。
 [2026年6月版](../archive/proxmox-rebuild.md)とはOSのレイアウトなどが異なるため、6月版の値を現行値の根拠にしない。
 VMに関わる部分は現行のTerraform / Ansible定義に基づく。
-以下は実装から導いた手順で、実機では未検証（この並びで通しの再構築は実行していない）。
+以下の並びで通しの再構築は実行していない。poolの自動importとmergerfsの起動順は、
+[2026-10-27の再起動で確認した](#2026-10-27の起動時import対策と確認)。
 
 ## 位置づけと順序
 
@@ -186,11 +187,14 @@ disk全体のby-idは未確認である。
 
 ```bash
 zpool labelclear -f /dev/disk/by-id/nvme-WD_BLACK_SN770_1TB_22390J802169
-zpool create -f -o ashift=12 -o cachefile=none vmpool \
+zpool create -f -o ashift=12 vmpool \
   /dev/disk/by-id/nvme-WD_BLACK_SN770_1TB_22390J802169
 zfs set compression=on vmpool
 zpool status vmpool
 ```
+
+実際のvmpoolも作成時には`cachefile=none`を指定していなかった。起動時の読み込み方法は
+作成時の指定で固定せず、作成・import後に次節の`zfs-import@`を必ず有効にする。
 
 ### データpoolのimportとmergerfs
 
@@ -206,6 +210,33 @@ zpool import cache-pool
 zpool status
 zfs list -o name,mountpoint,mounted
 ```
+
+作成またはimportした**各poolの`zfs-import@<pool>.service`を必ず有効にする**。
+vmpoolも対象とし、保持したvmpoolをimportした場合にも同じ登録を行う。
+pool名のハイフンは`\x2d`へエスケープする必要があるため、`systemd-escape`でunit名を生成する。
+
+```bash
+for pool in vmpool tank-gen1 tank-gen2 cache-pool; do
+  unit=$(systemd-escape --template=zfs-import@.service "$pool")
+  systemctl enable "$unit"
+done
+systemctl list-dependencies zfs-import.target
+```
+
+例えば`tank-gen1`のunit名は`zfs-import@tank\x2dgen1.service`となる。
+手で指定する場合は、`systemctl enable 'zfs-import@tank\x2dgen1.service'`のように単一引用符で囲む。
+既にimport済みのpoolに対して、この登録のためにunitをstartする必要はない。
+
+Proxmoxの個別unitは`zpool import -N -d /dev/disk/by-id -o cachefile=none`で読み込む。
+このimportは既定cacheもその時点で読み込み済みの対象pool一覧から再生成し、対象が0個なら
+Linuxでは`/etc/zfs/zpool.cache`が0バイトになる。cache方式との混在では未importのpoolが
+読み込まれなくなるため、全poolを個別unitに揃える（[原因と確認記録](#2026-10-27の起動時import対策と確認)）。
+`zfs-import-cache.service`は有効のまま残す。cacheが空ならスキップされるが、
+現行pve1ではudev settleを依存に引き込む役割もある。
+
+**新しいpoolを追加するときも、作成後に同じ登録を必須とする。** pool名を`systemd-escape`へ渡して
+個別unitを有効にし、`zfs-import.target`の依存一覧に追加されたことを確認する。
+次の計画再起動で自動importとdatasetのmountを[検証](#検証)し、追加作業の確認記録に残す。
 
 2026-10-12に`zfs list -d 2`で確認したdatasetとmountpointは次のとおりである。
 
@@ -227,9 +258,43 @@ repoにはcache-pool作成を自動化する定義が無いため、ここで新
 
 2026-10-12のpackageは`mergerfs 2.40.2-5`、`nfs-kernel-server 1:2.8.3-1`だった。
 mergerfsを導入し、[fstab設定](tiered-storage.md#etcfstabmergerfsマウント)を復元する。
+`x-systemd.requires=zfs-mount.service`も復元し、ZFSのmount完了後にmergerfsをmountさせる。
 両branchが`/mnt/cache-sata`と`/mnt/tank-gen2/data/shared`へ正しくmountされていることを確認してから、
 `mkdir -p /mnt/shared`、`mount /mnt/shared`でunion mountを戻す。
 cache-poolの`autotrim=on`とAHCI接続も同文書に従って確認する。
+
+### 2026-10-27の起動時import対策と確認
+
+対策前はvmpoolだけが`zfs-import@vmpool.service`で読み込まれ、tank-gen1・tank-gen2・cache-poolは
+`zfs-import-cache.service`に依存していた。OpenZFS 2.2〜2.4の該当処理では、
+`cachefile=none`付きimportでも既定cacheを更新する。Proxmoxの`zfsutils-linux 2.2.3-pve2`以降は
+個別unitがcache方式より先に動くため、vmpoolのimport時点では既定cacheの収録対象が0個となる。
+その結果cacheが空になり、`zfs-import-cache.service`は`ConditionFileNotEmpty`を満たさずスキップされた。
+2026年の6/28・7/4・7/7・9/13・10/27の起動で同じ問題があり、起動後の手動importで復旧していた。
+
+関連報告は[OpenZFS #10160](https://github.com/openzfs/zfs/issues/10160)、
+[Proxmoxの同様の事例](https://forum.proxmox.com/threads/zfs-pool-missing-after-reboot.149343/)、
+[Proxmox Bug #4835](https://bugzilla.proxmox.com/show_bug.cgi?id=4835)を参照。
+Bug #4835は個別unitを先行させる順序修正であり、空cache問題そのものの修正ではない。
+
+2026-10-27にデータ3 poolの個別unitを有効にし、元から有効だったvmpoolと合わせて全4 poolを
+個別importへ揃えた。`zfs-import-cache.service`は有効のまま残した。
+また、以前はZFSのimportより先にmountされていたmergerfsのfstab行へ
+`x-systemd.requires=zfs-mount.service`を追加した。変更前のfstabは
+`/etc/fstab.bak-20261027-zfs-order`に保存した。
+
+同日22:15 JSTの再起動では、次の順序をjournalで確認した。
+
+| 順序 | 確認結果 |
+| --- | --- |
+| 1 | 全4本の`zfs-import@`が完了。空cacheのため`zfs-import-cache.service`はスキップ |
+| 2 | `zfs-mount.service`が完了（全11 datasetがmount済み） |
+| 3 | `mnt-shared.mount`が完了 |
+| 4 | `nfs-server.service`が完了。export対象の不存在エラーなし |
+
+Apps・Hermes・DGXのNFSも復帰した。ただし`pve-guests.service`によるVM自動起動処理は
+`nfs-server.service`の完了より前に始まっている。今回は問題なかったが、VMの起動がNFSの準備完了を
+待つ順序までは保証していない。
 
 ### mover、cron、logrotate
 
@@ -490,6 +555,7 @@ pvesh get /nodes
 zpool list
 zpool status
 zfs list -o name,mountpoint,mounted
+systemctl list-dependencies zfs-import.target
 zpool get autotrim cache-pool
 findmnt -M /mnt/cache-sata
 findmnt -M /mnt/tank-gen2/data/shared
@@ -502,6 +568,10 @@ qm config 9000
 ```
 
 - poolがONLINEで、保持したdataset / snapshotが存在し、想定pathへmountされていること。
+- 起動後、`zfs-import.target`の依存一覧に全poolの個別インスタンスがあること。
+  現行はvmpool・tank-gen1・tank-gen2・cache-poolの4本で、新規追加したpoolも含める。
+  `journalctl -b -o short-precise`で個別import → `zfs-mount.service` → `mnt-shared.mount` →
+  `nfs-server.service`の順序と各unitの成功を確認する。依存一覧にあるだけでimport成功とは判断しない。
 - mergerfsのbranch順序・optionが[Tiered Storage](tiered-storage.md#設定)と一致すること。
 - exportのpath / client / optionと全markerの内容が[NFS契約](nfs-export.md#マーカー契約)と一致すること。
   例えば`cat /mnt/tank-gen2/data/shared/.homelab-export-shared`で`shared`、
