@@ -94,7 +94,9 @@ hf子プロセスだけumask `0000`。新規directoryは0777、fileは0666、所
 既存fileのmodeを一括変更しない。HF_HOME（xet cache含む）はローカルvolumeへ置き、NFSには
 local-dir本体とその`.cache/huggingface/`だけを書く。helperはargvと保存先をログに出す。
 
-HF tokenは任意。運用者が暗号化runtime bundleへ`hf_downloader.token`を追加し、通常のsecret更新手順を使う。
+HF tokenは技術的には任意だが、gated modelの取得と匿名より高いrate limitのため、この環境では設定する。
+運用者が暗号化runtime bundleへ`hf_downloader.token`（read権限のtoken）を追加し、通常のsecret更新手順を使う。
+gated modelは、tokenのアカウントでHugging Face上の利用条件に同意しておく。
 Ansibleが`/etc/homelab/secrets/hf-downloader/hf-token`（10002:10002、0400）を作る。
 directoryは10002:10002、0500で、directory全体をro bindする。bundleに値が無ければ空fileになる。
 空fileなら匿名取得する。tokenをDaguのparams・argv・ログへ入力しない。
@@ -110,7 +112,8 @@ directoryは10002:10002、0500で、directory全体をro bindする。bundleに�
    `ghcr.io/koji-genba/dagu-hf`をpublicにする。repoにはvisibilityを設定する仕組みが無い。
 2. 別のCompose/連携PRにそのdigestを反映する。現在のtag参照とTODOを残した状態ではmergeしない。
 3. Compose PRをmergeし、reconcileでApps VMのcheckoutを進める。
-4. 運用者の承認を得て通常の`make ansible-apply`を行い、新projectのhelper、token directory、
+4. bundleへ`hf_downloader.token`を追加済みであることを確認し、運用者の承認を得て通常の`make ansible-apply`を行い、
+   新projectのhelper、token directory、AdGuardの`@@||hf.co^`、
    DNS等を反映する。全projectが再作成され、実行中の取得も停止する。
 5. `/setup`で管理者を作り、下の受け入れ確認を行う。先行する監視設定は起動までdownになり得る。
 
@@ -187,9 +190,8 @@ Docker Desktop / WSL2の偽ai bindを使用し、mount種別だけ試験用overr
 - health成功はNFSの健全性を保証しない。download開始前のhelper検査と既存mount guardが別に必要。
 - 事前検査で拒否したrunは`Download refused: <理由>`をstderrへ出し、hfを起動しない（`Executing:`行が無い）。UIのstepログはstderr側を開いて理由を確認する。
 
-ローカル試験でmetadataだけ取れて本体の取得が止まる場合はDNSを確認する。homelabのAdGuardは
-HaGeZi URL Shortenerリストの`||hf.co^`により`*.hf.co`をNXDOMAINにする。
-Xetの`cas-server.xethub.hf.co`・`transfer.xethub.hf.co`、`cdn-lfs.hf.co`なども対象になる。
-Apps VMはhost resolverに公開DNS（`apps_upstream_dns_servers`）を使いtailnet DNSも受けないため影響しない。
-AdGuardをDNSに使う端末での試験では、試験用overrideだけに`dns: [1.1.1.1, 8.8.8.8]`を指定する。
-この変更では本番ComposeのDNSやAdGuard設定は変更しない。
+metadataだけ取れて本体の取得が止まる場合はDNSを確認する。HaGeZi URL Shortenerリストの`||hf.co^`は
+`*.hf.co`（Xetの`cas-server.xethub.hf.co`・`transfer.xethub.hf.co`、`cdn-lfs.hf.co`など、HFのfile配信先）を
+NXDOMAINにするため、`files/services/compose/dns/filters/allowlist.txt`に`@@||hf.co^`を置いている。
+AdGuardをDNSに使う端末（作業端末・DGXなど）では、この例外が`make ansible-apply`で反映済みかを確認する。
+Apps VM自体はhost resolverに公開DNS（`apps_upstream_dns_servers`）を使い、tailnet DNSも受けないため影響しない。

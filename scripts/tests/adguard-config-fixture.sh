@@ -75,7 +75,7 @@ expected_filters = [
 assert [item["url"] for item in parsed["filters"]] == expected_filters
 assert [item["id"] for item in parsed["filters"]] == list(range(1, 7))
 assert len({item["name"] for item in parsed["filters"]}) == len(parsed["filters"])
-assert parsed["user_rules"] == ["@@||t.co^", "@@||tailscale.com^"]
+assert parsed["user_rules"] == ["@@||t.co^", "@@||tailscale.com^", "@@||hf.co^"]
 service_names = {
     "staging.kojigenba-srv.com",
     "prod.kojigenba-srv.com",
