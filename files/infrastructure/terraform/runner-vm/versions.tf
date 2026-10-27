@@ -5,7 +5,7 @@ terraform {
     proxmox = {
       source = "bpg/proxmox"
       # Pin the exact provider build used by this root. Must match apps-vm.
-      version = "0.117.0"
+      version = "0.118.0"
     }
   }
 }
