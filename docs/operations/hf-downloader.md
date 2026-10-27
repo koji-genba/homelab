@@ -26,6 +26,8 @@ volumeはimageから`10002:10002 0700`を引き継ぐ。DAG・設定・helperは
 Daguは`2.22.4`、huggingface_hubは`2.3.0`。image tagは`2.22.4-hf2.3.0`。
 Dagu coordinator、terminal、git sync、Cloud report / remote accessは無効。
 `permissions.write_dags: false`でUIからDAGを変更できない。healthは`/api/v1/health`。
+`public_url: https://hf-downloader.kojigenba-srv.com`で初回setupのHostとCaddy越しのHTTPS Originを許可する。
+v2.22.4はIPと単一ラベル名を既定許可するため、内部health用の`127.0.0.1`・`hf-downloader`を`allowed_hosts`へ追加する必要はない。
 
 ## 登録・確認・停止・再実行
 
