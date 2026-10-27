@@ -12,7 +12,7 @@
 | --- | --- |
 | 2026-09-06: VMID 112、7 projects / NFS 7 mount | destroyからの再構築、受入12項目とユーザー受入が合格。[実証記録](../archive/implementation-status.md#phase-3-再構築性の証明2026-09-06全項目合格) |
 | 2026-09-25: VMID 101、7 projects / NFS 8 mount | 再構築、内部/外部DNS、7 FQDNのHTTPS/TLSまで確認。アプリ操作・SMB・通知は再受入していない。[実施記録](../archive/next-session.md#実施済み)・[残る受入](../archive/next-session.md#引き続き必要なこと) |
-| 現行定義: VMID 101、12 projects / 13 services、NFS 9 mount（hf-downloader初回反映は未実施） | Apps VM自身のtailnet参加を含む通し再構築は未検証。個別の追加・運用確認は、以下の各運用文書を参照 |
+| 現行定義: VMID 101、12 projects / 13 services、NFS 9 mount | Apps VM自身のtailnet参加を含む通し再構築は未検証。個別の追加・運用確認は、以下の各運用文書を参照 |
 
 2026-10-25に運用者は現行構成の通し再構築の実証を見送り、未実証のriskを受け入れた。
 再実証は未実施。普段の更新では行わず、[実証し直す契機](#通し再構築を実証し直す契機)に従う。
