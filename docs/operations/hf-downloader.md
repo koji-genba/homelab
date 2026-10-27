@@ -108,9 +108,10 @@ directoryは10002:10002、0500で、directory全体をro bindする。bundleに�
 1. imageだけのPRを作る。Dockerfile、requirements、公開workflow、Dependabot設定を含める。
    PRのbuild成功を確認してmergeし、GHCRへの公開とjob summaryの実在するdigestを確認する。
    認証情報を持たない別環境で`docker pull ghcr.io/koji-genba/dagu-hf@<確認したdigest>`を実行し、
-   匿名pullが成功することを確認する（この公開確認手順は未検証）。privateならGitHubのpackage設定で
+   匿名pullが成功することを確認する（2026-10-27の初回公開で、認証なしのmanifest取得とdigest指定のpullを確認済み。
+   GHCRはpublicで作成された）。privateならGitHubのpackage設定で
    `ghcr.io/koji-genba/dagu-hf`をpublicにする。repoにはvisibilityを設定する仕組みが無い。
-2. 別のCompose/連携PRにそのdigestを反映する。現在のtag参照とTODOを残した状態ではmergeしない。
+2. 別のCompose/連携PRにそのdigestを反映する。tagだけの参照のままではmergeしない。
 3. Compose PRをmergeし、reconcileでApps VMのcheckoutを進める。
 4. bundleへ`hf_downloader.token`を追加済みであることを確認し、運用者の承認を得て通常の`make ansible-apply`を行い、
    新projectのhelper、token directory、AdGuardの`@@||hf.co^`、
