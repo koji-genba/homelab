@@ -38,7 +38,7 @@ ZFSスナップショット、レプリケーション、NFSサーバー自体�
 
 | 対象 | repoから再構築できるか | diskとともに失うもの | backup |
 | --- | --- | --- | --- |
-| Apps VM（101） | できる。Terraform → Ansible → Compose。tailnet登録とProxmox権限は文書化された手作業。ただし現行11 projectsでの通し再構築は未実証。2026-10-25に実証を見送り、未実証のriskを受容。再実証の契機は[復旧手順](../operations/apps-vm-recovery.md#通し再構築を実証し直す契機)に定める | AdGuardの統計・query log、Sambaのログ、Gatusの履歴、sparkDashのunit登録（[再登録手順](../operations/sparkdash.md#永続化backup復旧)あり） | 取らない |
+| Apps VM（101） | できる。Terraform → Ansible → Compose。tailnet登録とProxmox権限は文書化された手作業。ただし現行12 projectsでの通し再構築は未実証。2026-10-25に実証を見送り、未実証のriskを受容。再実証の契機は[復旧手順](../operations/apps-vm-recovery.md#通し再構築を実証し直す契機)に定める | AdGuardの統計・query log、Sambaのログ、Gatusの履歴、Daguの管理者・履歴・キュー・cache、sparkDashのunit登録（[再登録手順](../operations/sparkdash.md#永続化backup復旧)あり） | 取らない |
 | Tailscale gateway（102） | できる。template 9000からcloneし、手動登録 → Ansibleでprefs適用 → Terraform / 管理画面でroute承認を行う（Ansible手順は実機未検証）。template 9000はscriptで作成済み（gateway rootでのcloneは未検証） | nodeのidentity（再登録が必要） | 取らない |
 | ElastiFlow（103） | できる。Terraform → 専用Ansible。2026-10-25にVMを作り直して確認（[詳細](../../files/infrastructure/terraform/elastiflow/README.md#再構築性とbackup)） | 過去のフローデータ、Kibanaのdashboardへの変更 | 取らない（過去のフローは不要。VMを作り直し、空のindexから取り込み直す） |
 | stashPadDev（111） | 2026-10-25に[READMEで開発環境を宣言](../../files/infrastructure/terraform/stashpad-dev/README.md#開発環境の再構築)。手順は実機で通し実行しておらず未検証。template 9000はscriptで作成済み（stashPadDev rootでのcloneは未検証） | VMの中にしか無い作業、宣言外の追加ツールや設定 | 取らない（重要ではないUbuntuの開発用VM。VM内だけの作業は運用者が別途pushする） |
@@ -72,6 +72,7 @@ Proxmox pve1 192.168.10.11
 │   ├── Open WebUI                  内部Docker network
 │   ├── SearXNG / mcp-searxng       内部Docker network
 │   ├── sparkDash                   内部Docker network -> DGX (SSH/HTTP)
+│   ├── hf-downloader               内部Docker network（初回反映は未実施）
 │   ├── Homepage                    内部Docker network
 │   └── Gatus                       内部Docker network
 ├── Hermes Agent VM (Debian 13)     192.168.10.104。Hermes + Hindsight + 記憶DB + TEI（tailnet外）
@@ -84,7 +85,7 @@ Healthchecks.io                     外部dead-man監視
 GitHub/GHCR                         ソース、CI、公開イメージ
 ```
 
-`files/services/compose/*/compose.yaml`の定義は11 projects / 12 services。sparkDashはremote-onlyで、初回反映は
+`files/services/compose/*/compose.yaml`の定義は12 projects / 13 services。sparkDashはremote-onlyで、初回反映は
 [sparkDash運用](../operations/sparkdash.md)に従う。
 HomepageはGit管理の静的リンク集で、[Homepage運用](../operations/homepage.md)に従って初回反映する。
 
@@ -106,6 +107,7 @@ Tailscale gatewayのVM定義とtailnet ACL/DNSはTerraformで管理し、gateway
 | `searxng.kojigenba-srv.com` | Caddy -> SearXNG | ネットワーク境界（Caddyの信頼network制限、loginなし） |
 | `mcp-searxng.kojigenba-srv.com` | Caddy -> mcp-searxng | ネットワーク境界（Caddyの信頼network制限、認証なし） |
 | `sparkdash.kojigenba-srv.com` | Caddy -> sparkDash:5555 | 信頼network/tailnet制限 + アプリBearer token（Caddy Basic Authなし） |
+| `hf-downloader.kojigenba-srv.com` | Caddy -> hf-downloader:8080 | 信頼network/tailnet制限 + Dagu内蔵ログイン（初回`/setup`） |
 | `dns.kojigenba-srv.com` | Caddy -> AdGuard Home UI | AdGuard内蔵ログイン |
 | `status.kojigenba-srv.com` | Caddy -> Gatus | Caddy Basic Auth |
 | `homepage.kojigenba-srv.com` | Caddy -> Homepage:3000 | 信頼network/tailnet制限 + Caddy Basic Auth（Gatusと共用） |
@@ -161,6 +163,14 @@ sparkDashのconfigはApps VMのnamed volume `homelab-sparkdash_sparkdash-config`
 NFS/ZFS snapshotやTerraform state-backupには含まれない。
 復旧方針は[sparkDash運用](../operations/sparkdash.md)を参照する。
 
+hf-downloaderはDagu + `hf download`でmodel/datasetを順次取得する。
+実行履歴・ログ・キュー・管理者・HF_HOME・ロックはApps VMローカルnamed volumeに置き、backupせず喪失を許容する。
+復旧時は再deploy直後に`/setup`で管理者を作り、必要な取得を再投入する。
+保存先は既存ai共有の`models/huggingface/`と`datasets/huggingface/`で、uid/gid `10002:10002`、
+file `0666` / directory `0777`とする。本体は再取得可能で、ai共有はsnapshot対象外のままである。
+任意tokenはSOPSから再配置し、省略時も空fileを配置する。初回反映はimageの公開・digest固定を先に済ませ、
+[hf-downloader運用](../operations/hf-downloader.md)に従う。本番反映・受入は未実施である。
+
 ### NFS export契約
 
 `/mnt/tank-gen2/data/ai`はDGX Spark 2台とApps VMが共有する単一exportで、client範囲は
@@ -187,7 +197,8 @@ VM側はNFSv4、`hard,_netdev`を使用する。systemd mount unit、`RequiresMo
 
 ## ライフサイクルと更新
 
-- 全imageをdigestで宣言する。
+- 全imageをdigestで宣言する。hf-downloaderの公開前のtag参照はdraftに限り、公開後にdigestを固定する。
+- dagu-hfのPython依存はDependabotの`pip`で月次にまとめて更新する。
 - Dependabotが週次でCompose（`docker-compose`）、Dockerfile（`docker`）、Terraform
   （apps-vm / agent-vm / runner-vm / elastiflow / tailscale-gateway / stashpad-dev / tailscale）、
   GitHub Actionsを確認する。Proxmox providerの更新は6 VM rootを同じversionに揃えてレビューする。

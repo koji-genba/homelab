@@ -34,7 +34,7 @@ mainへのpromotion commitが明示的な承認点であり、merge後のdeploy�
 
 ## Ansibleで生成する設定
 
-AdGuard HomeのDNS rule/config、Samba password、Caddy/Gatus/SillyTavern/Healthchecks/sparkDashのruntime
+AdGuard HomeのDNS rule/config、Samba password、Caddy/Gatus/SillyTavern/Healthchecks/sparkDash/hf-downloaderのruntime
 secretはGit reconcileではなくAnsibleの明示適用対象とする。暗号化bundleの復号確認後に
 次を実行する。
 
@@ -63,8 +63,18 @@ AnsibleはDNS rewriteとhelper一覧を更新し、runtime変更があれば全p
 新projectも起動する。変更が無ければhelperの更新だけでは起動しないため、apply後に起動していなければ
 `sudo /usr/local/sbin/homelab-compose-up homepage`を実行する。詳細は[Homepage運用](homepage.md)を参照する。
 
-現在の定義は`edge dns samba stashpad-prod stashpad-staging sillytavern open-webui searxng sparkdash homepage monitoring`の
-11 projects / 12 servicesで、停止順はその逆である。
+hf-downloaderは既存のai mountとmarkerを使い、新規exportは作らない。imageだけのPRを先にmergeし、
+GHCRへの公開後に得たdigestをComposeへ固定する。tagだけのComposeはdraftのままとし、適用しない。
+その後は連携一式のmerge、reconcileでのcheckout更新、`make ansible-apply`、起動確認の順とする。
+`files/services/images/dagu-hf/`だけの変更では再作成しない。Composeのdigestが変わらなければ
+取得を中断するだけになるためである。imageの公開後にComposeのdigestを更新するとreconcileが反映する。
+任意の`hf_downloader.token`を使う場合はapply前に既存SOPS bundleへ追加する。省略時も空fileを配置する。
+デプロイ直後に`/setup`でDagu管理者を作成する。詳細は[hf-downloader運用](hf-downloader.md)を参照する。
+Daguの状態はbackup対象外のローカルnamed volumeにあり、喪失時は管理者を作り直して取得を再投入する。
+モデル・データセット本体はai共有に置き、既存どおりsnapshot対象外・再取得可能として扱う。
+
+現在の定義は`edge dns samba stashpad-prod stashpad-staging sillytavern open-webui searxng sparkdash hf-downloader homepage monitoring`の
+12 projects / 13 servicesで、停止順はその逆である。
 
 ## projectの撤去（共通手順）
 

@@ -1,0 +1,39 @@
+host: 0.0.0.0
+port: 8080
+auth:
+  mode: builtin
+permissions:
+  write_dags: false
+  run_dags: true
+terminal:
+  enabled: false
+coordinator:
+  enabled: false
+default_execution_mode: local
+skip_examples: true
+signal_handling:
+  enable_propagation: true
+paths:
+  dags_dir: /etc/dagu/dags
+  wiki_dir: /var/lib/dagu/wiki
+  base_config: /etc/dagu/base.yaml
+git_sync:
+  enabled: false
+cloud:
+  report: "off"
+  remote_access: "off"
+queues:
+  enabled: true
+  config:
+    - name: hf-download
+      max_concurrency: 1
+# Dagu filters host env by default; pass only these operator-owned settings.
+env_passthrough:
+  - HFDL_AI_ROOT
+  - HFDL_MOUNT_TYPES
+  - HFDL_HF_BIN
+  - HFDL_LOCK_PATH
+  - HF_HOME
+  - HF_TOKEN_PATH
+  - HF_HUB_DISABLE_TELEMETRY
+  - HF_HUB_DISABLE_PROGRESS_BARS

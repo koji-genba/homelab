@@ -53,6 +53,11 @@ updates:
     ignore:
       - dependency-name: "koji-genba/*"
   - package-ecosystem: docker-compose
+    directory: /files/services/compose/hf-downloader
+    schedule: {interval: weekly}
+    ignore:
+      - dependency-name: "koji-genba/*"
+  - package-ecosystem: docker-compose
     directory: /files/services/compose/homepage
     schedule: {interval: weekly}
     ignore:

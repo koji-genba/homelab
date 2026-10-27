@@ -1,0 +1,41 @@
+description: Hugging Face の model / dataset を AI 共有へ順番に取得する
+queue: hf-download
+timeout_sec: 604800
+max_clean_up_time_sec: 45
+hist_retention_days: 30
+working_dir: /var/lib/dagu
+params:
+  - name: repo_id
+    type: string
+    required: true
+    description: namespace/name（必須。例 unsloth/Qwen3-8B-GGUF）
+  - name: repo_type
+    type: string
+    enum: [model, dataset]
+    default: model
+    description: 保存先の種類（models / datasets）
+  - name: revision
+    type: string
+    default: main
+    description: branch / tag / commit / refs/pr/N。main 以外は別 directory に保存
+  - name: include
+    type: string
+    default: ""
+    description: 取得パターン（カンマ区切り）。例 *Q4_K_M*
+  - name: exclude
+    type: string
+    default: ""
+    description: 除外パターン（カンマ区切り）
+  - name: max_workers
+    type: integer
+    default: 1
+    enum: [1, 2, 3, 4]
+    description: 1 ジョブ内の並列取得数。HDD 向け既定値は 1
+steps:
+  - name: download
+    action: exec
+    with:
+      command: /opt/hf/bin/python
+      args: [/etc/dagu/bin/hf_download.py]
+    timeout_sec: 604800
+    signal_on_stop: SIGTERM

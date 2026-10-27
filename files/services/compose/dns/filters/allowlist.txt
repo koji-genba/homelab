@@ -2,3 +2,6 @@
 # Required compatibility exceptions from the existing DNS policy.
 @@||t.co^
 @@||tailscale.com^
+
+# Hugging Face delivers files from hf.co subdomains (Xet, LFS, CDN); the URL Shortener list blocks ||hf.co^.
+@@||hf.co^

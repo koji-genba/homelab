@@ -1,12 +1,19 @@
 # Docker Compose projectの構成
 
 各directoryは独立してdeployできるprojectである。全projectが外部の`homelab_frontend` networkに参加する。
-定義は11 projects / 12 services（searxngだけ2 services）である。起動順は
-`edge dns samba stashpad-prod stashpad-staging sillytavern open-webui searxng sparkdash homepage monitoring`、停止は逆順。
+定義は12 projects / 13 services（searxngだけ2 services）である。起動順は
+`edge dns samba stashpad-prod stashpad-staging sillytavern open-webui searxng sparkdash hf-downloader homepage monitoring`、停止は逆順。
 [Homepage](../../../docs/operations/homepage.md)は静的YAMLによるサービスリンク集である。
 設定6ファイル（YAML 4件、`custom.css`、`custom.js`）をread-only bindし、logsと生成ファイルはtmpfsに置く。Docker socketは渡さない。
 [sparkDash](../../../docs/operations/sparkdash.md)は専用named volumeでconfigを保持するremote monitorで、
 初回はimageからuid/gid 10001とmode 0700を引き継ぐ。自動backupは構築せず、VM外の暗号化backupも必須とせず、volume喪失時は再deployとUIでの2台の再登録で復旧する。
+
+[hf-downloader](../../../docs/operations/hf-downloader.md)はDagu + `hf download`の取得キューである。
+既存`AI_MOUNT_PATH`の`models/huggingface/`と`datasets/huggingface/`へ`10002:10002`で書く。
+モデル・データセット本体は再取得可能で、ai共有は既存どおりsnapshot対象外とする。
+Daguの管理者・実行履歴・ログ・キュー・HF_HOME・ロックはApps VMローカルの`dagu-state` named volume（`/var/lib/dagu`）に置き、
+backupせず喪失を許容する。喪失時は再deploy後すぐに`/setup`で管理者を作り、必要な取得を再投入する。
+image公開とdigest固定を先に行い、初回反映は同運用手順に従う。
 
 HTTP(S)のentry pointはedge projectだけで、DNSとSMBは必要なhost portだけを公開する。
 内部名はApps VMのtailnet IPへ解決される（[ADR-0007](../../../docs/adr/0007-apps-vm-tailnet-dns.md)）。
@@ -36,7 +43,7 @@ gate有効時は全serviceが完全な`repo@sha256:<64 hex chars>`参照であ�
 
 初回追加はApps VMのcheckoutを更新した後、管理端末の最新checkoutから`make ansible-apply`を実行する。
 Compose roleのGit taskは`update: false`で、Ansible自体は既存checkoutを進めない。
-secret / AdGuard設定 / `compose.env`の変更を検出すると、cutover有効時に全11 projectsをforce-recreateする。
+secret / AdGuard設定 / `compose.env`の変更を検出すると、cutover有効時に全12 projectsをforce-recreateする。
 
 ## image更新と管理用wrapper
 

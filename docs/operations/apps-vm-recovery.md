@@ -12,7 +12,7 @@
 | --- | --- |
 | 2026-09-06: VMID 112、7 projects / NFS 7 mount | destroyからの再構築、受入12項目とユーザー受入が合格。[実証記録](../archive/implementation-status.md#phase-3-再構築性の証明2026-09-06全項目合格) |
 | 2026-09-25: VMID 101、7 projects / NFS 8 mount | 再構築、内部/外部DNS、7 FQDNのHTTPS/TLSまで確認。アプリ操作・SMB・通知は再受入していない。[実施記録](../archive/next-session.md#実施済み)・[残る受入](../archive/next-session.md#引き続き必要なこと) |
-| 現行: VMID 101、11 projects / 12 services、NFS 9 mount | Apps VM自身のtailnet参加を含む通し再構築は未検証。個別の追加・運用確認は、以下の各運用文書を参照 |
+| 現行定義: VMID 101、12 projects / 13 services、NFS 9 mount（hf-downloader初回反映は未実施） | Apps VM自身のtailnet参加を含む通し再構築は未検証。個別の追加・運用確認は、以下の各運用文書を参照 |
 
 2026-10-25に運用者は現行構成の通し再構築の実証を見送り、未実証のriskを受け入れた。
 再実証は未実施。普段の更新では行わず、[実証し直す契機](#通し再構築を実証し直す契機)に従う。
@@ -45,6 +45,7 @@ VM内の状態を引き継ぐものではない。詳細な設定・操作・受
 | [Open WebUI](open-webui.md#再deploy) | Compose・NFS mount。DB・ユーザー設定・署名鍵は既存NFSデータから利用 | NFS directory・marker・既存データの復旧、DGX APIとlogin/chatの確認 | VM内に復元すべき永続dataはない。NFS上のDB・署名鍵は保護対象 |
 | [SearXNG / MCP](searxng.md#再deploy) | 設定・container、instance secretの再生成、空cache。MCPはstateless | 外部検索先、MCP呼出し、Open WebUIの検索連携の確認 | cache、旧instance secret |
 | [sparkDash](sparkdash.md#永続化backup復旧) | image・空config volume、暗号化runtime bundleからtoken・任意SSH鍵を再配置 | DGX account/authorized_keysの準備、UIで2台を再登録、fingerprint照合、登録後再起動 | unit/settings/history/known_hosts、volume内に保存したsecret等。保存内容が増えたらbackup方針を見直す |
+| [hf-downloader](hf-downloader.md) | Gitの設定・DAG・helper、空のDagu状態volume、任意token（省略時は空file）の再配置 | 既存ai mount・marker・書込権限の確認、デプロイ直後の`/setup`で管理者作成、必要な取得の再投入 | Daguの管理者・実行履歴・ログ・キュー・HF_HOME・ロック（backup対象外）。ai上のモデル・データセットは再取得可能でsnapshot対象外 |
 | [Homepage](homepage.md#ログと復旧) | Gitの静的設定、Gatus共用Basic Authの再配置、tmpfs | 画面・リンクの確認 | tmpfs上のlogs・生成ファイル |
 | [Gatusの永続化](application-lifecycle.md#通常のreconcile) | Git設定・通知credential、空SQLite volume | 障害・復旧通知の受入 | 監視履歴・alert状態（backup対象外） |
 
@@ -60,6 +61,7 @@ named volumeはNFSデータやTerraform stateからは復元されない。正�
 | samba | `samba-state` / `/var/lib/samba`、`samba-logs` / `/var/log/samba` | ログは戻らない。identityの再生成は2026-10-12に[compose.yaml](../../files/services/compose/samba/compose.yaml)が固定するimageの`/usr/local/bin/docker-entrypoint.sh`を読んで確認済み。起動のたびに`/var/lib/samba`の`passdb.tdb`・`secrets.tdb`・`group_mapping.tdb`・`*.tdb`を削除し、Gitの`config/users.json`の`localSid`を`net setlocalsid`で設定する。group / userのuid・gid・ridと`/run/samba-secrets`のpasswordから同じidentityを再生成する。共有設定はGitの`config/smb.conf`、passwordはsecrets roleから再配置する |
 | searxng | `searxng-cache` / `/var/cache/searxng` | 喪失を許容するcache（[SearXNG運用](searxng.md#構成)） |
 | sparkdash | `sparkdash-config` / `/app/config` | unit/settings/history等。[backup・復旧方針](sparkdash.md#永続化backup復旧)に従う |
+| hf-downloader | `dagu-state` / `/var/lib/dagu` | 管理者・履歴・ログ・キュー・HF_HOME・ロック。backupせず喪失を許容し、再deploy後に`/setup`と再投入を行う |
 | monitoring | `gatus` / `/data` | 監視履歴・alert状態。backup対象外（[共通手順](application-lifecycle.md#通常のreconcile)） |
 
 Samba imageを更新した場合は、上表の再生成動作を再確認する必要がある。
@@ -68,8 +70,9 @@ VM backupも無かった。`/etc/pve/jobs.cfg`は存在せず、`/etc/pve/vzdump
 `pvesm list <storage> --content backup`は`local` / `local-lvm` / `vmpool`とも0件、
 `/var/lib/vz/dump`は空だった。`storage.cfg`にPBS / NFS / CIFSのbackup先も無い。
 Apps VMはrepoから機能を再構築する方針とし、VM backupを取らない。
-2026-10-25の見送り判断では、現行構成の通し再構築が未実証であることと、以下の喪失を受け入れる。
-diskとともに失うのはAdGuardの統計・query log、Sambaのログ、Gatusの履歴、sparkDashのunit登録などである。
+2026-10-25の見送り判断では当時の構成の通し再構築が未実証であることと、ローカルstateの喪失を受け入れた。
+現行設計ではhf-downloaderも含め、以下の喪失を許容する。
+diskとともに失うのはAdGuardの統計・query log、Sambaのログ、Gatusの履歴、sparkDashのunit登録、Daguの管理者・履歴・キュー・cacheなどである。
 [再構築性とbackupの方針](../architecture/target-state.md#再構築性とbackupの方針)に従い、
 上表の再生成・再配置はvolumeの復元とは区別する。
 
@@ -419,10 +422,10 @@ VM boot成功やcontainerがhealthyになっただけでは復旧完了とはみ
 
 | 対象 | 完了条件 |
 | --- | --- |
-| 宣言・稼働状態 | 現行11 projects / 12 servicesすべてが稼働し、image digestがGit宣言と一致。管理端末・VM checkout・Ansible描画物の版が整合し、reconcileとdead-man timerが動作する |
+| 宣言・稼働状態 | 現行12 projects / 13 servicesすべてが稼働し、image digestがGit宣言と一致。管理端末・VM checkout・Ansible描画物の版が整合し、reconcileとdead-man timerが動作する |
 | NFS・既存データ | 9 mountのsource・mode・markerが宣言どおりで、writerが競合しない。stashPad prod/stagingの操作とmetadata分離、SillyTavernの会話・設定保存、Open WebUIの既存user・chat履歴とDGX経由のchatを確認する |
 | LAN / tailnet | 両経路でDNSの通常解決・内部rewrite・block/allowlist、全公開FQDNのHTTPS/TLS・認証、既存userによるSMB全shareのread/writeを確認。tailnet IPの固定・direct到達とNFSがeth0を通ること、許可外networkからの遮断も確認する |
-| 追加機能・外部依存 | SearXNG検索・MCP呼出し・Open WebUIの検索連携、sparkDashの2台再登録・fingerprint照合・登録後再起動、Homepageの画面・リンクを各runbookで確認。ElastiFlow等の外部upstreamは別途復旧し、Caddy経由の到達を確認する |
+| 追加機能・外部依存 | SearXNG検索・MCP呼出し・Open WebUIの検索連携、sparkDashの2台再登録・fingerprint照合・登録後再起動、Homepageの画面・リンク、hf-downloaderの管理者作成・Enqueue・排他・保存先・任意tokenを各runbookで確認。ElastiFlow等の外部upstreamは別途復旧し、Caddy経由の到達を確認する |
 | 通知 | Gatusの障害・復旧Discord通知、Healthchecks.ioのdead-man断・復帰を確認。project内の一部service（MCP等）だけの停止もdead-manが検出することを確認する |
 | 再起動・起動拒否 | reboot後に9 mountと全serviceが自動復旧する。mount欠落・不正なsource/mode・marker異常時はアプリ起動を拒否し、空のbind sourceへ書き込まない |
 

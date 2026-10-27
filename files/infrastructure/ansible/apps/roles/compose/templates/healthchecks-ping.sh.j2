@@ -61,7 +61,7 @@ compose() {
     --file "$repo/files/services/compose/$project/compose.yaml" "$@"
 }
 
-for project in edge dns samba stashpad-prod stashpad-staging sillytavern open-webui searxng sparkdash homepage monitoring; do
+for project in edge dns samba stashpad-prod stashpad-staging sillytavern open-webui searxng sparkdash hf-downloader homepage monitoring; do
   # Use the same active profiles as startup, without resolving secret env files.
   # All declared services are long-running; there are no one-shot exceptions.
   services=$(compose config --no-env-resolution --services) \

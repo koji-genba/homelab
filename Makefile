@@ -320,6 +320,10 @@ compose-reconcile-fixture:
 mover-test:
 	./scripts/tests/mover-fixture.sh
 
+.PHONY: hf-downloader-test
+hf-downloader-test:
+	$(TOOLBOX_RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/tests/hf-downloader-test.py
+
 shellcheck:
 	$(TOOLBOX_RUN) shellcheck scripts/*.sh scripts/tests/*.sh
 

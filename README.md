@@ -23,6 +23,7 @@ Proxmox VE 192.168.10.11
 │   ├── Open WebUI
 │   ├── sparkDash (DGX remote monitor)
 │   ├── SearXNG + MCP
+│   ├── hf-downloader (モデル・データセット取得キュー、初回反映は未実施)
 │   ├── Homepage (サービスリンク集)
 │   └── Gatus + Healthchecks.io dead-man
 ├── Tailscale gateway                 192.168.10.102
@@ -31,7 +32,7 @@ Proxmox VE 192.168.10.11
 └── Hermes Runner VM                  192.168.10.105 (実行・隔離ブラウザ、repo定義・未構築)
 ```
 
-Compose定義は11 projects / 12 servicesです。sparkDashの初回反映は[運用手順](docs/operations/sparkdash.md)に従います。
+Compose定義は12 projects / 13 servicesです。sparkDashの初回反映は[運用手順](docs/operations/sparkdash.md)に従います。
 
 Hermesの常駐エージェントはApps VMとは別の2台（Agent VM / Runner VM）で動かします。両VMともtailnetには参加せず、
 Apps VMの15分reconcileの対象外で、`make ansible-apply-agent`で手動反映します。初回構築と運用は
@@ -66,6 +67,7 @@ VLAN 10はServer、20はTrusted、30はIoT、40はGuestです。VLAN 11と63は�
 - [Open WebUI運用](docs/operations/open-webui.md)
 - [SearXNG / MCP運用](docs/operations/searxng.md)
 - [sparkDash運用](docs/operations/sparkdash.md)
+- [hf-downloader運用](docs/operations/hf-downloader.md)
 - [Hermes Agent運用](docs/operations/hermes-agent.md)
 - [Hermes Agentバックアップ運用](docs/operations/hermes-agent-backup.md)
 - [Homepage運用](docs/operations/homepage.md)
@@ -104,7 +106,9 @@ scripts/                         # preflight、rollback、state backup/restore
 カスタムイメージは [caddy-image.yml](.github/workflows/caddy-image.yml) と
 [sparkdash-image.yml](.github/workflows/sparkdash-image.yml) でGHCRへ公開します。
 sparkDashはDGXのremote monitorとしてComposeに登録し、公開imageのdigestを固定します。
-上流更新とComposeのdigest更新は別の変更で行います。
+hf-downloaderは[dagu-hf-image.yml](.github/workflows/dagu-hf-image.yml)でDagu + Hugging Face CLIのimageを公開します。
+上流更新とComposeのdigest更新は別の変更で行います。hf-downloaderは公開後にdigestを固定するまでdraftとし、
+初回反映は[hf-downloader運用](docs/operations/hf-downloader.md)に従います。
 Hermesの自前イメージ（`homelab-hermes-agent` / `homelab-memory-db`）は
 [hermes-agent-image.yml](.github/workflows/hermes-agent-image.yml) と
 [memory-db-image.yml](.github/workflows/memory-db-image.yml) で公開し、同じくdigestを固定します。

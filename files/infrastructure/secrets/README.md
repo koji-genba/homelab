@@ -88,7 +88,7 @@ bundleのpathはAnsibleの`runtime_secrets_file`で指定する。配置の実�
 runtime secretやAdGuard設定が変わると`secrets_runtime_changed`が立ち、
 [Compose role](../ansible/apps/roles/compose/tasks/main.yml)がcutover有効時に
 `HOMELAB_FORCE_RECREATE=true`で`homelab-compose-up all`を実行する。
-宣言済みの全11 projectsがforce-recreateされ、DNS・SMBも短時間途切れる。
+宣言済みの全12 projectsがforce-recreateされ、DNS・SMBも短時間途切れる。
 
 `runtime.sops.yaml`はapplication cutoverを有効化する前に必要になる。それまでのフェーズ1 bootstrapでは
 secretを復号せず、containerも起動しない。
@@ -99,3 +99,22 @@ sparkDashの必須token（`sparkdash.token`）は64桁の16進文字列として
 uid/gid `10001:10001`、mode `0400`で配置する。directoryは`0500`で、read-only mountする。
 任意keyを省略/空にしてapplyすると配置済み鍵を削除する。生成・SOPS編集・反映順序は
 [sparkDash運用](../../../docs/operations/sparkdash.md)を参照する。
+
+## 任意のHugging Face token
+
+`hf_downloader.token`はprivate/gated repository向けの任意のread tokenである。keyまたは
+`hf_downloader`自体を省略してもよい。省略/空でapplyすると、既存の値も空に戻す。
+secrets roleは`/etc/homelab/secrets/hf-downloader/hf-token`を常に配置し、uid/gid `10002:10002`、
+file mode `0400`、directory mode `0500`とする。containerへはdirectoryをread-only bindする。
+
+既存bundleへ追加するときは上記「既存bundleの編集」の`sops_toolbox`を使い、次のkeyを設定する。
+以下は形式だけの例であり、実値をlogやGitへ残さない。
+
+```sh
+sops_toolbox set files/infrastructure/secrets/runtime.sops.yaml '["hf_downloader"]["token"]' '"<Hugging Face read token>"'
+```
+
+同じ手順で`chmod 0600`、復号確認、暗号化bundleのreviewを行い、checkout更新後に明示適用する。
+tokenの追加・変更・空への変更でも`secrets_runtime_changed`が立ち、全12 projectsが再作成される。
+Daguの初期管理者はbundleに含めず、デプロイ直後に`/setup`で作成する。
+初回反映・確認は[hf-downloader運用](../../../docs/operations/hf-downloader.md)を参照する。
