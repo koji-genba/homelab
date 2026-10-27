@@ -13,7 +13,7 @@
 モデル・データセット本体は再取得可能で、ai共有は既存どおりsnapshot対象外とする。
 Daguの管理者・実行履歴・ログ・キュー・HF_HOME・ロックはApps VMローカルの`dagu-state` named volume（`/var/lib/dagu`）に置き、
 backupせず喪失を許容する。喪失時は再deploy後すぐに`/setup`で管理者を作り、必要な取得を再投入する。
-image公開とdigest固定を先に行い、初回反映は同運用手順に従う。
+2026-10-27に本番反映し、2026-10-28の受け入れ結果は同運用手順に記録した。
 
 HTTP(S)のentry pointはedge projectだけで、DNSとSMBは必要なhost portだけを公開する。
 内部名はApps VMのtailnet IPへ解決される（[ADR-0007](../../../docs/adr/0007-apps-vm-tailnet-dns.md)）。

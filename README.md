@@ -23,7 +23,7 @@ Proxmox VE 192.168.10.11
 │   ├── Open WebUI
 │   ├── sparkDash (DGX remote monitor)
 │   ├── SearXNG + MCP
-│   ├── hf-downloader (モデル・データセット取得キュー、初回反映は未実施)
+│   ├── hf-downloader (モデル・データセット取得キュー)
 │   ├── Homepage (サービスリンク集)
 │   └── Gatus + Healthchecks.io dead-man
 ├── Tailscale gateway                 192.168.10.102
@@ -107,8 +107,8 @@ scripts/                         # preflight、rollback、state backup/restore
 [sparkdash-image.yml](.github/workflows/sparkdash-image.yml) でGHCRへ公開します。
 sparkDashはDGXのremote monitorとしてComposeに登録し、公開imageのdigestを固定します。
 hf-downloaderは[dagu-hf-image.yml](.github/workflows/dagu-hf-image.yml)でDagu + Hugging Face CLIのimageを公開します。
-上流更新とComposeのdigest更新は別の変更で行います。hf-downloaderは公開後にdigestを固定するまでdraftとし、
-初回反映は[hf-downloader運用](docs/operations/hf-downloader.md)に従います。
+上流更新とComposeのdigest更新は別の変更で行います。hf-downloaderは2026-10-27に本番反映し、
+2026-10-28の受け入れ結果は[hf-downloader運用](docs/operations/hf-downloader.md)に記録しています。
 Hermesの自前イメージ（`homelab-hermes-agent` / `homelab-memory-db`）は
 [hermes-agent-image.yml](.github/workflows/hermes-agent-image.yml) と
 [memory-db-image.yml](.github/workflows/memory-db-image.yml) で公開し、同じくdigestを固定します。

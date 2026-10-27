@@ -72,7 +72,7 @@ Proxmox pve1 192.168.10.11
 │   ├── Open WebUI                  内部Docker network
 │   ├── SearXNG / mcp-searxng       内部Docker network
 │   ├── sparkDash                   内部Docker network -> DGX (SSH/HTTP)
-│   ├── hf-downloader               内部Docker network（初回反映は未実施）
+│   ├── hf-downloader               内部Docker network
 │   ├── Homepage                    内部Docker network
 │   └── Gatus                       内部Docker network
 ├── Hermes Agent VM (Debian 13)     192.168.10.104。Hermes + Hindsight + 記憶DB + TEI（tailnet外）
@@ -169,7 +169,7 @@ hf-downloaderはDagu + `hf download`でmodel/datasetを順次取得する。
 保存先は既存ai共有の`models/huggingface/`と`datasets/huggingface/`で、uid/gid `10002:10002`、
 file `0666` / directory `0777`とする。本体は再取得可能で、ai共有はsnapshot対象外のままである。
 任意tokenはSOPSから再配置し、省略時も空fileを配置する。初回反映はimageの公開・digest固定を先に済ませ、
-[hf-downloader運用](../operations/hf-downloader.md)に従う。本番反映・受入は未実施である。
+[hf-downloader運用](../operations/hf-downloader.md)に従う。2026-10-27に本番反映し、2026-10-28の受け入れ結果を同文書に記録した。
 
 ### NFS export契約
 

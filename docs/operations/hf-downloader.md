@@ -1,6 +1,6 @@
 # HF downloader運用
 
-- 状態: ローカルのbrowser・queue・重み取得・停止/再投入を検証済み。公開imageのdigest反映待ち。実機での初回反映・NFS上の動作は未検証
+- 状態: 2026-10-27に本番反映、2026-10-28にNFSへの取得・権限・token使用を確認。ローカルではbrowser・queue・重み取得・停止/再投入も検証済み。本番での未検証項目は受け入れ確認に記録
 - 対象: `hf-downloader` Compose project（`https://hf-downloader.kojigenba-srv.com`）
 - 関連: [アプリ更新・promotion・rollback](application-lifecycle.md)、[NFS export契約](nfs-export.md)、
   [DGX Sparkストレージ運用](dgx-storage.md)
@@ -40,7 +40,7 @@ v2.22.4はIPと単一ラベル名を既定許可するため、内部health用�
 6. 失敗・停止runは**DAG全体のRetry**を使う。同じRun IDで再度queueへ入る。
    パラメータを変えたいときは新しくEnqueueする。
 
-上記のbrowser操作は試験用Caddy越しのheadless Chromiumで確認済み。実機での受け入れは未検証。
+上記のbrowser操作は試験用Caddy越しのheadless Chromiumで確認済み。本番での確認範囲は下の受け入れ結果を参照する。
 
 | パラメータ | 既定値 | 意味 |
 | --- | --- | --- |
@@ -105,7 +105,7 @@ directoryは10002:10002、0500で、directory全体をro bindする。bundleに�
 `HF_TOKEN_PATH`で読むためtokenの値を環境変数へ展開しない。bundle追加を含むsecret変更は
 **全projectを再作成する**ので、実行中ジョブを終えてから行う。
 
-## 初回反映（実機では未検証）
+## 初回反映（2026-10-27実施）
 
 1. imageだけのPRを作る。Dockerfile、requirements、公開workflow、Dependabot設定を含める。
    PRのbuild成功を確認してmergeし、GHCRへの公開とjob summaryの実在するdigestを確認する。
@@ -120,6 +120,19 @@ directoryは10002:10002、0500で、directory全体をro bindする。bundleに�
    DNS等を反映する。全projectが再作成され、実行中の取得も停止する。
 5. `/setup`で管理者を作り、下の受け入れ確認を行う。先行する監視設定は起動までdownになり得る。
 
+2026-10-27の反映記録:
+
+- PR #145をmergeし、CIが`ghcr.io/koji-genba/dagu-hf:2.22.4-hf2.3.0`を公開。GHCRは最初からpublicで、
+  認証なしのmanifest取得・digest指定pullを確認後、PR #146でdigestを固定してmergeした。
+- Apps VMのreconcileでdns / edge / homepage / monitoringを再作成し、すべてsuccess。
+  続く`make ansible-apply`はfailed=0。AdGuard・secretの変更で全projectを再作成し、
+  hf-downloaderのhealthy、Git宣言とdigest一致、token fileの10002:10002 / 0400・非空を確認した。
+- 手順に無かった`/setup`の`host ... is not allowed`が発生した。v2.22.4のbuiltin認証は
+  `POST /api/v1/auth/setup`だけでHostを検査する。PR #155で`public_url`を設定し、
+  reconcileでhf-downloaderだけを再作成して解消、管理者を作成した。
+- Caddy経由（LAN IP指定）でhealth 200、未認証API 401、直接Start・start-sync・`/mcp` 403、
+  `/setup` 200を確認。AdGuardで`*.hf.co`（Xet・LFS・CDN）の名前解決も確認した。
+
 ## 更新
 
 Dagu / huggingface_hubを上げるときもimage PRとdigest反映PRを分ける。
@@ -133,7 +146,9 @@ Caddyの許可ルールを見直す。ローカルで認証・権限・3件queue
 helper/DAG/config変更もreconcileでcontainer再作成になる。image用directoryだけの変更では再作成しない。
 公開後にComposeのdigestを変更して初めて新しいimageへ切り替わり、取得を中断する。
 
-## 受け入れ確認（実機では未検証）
+## 受け入れ確認（2026-10-28実施・一部未検証）
+
+以下は確認手順。今回の本番での確認範囲は後述の結果を参照する。
 
 1. healthが200、未認証のDAG一覧が401、ログイン後に`hf-download`だけが表示されることを確認する。
 2. `hf-internal-testing/tiny-random-bert`を`include=config.json`でEnqueueし、modelsの正しいpathへ保存されることを確認する。
@@ -142,6 +157,18 @@ helper/DAG/config変更もreconcileでcontainer再作成になる。image用dire
 5. 存在しないrepoを投入し、失敗ログを読んでDAG全体Retryがqueueへ戻ることを確認する。
 6. 実行中runをStopし、次のrunが進むことを確認する。Caddy経由のStartが403になり、step Retryもlockで直列化されることを確認する。
 7. GatusのhealthとHomepageリンクを確認する。
+
+2026-10-28の本番受け入れ結果:
+
+- `Qwen/Qwen2.5-0.5B-Instruct`を`include=*.json`で取得し、json 5 fileだけを
+  `models/huggingface/Qwen/Qwen2.5-0.5B-Instruct/`へ保存。10002:10002、file 0666 / directory 0777、
+  `.incomplete`残り0件、ログのargv・保存先・清掃件数を確認した。
+- gated（auto）の`orcarouter/Qwen3.8-Flash-Next-Uncensored-GGUF`を`include=*.md`で取得し、
+  `README.md`を保存。未認証警告0件でtoken使用を確認し、Daguのログ・データにtokenらしき文字列は0件だった。
+- HomepageのDaguリンクとアイコン表示を運用者が確認した。Gatusのhf-downloader監視は直近5回とも成功していた。
+
+本番では、複数ジョブを積んだときの直列実行（ローカルでは確認済み）、Stopと再開、存在しないrepoの失敗とDAG全体Retry、
+大きなモデルの取得、gatedの手動承認型repoは未検証。
 
 ## ローカル検証（2026-10-26〜27）
 
@@ -165,7 +192,7 @@ Docker Desktop / WSL2の偽ai bindを使用し、mount種別だけ試験用overr
 
 作業端末ではAdGuardのURL shortenerリストが`*.hf.co`をNXDOMAINにするため、試験用overrideだけに
 `dns: [1.1.1.1, 8.8.8.8]`を指定した。通常設定のXetで重み取得が成功し、HTTP fallbackは使っていない。
-本番Apps VMは既存のupstream DNSを使う。実機での名前解決・取得は未検証。
+本番Apps VMは既存のupstream DNSを使う。2026-10-27にAdGuardで`*.hf.co`（Xet・LFS・CDN）の名前解決を確認し、翌日に本番での取得を確認した。
 初回の実取得試験の受信量は停止前1.31GB、再起動後約1.46GBで、合計3GB以内。
 清掃追加試験の受信量は504,488,197 bytesで1.5GB以内。いずれも取得物は試験後に削除済み。
 
