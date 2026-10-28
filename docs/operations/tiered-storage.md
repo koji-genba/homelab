@@ -69,7 +69,14 @@ mergerfsを通さない直接経路として維持。大事なデータのコピ
 
 `inodecalc=path-hash`: moverによってファイルがSSD→HDDに移動してもinode値が変わらない。NFS経由でstale handleが出るのを防ぐ。
 
-`noforget`: NFSのファイルハンドルの安定性のため、2026-10-29に手順へ追加した。実機への反映にはmergerfsのマウントし直しが必要で、未反映。
+`noforget`: NFSのファイルハンドルの安定性のため、2026-10-29にpve1のfstabへ追加し、mergerfsをマウントし直して反映済み。
+mergerfsプロセスの引数に`noforget`があることと、markerを確認した。
+
+マウントし直す際はApps VMを停止し、pve1で`exportfs -u`の後に`exportfs -f`で
+カーネルのNFS exportキャッシュを破棄してから`umount /mnt/shared`する。
+2026-10-29の保守では、`exportfs -u`だけではキャッシュがマウントを参照し続け、
+ユーザー空間のプロセスが掴んでいなくても`umount`がbusyになった。
+再マウント後は`exportfs -ra`で再exportしてからApps VMを起動する。
 
 `x-systemd.requires=zfs-mount.service`: `zfs-mount.service`へのRequires / After依存を加え、
 ZFSより先にmergerfsがmountされるのを防ぐ。2026-10-27にpve1へ反映し、再起動で順序を確認した。
