@@ -262,6 +262,29 @@ Windows → SambaをLANのIPで接続し、1GbEで2026-10-29に計測した。
 比較用の`shared-hdd`は`sync`のままで、逐次コピーは8MiBで約31MB/s、40MiBで約54MB/s、300KiBで約2.4MB/s。
 2回の計測で同等だった。
 
+### 01:06〜01:09 JSTの保守後の再計測
+
+後述の3件の設定変更を反映後、同じくWindows → Samba、LANのIP、1GbEで計測した。
+`shared`は`async`のまま、`shared-hdd`は`sync`のままである。
+逐次コピー列の括弧内は1ファイルの所要時間の中央値。
+
+| sharedのファイルサイズ | 変更前（asyncのみ）の逐次コピー | 変更後の逐次コピー | 変更前の /MT:8 | 変更後の /MT:8 |
+| --- | --- | --- | --- | --- |
+| 8MiB | 89MB/s（86ms/個） | 92MB/s（88ms/個） | 100MB/s | 102MB/s |
+| 40MiB | 99MB/s（424ms/個） | 100MB/s（417ms/個） | 106MB/s | 109MB/s |
+| 300KiB | 21MB/s | 24MB/s（9.4ms/個） | 29MB/s | 34MB/s |
+
+| shared-hddのファイルサイズ | 変更前の逐次コピー（sync） | 変更後の逐次コピー（sync） |
+| --- | --- | --- |
+| 8MiB | 約31MB/s | 34MB/s |
+| 40MiB | 約54MB/s | 56MB/s |
+| 300KiB | 約2.4MB/s | 2.9MB/s |
+
+各条件のスループットは数値上改善し、悪化は見られなかった。ただし改善幅は計測の揺らぎと同程度で、
+この3件の設定変更の効果とは断定できない。全体スループットと1ファイルの中央値は別の指標である。
+
+### pve1上の経路別計測（保守前）
+
 Linux側はpython3の計測スクリプトで、段ごとに測った。次の表はpve1上でファイルごとにfsyncした場合の
 **1ファイルの合計所要時間の中央値**であり、fsync呼び出しだけの時間ではない。
 
@@ -285,19 +308,31 @@ Linux側はpython3の計測スクリプトで、段ごとに測った。次の�
 - pve1ローカルのcloseだけでは永続化を待たない。段ごとの比較ではfsyncの有無を分け、
   ファイルごとの中央値とRPCの平均RTTを混同しない。
 
-## 2026-10-29に併せて用意した設定変更
+## 2026-10-29に併せて反映した設定変更
 
-次の3件をrepoの設定・手順へ反映した。実機反映は未実施で、変更後の計測は別途行う。
+2026-10-29 01:06〜01:09（JST）の保守で、次の3件をpve1とApps VMへ反映した。
+Apps VMの停止時間は約3分だった。
 
 - **NFS向けの`noforget`**: [mergerfsのfstab手順](tiered-storage.md#etcfstabmergerfsマウント)に`noforget`を追加した。
-  NFSのファイルハンドルの安定性のためで、実機反映にはSambaを止めてmergerfsをマウントし直す必要がある。
+  NFSのファイルハンドルの安定性のためで、pve1のfstabにも追加し、`/mnt/shared`をマウントし直した。
+  mergerfsプロセスの引数に`noforget`があることと、markerを確認した。
 - **Apps VMのNICの`queues`**: `files/infrastructure/terraform/apps-vm/main.tf`の1つ目の`network_device`に
   `queues = 4`を追加した。4 vCPUに合わせ、2026-07のmultiqueue=4という記録との食い違いを解消する。
   固定版bpg/proxmox 0.117.0の[公式資料](https://github.com/bpg/terraform-provider-proxmox/blob/v0.117.0/docs/resources/virtual_environment_vm.md)で対応を確認した。
-  実機ではnet0へ同じ値を先行設定し、Apps VMを再起動する。任意のlegacy NICは現在不要で既定無効のため変更しない。
+  実機では`qm set`でnet0へTerraformの定義と同じ`queues=4`を設定し、起動後の`eth0`がrx/txとも4キューであることを確認した。
+  `terraform plan`で差分が出ないことは未確認。
 - **SambaのTCPバッファ**: `smb.conf`の`socket options`行を削除した。
   [公式資料](https://www.samba.org/samba/docs/current/man-html/smb.conf.5.html#SOCKETOPTIONS)が固定バッファによる
   自動調整の無効化を警告しているため、カーネルの自動調整に任せる。Sambaの既定は`TCP_NODELAY`。
+  PR #159のマージ後、Appsのreconcileで反映し、`testparm`で既定値になったことを確認した。
+
+保守はAppsのreconcile → Apps VMの停止 → pve1で`exportfs -u` → `umount` → fstabの変更 →
+`mount` → `exportfs -ra` → `qm set` → Apps VMの起動の順で実施した。
+
+**mergerfsをマウントし直す際の注意**: 今回はApps VMを停止して`exportfs -u`した後も、
+`umount /mnt/shared`がbusyになった。`fuser`ではkernel mountだけが見え、ユーザー空間のプロセスは
+掴んでいなかった。カーネルのNFS exportキャッシュがマウントを参照していたため、
+`exportfs -u`の後に`exportfs -f`でキャッシュを破棄してから`umount`すると成功した。
 
 ## 残課題
 
