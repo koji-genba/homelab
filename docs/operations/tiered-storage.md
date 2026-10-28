@@ -15,6 +15,12 @@ pve1上のtank-gen2に対してSSDライトキャッシュ層をmergerfsで構�
 読み込み  → /mnt/shared から透過的にアクセス（SSD・HDD問わず）
             tank-gen2のread cache → M8VC L2ARC (476GB)
 
+tank-gen3 (Seagate BarraCuda 24TB ×2 mirror)
+  ├─ data/ai       → DGX / Apps（SSDキャッシュ・mover対象外）
+  └─ data/archive  → Apps Samba（通常readonly、verified snapshot）
+tank-gen1 → アーカイブの2つ目のコピーの置き場にする案（未決定）
+vmpool → VM disk
+
 pve1 /mnt/shared (NFS export)
   → Apps VM /srv/homelab/nfs/shared
   → Compose Samba container /mnt/shared → Windows SMB
@@ -29,6 +35,9 @@ SMB経路の宣言は`files/infrastructure/ansible/apps/group_vars/apps.yml`の`
 |---|---|---|
 | cache-pool | KIOXIA EXCERIA SATA SSD ×2 (mirror) | mergerfsライトキャッシュ |
 | tank-gen2 | Toshiba N300 ×2 (mirror) | 実体ストレージ |
+| tank-gen3 | Seagate ST24000DM001 24TB ×2 (mirror) | ai・archive。運用は[tank-gen3](tank-gen3.md) |
+| tank-gen1 | Toshiba MD04ACA400 ×2 (mirror) | アーカイブの2つ目のコピーの置き場にする案（未決定） |
+| vmpool | WD_BLACK SN770 1TB | VM disk |
 | M8VC | Plextor PX-512M8VC 476GB | tank-gen2 L2ARC |
 | /mnt/shared | mergerfs union mount | クライアントから見えるパス |
 
@@ -122,7 +131,8 @@ modeやmtimeは元のSSDディレクトリが削除されていると復元元�
 ## ZFS snapshotポリシー
 
 対象: `tank-gen2/data/shared`のみ（moverスクリプトの`DATASET`で指定し自動取得）。
-`cache-pool`上の残存ファイル、`ai`、`archive`、`k8s-volumes`、VM内named volumeは含まれない。
+この自動取得には`cache-pool`上の残存ファイル、`ai`、`archive`、`k8s-volumes`、VM内named volumeは含まれない。
+`archive`は別途、投入・検証ごとに`@verified-YYYYMMDD`を手動取得する。
 snapshotは同じdataset上の世代保持であり、backupと同義ではない。SSDに残るファイルの復旧方針と、
 pool喪失に備える別媒体へのbackupは別に確認する。保持世代の正は同スクリプトのprune処理である。
 

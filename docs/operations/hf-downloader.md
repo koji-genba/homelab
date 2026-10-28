@@ -15,6 +15,7 @@ browser -> Caddy (TLS, admin_networksと同じ到達元制限)
 Dagu scheduler -> hf-download queue (max_concurrency=1)
                -> Python helper -> ローカルflock -> hf download --local-dir
 named volume: /var/lib/dagu (認証・履歴・ログ・キュー・HF_HOME・lock)
+NFS server: 192.168.10.11:/mnt/tank-gen3/data/ai
 NFS ai: /srv/homelab/nfs/ai -> /data/ai (ro、marker確認)
   models   -> /data/ai/models   (rw)
   datasets -> /data/ai/datasets (rw)

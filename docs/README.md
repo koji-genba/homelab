@@ -31,6 +31,7 @@
 
 ## ストレージ・性能
 
+- [tank-gen3運用](operations/tank-gen3.md): ai・archive mirrorのプロパティ、監視、scrubとreadonly運用。
 - [Tiered Storage](operations/tiered-storage.md): mergerfsのSSD書き込み層、moverとZFS snapshotの運用。
 - [SMB転送速度トラブルシューティング](operations/smb-performance-troubleshooting.md): Tailscale経路とcache-poolのTRIMに関する調査記録。
 

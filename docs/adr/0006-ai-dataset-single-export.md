@@ -66,3 +66,9 @@ DGX Sparkを2台（4TB SKUと1TB SKU）導入し、GE2 port 3/4のServer VLAN 10
 - 1GbE（実効110MB/s）が前提となるため、運用側で次を守る。tar.gzはNFS上で展開せずDGXの
   ローカルNVMeへ展開する。`HF_HOME`/`HF_HUB_CACHE`はNFSへ置かない。2台分のstagingは
   4TB機を起点とし、1TB機はDGX間のQSFP直結経路から読む
+
+## 配置の変更
+
+[ADR-0010](0010-tank-gen3-cold-pool.md)でserver側の配置を`tank-gen3/data/ai`へ変更する。
+上記は採用時の記録として保持し、現行のexport契約・運用は[NFS export契約](../operations/nfs-export.md)と
+[tank-gen3運用](../operations/tank-gen3.md)を参照する。

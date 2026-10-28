@@ -5,7 +5,7 @@
 - export契約: [NFS export契約](nfs-export.md#ai-dataset-exportadr-0006)
 - 対象: DGX Spark 2台（4TB機 `192.168.10.51`、GE2 port 3 / 1TB機 `192.168.10.52`、GE2 port 4）
 
-DGX Spark 2台から使うモデルと学習データ（tar.gz）の置き場を、`tank-gen2/data/ai`の単一NFS export
+DGX Spark 2台から使うモデルと学習データ（tar.gz）の置き場を、`tank-gen3/data/ai`の単一NFS export
 として用意する。read-only exportもclientごとの分割も行わず、Apps VMとDGX 2台が同じ条件でmountする。
 
 ## 前提
@@ -16,6 +16,8 @@ DGX Spark 2台から使うモデルと学習データ（tar.gz）の置き場を
   （[ADR-0003](../adr/0003-four-network-zones.md)）
 - Port 3/4はすでにVLAN 10 accessであり、`config.txt`の変更も不要
 
+既存データの移行では新規作成・chmodを再実行せず、[tank-gen3運用](tank-gen3.md)の受信・切り替え条件に従う。
+
 ## 手順A: pve1（`192.168.10.11`、rootで実行）
 
 この手順は初回作成用であり、dataset作成やexports追記をそのまま再実行しない。
@@ -25,19 +27,21 @@ DGX Spark 2台から使うモデルと学習データ（tar.gz）の置き場を
 cp -a /etc/exports /etc/exports.bak.$(date +%F)
 exportfs -v > /root/exportfs-before-$(date +%F).txt
 
-zfs create -o recordsize=1M tank-gen2/data/ai
-mkdir -p /mnt/tank-gen2/data/ai/models /mnt/tank-gen2/data/ai/datasets
-chmod -R 0777 /mnt/tank-gen2/data/ai
+zfs create -o recordsize=1M tank-gen3/data/ai
+mkdir -p /mnt/tank-gen3/data/ai/models /mnt/tank-gen3/data/ai/datasets
+chmod -R 0777 /mnt/tank-gen3/data/ai
 
-# marker本体は0644のままにして、非rootから上書きされないようにする
-printf 'ai\n' > /mnt/tank-gen2/data/ai/.homelab-export
+# marker本体は0644、所有者は既存の10002:10002を保持する
+printf 'ai\n' > /mnt/tank-gen3/data/ai/.homelab-export
+chown 10002:10002 /mnt/tank-gen3/data/ai/.homelab-export
+chmod 0644 /mnt/tank-gen3/data/ai/.homelab-export
 
 cat >> /etc/exports <<'EOF'
-/mnt/tank-gen2/data/ai           192.168.10.0/24(rw,sync,no_subtree_check,no_root_squash)
+/mnt/tank-gen3/data/ai           192.168.10.0/24(rw,sync,no_subtree_check,no_root_squash)
 EOF
 
 exportfs -ra
-exportfs -v | grep -F /mnt/tank-gen2/data/ai
+exportfs -v | grep -F /mnt/tank-gen3/data/ai
 ```
 
 `fsid`は指定しない。明示が要るのはFUSEの`/mnt/shared`と、それとinode空間を共有する
@@ -46,13 +50,13 @@ exportfs -v | grep -F /mnt/tank-gen2/data/ai
 確認：
 
 ```sh
-zfs get -o property,value recordsize,atime,compression tank-gen2/data/ai
+zfs get -o property,value recordsize,atime,compression tank-gen3/data/ai
 # recordsize=1M / atime=off / compression=lz4 を期待する
-ls -la /mnt/tank-gen2/data/ai
-cat /mnt/tank-gen2/data/ai/.homelab-export   # -> ai
+ls -la /mnt/tank-gen3/data/ai
+cat /mnt/tank-gen3/data/ai/.homelab-export   # -> ai
 ```
 
-`tank-gen2/data/ai`はsnapshot対象に含めない。`mover.sh`は`tank-gen2/data/shared`だけを見るため、
+`tank-gen3/data/ai`はsnapshot対象に含めない。`mover.sh`は`tank-gen2/data/shared`だけを見るため、
 追加設定は不要である。
 
 ## 手順B: Apps VM（管理端末から）
@@ -101,10 +105,13 @@ smbclient -L //192.168.10.101 -U koji-genba    # [ai] が見えること
 
 ## 手順C: DGX Spark 2台（4TB機・1TB機とも同じ）
 
+次の追記例は新規clientのみ。移行時はwriter停止、automount/mount停止、fstabの既存ai行の置換、
+daemon-reload、automount再開の順に行い、行を二重にしない。
+
 ```sh
 sudo mkdir -p /mnt/ai
 sudo tee -a /etc/fstab <<'EOF'
-192.168.10.11:/mnt/tank-gen2/data/ai  /mnt/ai  nfs4  hard,_netdev,nfsvers=4.1,noatime,rsize=1048576,wsize=1048576,timeo=600,retrans=2,nconnect=8,x-systemd.automount  0  0
+192.168.10.11:/mnt/tank-gen3/data/ai  /mnt/ai  nfs4  hard,_netdev,nfsvers=4.1,noatime,rsize=1048576,wsize=1048576,timeo=600,retrans=2,nconnect=8,x-systemd.automount  0  0
 EOF
 sudo systemctl daemon-reload
 ls /mnt/ai        # automountがここで張られる
@@ -149,6 +156,8 @@ uid/gid `10002:10002`で書く（file `0666` / directory `0777`）。モデル�
 ai共有は既存どおりsnapshot対象外とする。それ以外の配下構造は運用で決めてよく、exportは増やさない。
 
 ## 手動反映の記録
+
+以下は移行前の記録であり、当時の参照元を保持する。現行の参照元は上記手順の`tank-gen3`である。
 
 | 項目 | 値 |
 | --- | --- |
