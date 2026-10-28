@@ -57,16 +57,19 @@ moverスクリプトの末尾で、settle条件を満たして移動できたHDD
 
 **/mnt/tank-gen2/data/sharedのNFS exportも残す**
 mergerfsを通さない直接経路として維持。大事なデータのコピーやパフォーマンス比較用。
+`shared-hdd`は`sync`のまま維持し、2026-10-29に`async`へ変更した`shared`とは永続化の条件が異なる。
 
 ## 設定
 
 ### /etc/fstab（mergerfsマウント）
 
 ```
-/mnt/cache-sata:/mnt/tank-gen2/data/shared  /mnt/shared  fuse.mergerfs  defaults,cache.files=off,dropcacheonclose=false,category.create=ff,inodecalc=path-hash,func.getattr=newest,fsname=mergerfs-shared,x-systemd.requires=zfs-mount.service  0  0
+/mnt/cache-sata:/mnt/tank-gen2/data/shared  /mnt/shared  fuse.mergerfs  defaults,cache.files=off,dropcacheonclose=false,category.create=ff,inodecalc=path-hash,func.getattr=newest,fsname=mergerfs-shared,noforget,x-systemd.requires=zfs-mount.service  0  0
 ```
 
 `inodecalc=path-hash`: moverによってファイルがSSD→HDDに移動してもinode値が変わらない。NFS経由でstale handleが出るのを防ぐ。
+
+`noforget`: NFSのファイルハンドルの安定性のため、2026-10-29に手順へ追加した。実機への反映にはmergerfsのマウントし直しが必要で、未反映。
 
 `x-systemd.requires=zfs-mount.service`: `zfs-mount.service`へのRequires / After依存を加え、
 ZFSより先にmergerfsがmountされるのを防ぐ。2026-10-27にpve1へ反映し、再起動で順序を確認した。
@@ -77,6 +80,10 @@ poolの起動時importは全poolの個別`zfs-import@`を有効にする方式�
 ### /etc/exports
 
 client scope、option、fsidは[NFS export契約](nfs-export.md#実測された親export)を参照する。
+2026-10-29から`shared`（`/mnt/shared`）だけを`async`とし、ファイルごとのCOMMIT待ちを軽減した。
+pve1の異常停止時には完了応答済みの直近数秒程度の書き込みを失う危険を受け入れる。
+`shared-hdd`とほかのexportは`sync`を維持する。理由・計測・残課題は
+[2026-10の調査記録](smb-performance-troubleshooting.md#2026-10-小さめのファイルを大量に書くと速度が出ない)を参照する。
 FUSEファイルシステムはカーネルがfsidを自動取得できないため`/mnt/shared`に`fsid=100`を明示。
 `/mnt/tank-gen2/data/shared`にも`fsid=101`を明示して、NFS再起動・mergerfs再マウント後のstale file handleを避ける。
 既存4 exportはApps VMの`/32`へ制限し、DGXも使う`ai`だけを`/24`にする契約である。

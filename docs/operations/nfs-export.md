@@ -1,6 +1,7 @@
 # NFS export契約
 
 - 状態: marker・`ai` export反映済み。旧4 exportは2026-09-23にApps VM `/32`へ制限済み。`agent-backups` exportは2026-10-18に作成済み（client mount・backup確認済み）
+- `shared`は2026-10-29に`async`へ変更済み。`shared-hdd`とほかのexportは`sync`を維持。
 - サーバー: Proxmox/NFS host `192.168.10.11`
 - データ復旧: このリポジトリの対象外
 - 関連設計: [目標ストレージ契約](../architecture/target-state.md#storage-contract)
@@ -16,13 +17,14 @@
 2026-09-23にApps VMの`/32`へ狭め、`exportfs -v`で確認した。
 2026-10-12にpve1の`exportfs -v`で、既存4 exportの`192.168.10.101/32`、`ai`の`192.168.10.0/24`、
 `/mnt/shared`の`fsid=100`と`/mnt/tank-gen2/data/shared`の`fsid=101`が契約どおりであることを再確認した。
+以下の表はその後の変更を反映しており、`/mnt/shared`の`async`は2026-10-29の変更後の値である。
 
 | サーバーpath | client範囲 | 主要option（実測） | 固有option |
 | --- | --- | --- | --- |
 | `/mnt/tank-gen2/data/k8s-volumes` | `192.168.10.101/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | なし |
 | `/mnt/tank-gen1/data/archive` | `192.168.10.101/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | なし |
 | `/mnt/tank-gen2/data/shared` | `192.168.10.101/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid=101` |
-| `/mnt/shared` | `192.168.10.101/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid=100` |
+| `/mnt/shared` | `192.168.10.101/32` | `async,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid=100`（2026-10-29にasync化） |
 | `/mnt/tank-gen2/data/agent-backups` | `192.168.10.104/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid`なし（2026-10-18作成） |
 
 ## Apps VMの利用path
@@ -124,9 +126,15 @@ agent-vm / runner-vmともchanged=0、export root 0700を維持し、健康確�
 `192.168.10.0/24`のままとする。Server VLAN内を同一trust boundaryとして扱う
 [ADR-0003](../adr/0003-four-network-zones.md)の前提に従い、host単位の`/32`へは狭めない。
 
-基本optionは `rw,sync,no_subtree_check,no_root_squash` とする。client mount optionへ`sync`は付けない。
+基本optionは `rw,sync,no_subtree_check,no_root_squash` とする。ただし`shared`（`/mnt/shared`）は
+2026-10-29から`rw,async,no_subtree_check,no_root_squash,fsid=100`とする。client mount optionへ`sync`は付けない。
 `no_root_squash`は既存UID/GIDとの初期互換性のためで、移行後の所有者検証を終えたら
 `root_squash`へ狭められるか再評価する。
+
+`shared`の変更は、ファイルごとのNFS COMMITがmergerfsのfsyncを待つ時間を減らすためである。
+pve1の異常停止時には、完了応答済みの直近数秒程度の書き込みを失う危険を受け入れる。
+主用途は元ファイルがPCに残るコピーで、`shared-hdd`（`fsid=101`）とほかのexportは`sync`のままとする。
+判断の根拠・計測・UPSの制約は[2026-10の調査記録](smb-performance-troubleshooting.md#2026-10-小さめのファイルを大量に書くと速度が出ない)を参照する。
 
 フェーズ1ではexportが`rw`でもApps VM側を`ro`でmountし、旧Kubernetesを唯一のwriterにする。
 cutover確認後だけApps VM側mountを`rw`へ変更する。
