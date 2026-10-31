@@ -268,7 +268,8 @@ repoにはcache-pool作成を自動化する定義が無いため、ここで新
 mergerfsを導入し、[fstab設定](tiered-storage.md#etcfstabmergerfsマウント)を復元する。
 `x-systemd.requires=zfs-mount.service`も復元し、ZFSのmount完了後にmergerfsをmountさせる。
 両branchが`/mnt/cache-sata`と`/mnt/tank-gen2/data/shared`へ正しくmountされていることを確認してから、
-`mkdir -p /mnt/shared`、`mount /mnt/shared`でunion mountを戻す。
+`mkdir -p /mnt/shared`、`systemctl daemon-reload`、`systemctl start mnt-shared.mount`でunion mountを戻す。
+SSHセッションのcgroupへmergerfsを残さないため、手動のmountコマンドで起動しない。
 cache-poolの`autotrim=on`とAHCI接続も同文書に従って確認する。
 
 ### 2026-10-27の起動時import対策と確認
@@ -302,7 +303,11 @@ Bug #4835は個別unitを先行させる順序修正であり、空cache問題�
 
 Apps・Hermes・DGXのNFSも復帰した。ただし`pve-guests.service`によるVM自動起動処理は
 `nfs-server.service`の完了より前に始まっている。今回は問題なかったが、VMの起動がNFSの準備完了を
-待つ順序までは保証していない。
+待つ順序までは保証していなかった（2026-10-27時点）。
+PR #172のpve1 Ansible drop-in（After=nfs-server.service）は2026-10-31 20:49に反映した。
+11-01のFSD試験ではVM全停止01:51:06→NFS停止01:51:06.44→mergerfs unmount01:51:12、
+起動時はNFS Finished01:55:48.000→pve-guests開始01:55:48.002を確認した。
+2026-10-27時点の順序の不足はこのdrop-inで解消した。[ADR-0012](../adr/0012-ups-stayoff-nfs-order.md)を参照。
 
 tank-gen3の作成条件、smartd設定、四半期scrub、archiveの書き込み可と自動snapshotは
 [tank-gen3運用](tank-gen3.md)に従って復元する。新規poolの再起動後のimport・mountは未検証として別途記録する。
@@ -581,8 +586,12 @@ pvesm status
 pvesh get /storage/local
 qm list
 qm config 9000
+systemctl cat pve-guests.service
+systemctl show pve-guests.service -p After
 ```
 
+- pve-guestsの `50-homelab-nfs-order.conf` とAfterの `nfs-server.service` を確認する。
+  起動ログでNFS→VM、停止ログでVM→NFSの順も確認する（2026-11-01のFSD試験で両方確認済み）。
 - poolがONLINEで、保持したdataset / snapshotが存在し、想定pathへmountされていること。
 - 起動後、`zfs-import.target`の依存一覧に全poolの個別インスタンスがあること。
   現行契約はvmpool・tank-gen1・tank-gen2・tank-gen3・cache-poolの5本で、新規追加したpoolも含める。
@@ -650,7 +659,7 @@ VM初回構築・OS reboot・本番DR・Runner/NFSは実機未検証である。
 ## NUTとVM停止順の復元（未検証）
 
 ホストを作り直したら、USBのCPJ1200を接続し、管理端末からpve1専用Ansible rootを反映する。
-NUTとUPS停止に使うVM startupを管理し、上記のmover・exports・mergerfs・zfs-import@は引き続き個別の復旧手順に従う。
+NUT、UPS停止に使うVM startup、pve-guestsのNFS順序を管理し、上記のmover・exports・mergerfs・zfs-import@は引き続き個別の復旧手順に従う。
 シークレット・known_hostsの準備、check→apply、UPSの読み取りと停止・復電試験は
 [UPS / NUT運用](ups-nut.md)に従う。pve1へage鍵を配置しない。
 

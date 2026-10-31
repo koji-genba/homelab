@@ -1,8 +1,12 @@
 # UPS / NUT運用
 
-[ADR-0011](../adr/0011-ups-nut-shutdown.md) / [issue #158](https://github.com/koji-genba/homelab/issues/158)。
+[ADR-0011](../adr/0011-ups-nut-shutdown.md) / [ADR-0012](../adr/0012-ups-stayoff-nfs-order.md) / [issue #158](https://github.com/koji-genba/homelab/issues/158)。
 2026-10-31 JSTに段階1〜3（導入・secondary接続・dry-run停電試験）を確認した（運用者報告）。
-段階4の本番停止・killpower・復電後の一連の起動は**未検証**。以下では確認結果と残る試験を分ける。
+同日20:00〜20:30の段階4で実停止・killpower・起動後の復旧を確認し、UPSの停電中の再投入とNFSの先行停止が判明した。
+PR #172のondelay=-1とNFS順序修正は2026-10-31 20:49に反映済み。
+2026-11-01 01:50の商用電源接続中のFSD試験で、HOSTSYNC、VM→NFSの停止順、NFS→VMの起動順、
+CPJ1200のstayoffとUPSボタンによる復旧を確認した（実機ログ・運用者の目視、時刻はすべてJST）。
+商用電源なしのstayoffは直接試験しておらず、確認済みの範囲と推測を以下で区別する。
 
 ## 構成
 
@@ -15,7 +19,7 @@ firewallは追加せず、現状のServer LANの境界を前提にする。
 DGX secondaryの設定は別repo [koji-genba/edgexpert-ai-stack](https://github.com/koji-genba/edgexpert-ai-stack)
 のNUT手順に従う。private repoの内容は転記しない。primary名はupsmon-pve1、共用secondary名はupsmon-dgx。
 DGXはupsschedで停電継続120秒後にローカル停止し、推論の猶予120秒、Docker停止、hard NFSの通常unmount後まで
-upsmon接続を維持する必要がある。pve1のHOSTSYNCは既定240秒、実測後に調整する。
+upsmon接続を維持する必要がある。pve1のHOSTSYNCは240秒。11-01の試験では約21秒で両secondaryのログアウト待ちを完了した。
 
 ## シナリオ
 
@@ -25,8 +29,8 @@ upsmon接続を維持する必要がある。pve1のHOSTSYNCは既定240秒、�
 | 120秒超、まだLBではない | DGXが先に停止、pve1とVMは稼働を続ける |
 | DGX停止中・停止後、LB前に復電 | pve1は稼働を続ける。ONLINE時に接続元に.51/.52がなければ手動起動を案内。停止途中で接続が残る場合は検出できないので両台を確認する |
 | 120秒以前でもOB+LBになる | primaryがFSD、DGXの停止と切断をHOSTSYNCまで待ち、pve1の停止へ進む |
-| FSD後、VM停止中に復電 | FSDを自動取消せず停止を完遂。最後にUPSの出力を切り、復電条件を満たせば出力が戻る設計（実動作は未検証） |
-| 出力断後に復電 | ondelayとUPSの条件に従い出力復帰、BIOSで各機電源オン。推論は手動起動 |
+| FSD後、VM停止中に復電 | FSDを自動取消せず停止を完遂。最後にUPS出力を切り、ondelay=-1で停止を維持する。CPJ1200では商用電源ありでstayoffを確認済み。入力なしでも戻らないと見るのは推測。復電後は手動で出力を戻す |
+| 出力断後に復電 | 商用電源を確認してからUPSの電源ボタンで出力を戻す。ネットワーク・DGXが起動し、pve1は電源ボタンで起動。推論は手動起動 |
 | UPS/upsd通信断 | COMMBAD/NOCOMM通知。最後の状態がOBならDEADTIME経過で危険と判断する場合がある。通信断を通常の停電timerと混同しない |
 
 pve1には停電タイマーを置かず、通常はOB+LBで停止する。VMの停止は次の順で、down_delayは
@@ -54,12 +58,27 @@ Terraformの6 rootにはstartupブロックを置かず、`lifecycle.ignore_chan
 [Terraformのignore_changes仕様](https://developer.hashicorp.com/terraform/language/meta-arguments/lifecycle#ignore_changes)
 と合わせると、Ansibleが設定したstartupだけでは更新差分が出ず、他に差分がなければNo changesとなる。
 cloneの読み取りでは未指定startupをstateへ取り込まない分岐もあるが、startupを除去する更新は発生しない。
-これはソースと仕様による確認で、実機planは今回実行していない。新しいroleの実機反映も未検証。
+これはソースと仕様による確認で、実機planはこの記録作成時には実行していない。段階4ではstartup順での実停止・起動を確認した。
+
+### pve-guestsとNFSの順序
+
+PR #172で `guest_nfs_order` roleが
+`/etc/systemd/system/pve-guests.service.d/50-homelab-nfs-order.conf` に `After=nfs-server.service` を配置する。
+VM停止完了→NFSサーバー→mergerfs→ZFSの順を意図し、起動はその逆でNFS準備後にVMを起動する。
+Afterは両unitが起動・停止するときの順序指定であり、NFS起動の成功まで保証する依存ではない。
+配置後はdaemon-reloadだけを行う。pve-guestsはRefuseManualStart/Stopのためrestartしない。
+2026-10-31 20:49に反映済み。11-01のFSD試験でVM全停止→NFS停止→mergerfs unmountと、
+起動時のNFS完了→pve-guests開始を確認した。再構築・再適用時も次でAfterを確認する。
+
+```sh
+systemctl cat pve-guests.service
+systemctl show pve-guests.service -p After
+```
 
 ## LBしきい値の決定と測定（2026-10-31 JST）
 
 運用者がpve1のgroup_varsに次の値を採用した。roleのdefaultsは変更せず、未指定時はUPS自身のLBを使う。
-この値の実機反映・LB/FSDからの停止完了は、段階1〜3の結果だけでは検証済みとしない。
+段階4では残量49%・runtime908秒でLB/FSDとなり、残量しきい値による停止を確認した。
 
 ```yaml
 nut_ignorelb: true
@@ -82,19 +101,32 @@ overrideはUPS firmwareを書き換えない。[2.8.1 ups.conf](https://networku
 | 上記の放電率 | 約4.8%/分。満充電から約20分の見積もりであり、全放電の実測ではない |
 | 同じ負荷でのbattery.runtime | 1033〜1410秒に変動 |
 | アイドルDGX 1台 | 負荷約6〜7%（約45W） |
-| DGX停止後のpve1とネットワーク | 負荷約25%（約180W）と推定。停止後の持続時間は未検証 |
+| DGX停止後のpve1とネットワーク | 段階4で負荷約25%を確認。約180Wの換算。20:03の83%→20:14の49%と約3%/分で低下。全放電までの持続時間は未測定 |
 
-### 停止時間予算と残る確認
+### 停止時間予算と実測
 
-待ち上限の合計はHOSTSYNC240 + FINALDELAY5 + order3の180 + Apps420 + gateway180 = **1025秒**。
-さらにpve1自身のNFS/ZFS flush・OS停止、UPS offdelay60と安全余裕が必要。
-これは各上限を使い切る最悪条件であり、早く停止すれば次に進む。
-DGXが120秒で先に停止済みならHOSTSYNCを全て使うとは限らないが、本番停止時間はまだ未検証。
+2026-11-01の修正後の試験では、**FSD設定からpve1電源オフまで約70秒**（01:50:04→01:51:12、実時間68秒）。
+内訳はsecondaryのログアウト待ちHOSTSYNC約21秒、FINALDELAY5秒、VM停止約34秒
+（01:50:33→01:51:06、実時間33秒）と、その前後のホスト停止処理。
+pve1の停止開始01:50:30から電源オフまでは42秒、UPS出力断まではFSDから約122秒（01:52:06）だった。
+今回HOSTSYNCを通して、推論稼働中の両secondaryを待つ経路も確認できた。
 
-runtime300秒は停止に必要な全時間を保証する値ではなく、高負荷時の瞬停による即時FSDを避けるための判断。
-残量50%も、上記1025秒以上の最悪条件を支えられると証明した値ではない。
-段階4でDGX停止後の負荷・残時間、Appsを含む実停止時間を測り、時間不足なら負荷・停止猶予・しきい値を見直す。
-バッテリー劣化、表示の揺れ、USB通信の遅れを含む余裕を取り、アイドル時の見積もりを推論中へ流用しない。
+| 計測対象 | 10-31 20:00試験（NFS先行停止） | 11-01 01:50試験（修正後） |
+| --- | --- | --- |
+| HOSTSYNCの実待ち | 0秒（DGXは既に停止） | 約21秒 |
+| order3の最長 | Hermes94秒 | ElastiFlow9秒（Hermes6秒） |
+| Apps VM全体 | 261秒（Compose停止67秒、終盤に待ち） | 19秒 |
+| gateway | 2秒 | 2秒 |
+| pve-guestsのVM停止全体 | 360秒 | 約34秒（ログ間33秒） |
+| FSD→pve1電源オフ | 約381秒 | 約70秒（ログ間68秒） |
+| FSD→UPS出力断 | 約436秒 | 約122秒 |
+
+VMより後までNFSを維持した修正後はApps・Hermesの待ちが短くなった。今回の値はこの推論・負荷条件での実測であり、
+Apps420秒・他180秒の待ち上限は維持する。上限を全て使う場合はHOSTSYNC240 + FINALDELAY5 +
+order3の180 + Apps420 + gateway180 = **1025秒**に、ホスト停止・offdelay60・安全余裕が必要。
+runtime300秒は全停止時間の保証ではなく、今回の商用電源ありFSD試験はバッテリー持続時間の測定でもない。
+残量50%でも最悪予算を保証したわけではなく、バッテリー劣化や負荷変動も考慮して継続確認する。
+10-31のFSD時runtime908秒と起動後の残量86%への変化も、表示値だけで余裕を断定しない根拠として残す。
 確認には次を使い、日時・負荷・経過秒・実停止時間を記録する。
 
 ```sh
@@ -124,7 +156,7 @@ AGE_IDENTITY_FILE=/secure/path/age-identity.txt make ansible-apply-pve1
 roleは接続済み0764:0501のグループがnutでない場合だけ対象デバイスへルールを当て直す（check時は変更しない）。
 初回checkでNUT未導入ならpackage予定とUSB接続を検査し、配置は省略する。適用後にcheck/diffを再実行しchanged=0を確認する。
 passwordを含むupsmon.conf、upsd.usersとwebhookはdiff非表示。設定変更時はupsmonをrestartする。
-既存curl/python3/loggerを使用し、sudo/jqは導入しない。pve1 rootの範囲はNUTとUPS停止に使うVM startup。
+既存curl/python3/loggerを使用し、sudo/jqは導入しない。pve1 rootの範囲はNUT、UPS停止に使うVM startup、pve-guestsとNFSの順序。
 
 4. DGX担当とsecondary資格情報を安全な経路で共有し、別repoの手順で両台を反映する。
    DGX側の120秒timer・停止順・SHUTDOWNEXIT・NFS解除後のログアウトが必要。
@@ -132,7 +164,12 @@ passwordを含むupsmon.conf、upsd.usersとwebhookはdiff非表示。設定変�
    `qm config <VMID>` で6台のstartupを確認する。Terraformはstartupをignoreするため、VM再作成後もAnsibleが必要。
    `nut_shutdown_dry_run=true` はNUTの停止だけを模擬し、通常applyではstartup設定は更新される。
    startupだけの確認・反映は `PVE1_ANSIBLE_ARGS='--tags guest_startup --check'` /
-   `PVE1_ANSIBLE_ARGS='--tags guest_startup'` を使える（実機反映は未検証）。
+   `PVE1_ANSIBLE_ARGS='--tags guest_startup'` を使える。
+
+6. PR #172のondelayとdrop-inは2026-10-31 20:49に反映した。再適用時も同じpve1 Ansibleを使う。NUTのdriverがrestartされたことと、
+   `upsc cpj1200@localhost ups.delay.start` が `-1`、`ups.delay.shutdown` が `60` であることを確認する。
+   `systemctl show pve-guests.service -p After` にnfs-server.serviceが入ることを確認する。
+   11-01のFSD試験で商用電源ありのstayoffとNFS順序を確認済み。NFS順序だけなら `--tags guest_nfs_order` で反映できる。
 
 ## 導入後の確認
 
@@ -150,7 +187,7 @@ journalctl -u nut-server -u nut-monitor --since '-10 minutes'
 ```
 
 upscでOL（通常時）、USB製品、battery.charge/runtime、ups.load、ups.statusを確認。
-以下は導入後の確認手順。2026-10-31の実施結果は段階1〜3に記録し、`upsdrvctl -t shutdown`の実機確認は未検証とする。
+2026-10-31の確認結果は段階1〜4に記録する。`upsdrvctl -t shutdown`だけで実際の出力制御を確認したとは扱わない。
 `upsc -c`で192.168.10.51/.52の接続元を確認。IPv4-mapped IPv6も通知では認識する。
 `upscmd -l` / 引数なしの`upsrw`は利用可能なコマンド・変数の一覧だけを読む。
 monitorアカウントにinstcmd/set権限は付けない。`upsdrvctl -t shutdown`は手順を表示するだけで、
@@ -165,9 +202,11 @@ journalctl -t homelab-nut --since '-5 minutes'
 
 Discordに日本語、ホスト名、ONLINE、battery.charge/runtime・ups.load・ups.statusが届くこととDGX不在時の案内を確認。
 従来のinput.voltageはdriverのpollfreq（30秒）ごとの更新のため、ONBATT通知で100.0、ONLINEで0.0と
-前の状態の値が出た（2026-10-31実機確認）。通知項目をups.statusへ変更した。変更後の実配送は未検証。
+前の状態の値が出た（2026-10-31実機確認）。通知項目をups.statusへ変更した。段階4ではONBATT・LOWBATT・SHUTDOWNの配送を確認した。
 スクリプトは二段forkで切り離し、upsc各3秒、curl最大5秒で打ち切る。失敗はURLを含めずloggerへ残す。
 送信完了をシェルの終了コードから判断しない。停電中は外部通信が使えない場合もある。
+pve1のprimaryが自分でFSDを立てたとき、NUTはprimary側にFSDイベントを出さない。
+FSDイベントはsecondary側の通知なので、primaryの停止開始はLOWBATT・SHUTDOWNで確認する（段階4で確認）。
 `upsmon -c fsd`は通知試験ではなく全体の停止要求なので通常設定で実行しない。
 
 ## 段階的な試験
@@ -187,7 +226,7 @@ Hermesの作業・Runnerジョブ、書き込み・転送・backup・mover等を
 
 ### 段階1: pve1導入の結果（2026-10-31 JST）
 
-以下の段階1〜3はすべて運用者報告に基づく。
+以下の段階1〜4と11-01のFSD試験はすべて運用者報告と実機ログの確認結果に基づく。
 pve1にdry-run設定で適用した。初回はパッケージより前に挿さっていたUPSへ `62-nut-usbups.rules` が当たらず、
 driverが `insufficient permissions` で起動しなかった。roleのudev当て直しで解決した（commit `9481bbd`）。
 再applyはchanged=0。通知試験はDiscordに届いた。
@@ -203,7 +242,7 @@ DGX両台を別repoの `scripts/setup-nut-client.sh --dry-run-shutdown` でdry-r
 pve1の `upsc -c` に.51・.52が出ることを確認した。private repoの設定詳細はそちらの手順に従う。
 DGXを手で再起動した際、推論を止めるunit→ `/mnt/ai` のunmount→upsmon終了→pve1のログアウト記録の順になった。
 .52では15:55:57.112→.189→.190→pve1 .194と、各記録が数十ミリ秒以内に続いた。
-この記録は手動再起動時の順序確認であり、負荷のある推論の停止時間やFSD時のHOSTSYNCの余裕は未検証。
+これは手動再起動時の順序確認。推論稼働中の停止時間は段階4にも記録する。全secondaryが残る状態でのHOSTSYNCは11-01の試験で確認した。
 
 ### 段階3: dry-run停電試験の結果（2026-10-31 JST）
 
@@ -220,44 +259,124 @@ NUT 2.8.1のupsschedはタイマー開始・取消を通常ログに出さない
 ネットワーク機器はUPSで動き続け、停電中も通知が届いた。負荷・放電率・runtimeは上のしきい値の節に記録した。
 このA/Bの結果からFSD経路を検証済みとはしない。
 
-### 段階4: 本番どおりの停止・復帰（未検証、後日実施）
+### 段階4: 本番停止と復旧の結果（2026-10-31 20:00〜20:30 JST）
 
-pve1・DGXの実際の協調停止、killpower、復電での一連の起動はまだ未検証。
-本番設定へ切り替える前に、dry-runとflagの状態を確認する。
+推論 `vllm-glm53-dflash2` を動かした状態で20:00ごろUPS入力プラグを抜き、pve1は20:00:2xにOBを検知した。
+プラグ抜去は説明書が禁じる操作であり、次回は共通の準備に記載した入力遮断方法を使う。
+当時はoffdelay=60、ondelay=120。次の時系列は実機ログ・UPS表示を運用者が確認した結果である。
 
-- pve1はSHUTDOWNCMDがloggerのみ、POWERDOWNFLAG省略であることをrootで
-  `grep -E '^(SHUTDOWNCMD|POWERDOWNFLAG)' /etc/nut/upsmon.conf` によりsecretを表示せず確認し、
-  `test ! -e /etc/killpower` を確認する。DGXも別repoのdry-run手順に従う。
-- FSD模擬が必要なら、両方のdry-run設定確認後の明示操作として行う。FSDは復電だけでは解除されない。
-  試験後はOLを確認し、dry-runを維持して `systemctl restart nut-server.service nut-monitor.service`、
-  upscでFSD消失を確認する。flagが残る場合は停止処理中でないこととOL・FSDなしを確認してから
-  rootで `rm -- /etc/killpower`。Ansibleはstale flagを自動削除しない。このFSD復旧経路も未検証。
-- DGXは別repoの手順で状態を戻してdry-runを解除する。pve1は決定したLB値を反映し、
-  `nut_shutdown_dry_run=false` で再適用する。monitorのrestartとflag不在を確認する。
-- 短い停電、DGX早期停止後の復電、LB/FSD後の復電（VM停止中・出力断後）を分けて試す。
-  DGXの実停止・NFS解除、HOSTSYNC、VM順とAppsを含む実停止時間、pve1のflush・停止、UPS出力断を確認する。
-- FSD後は復電しても停止を完遂すること、`shutdown.return` の実動作、offdelay=60 / ondelay=120の
-  実遅延と復帰を観察する。pve1のAC復帰設定、HDD 6本の同時スピンアップも確認する。
-- 出力断・復帰に失敗する場合や停止時間予算が足りない場合は無人運転を保留し、
-  安全を確認して電源操作で復旧する。reconcile・端末DNSも戻す。
+| 時刻 | 結果 |
+| --- | --- |
+| 20:00:26 | DGXにONBATT |
+| 20:02:26 | 両DGXの120秒タイマー満了、sudo upsmon -c fsd |
+| 20:02:31 | DGX停止開始。推論は.51（gateway/head）3秒、.52（worker）14秒で停止。その後Docker→/mnt/aiのunmount→upsmonログアウト |
+| 20:02:36 / 20:02:47 | .51 / .52のログアウト |
+| 20:03〜20:14 | DGX停止後の負荷約25%。残量83→49%、約3%/分 |
+| 20:14:54 | pve1がbattery is low→FSD。残量49%、runtime908秒、負荷26% |
+| 20:14:59 | secondary不在のためHOSTSYNC待ちなしでpve1停止開始 |
+| 20:15:00 | nfs-server.serviceが先に停止（問題2） |
+| 20:15:01 / 20:15:02 | pve-guests停止開始 / order3のVMを同時停止。111と105は各2秒、103は10秒、104は94秒 |
+| 20:16:37〜20:20:58 | Apps（101）停止、261秒。homelab-apps.serviceのCompose停止は67秒、残りはjournald停止後の終盤 |
+| 20:20:59 | gateway（102）停止、2秒 |
+| 20:21:02 / 約20:21:15 | VM全停止 / pve1電源オフ |
+| 約20:22:10 | killpowerでUPS出力断。UPS表示のカウントダウンも確認 |
+| 出力断の約1分後 | 入力を抜いたまま出力が戻り、DGXがバッテリーで自動起動（問題1）。pve1はBIOS設定どおり起動せず、運用者が電源ボタンで起動 |
+| 起動後〜20:30:38 | 5 pool ONLINE、mergerfs・NFS export6つ復帰。VMは102→101→103→104→…の順で起動。Appsのhomelab-apps.serviceが20:30:38にactive。DGXの/mnt/aiもOK |
 
-killpowerはDebianの `/usr/lib/systemd/system-shutdown/nutshutdown` が最後に `upsmon -K` を確認して
-実行する。通常の計画停止ではflagを立てない。CPJ1200のACあり/なしでのshutdown.returnの挙動は未検証。
-[CPJ1200取扱説明書](https://sakae-denshi.com/wp-content/uploads/2023/08/CPS_UM_CPJ1200_jp.pdf)と
-[NUT 2.8.1 usbhid-ups](https://networkupstools.org/historic/v2.8.1/docs/man/usbhid-ups.html)を参照する。
+DiscordにはONBATT（20:00）、LOWBATTとSHUTDOWN（20:14）が届いた。
+primary自身のFSDでFSD通知が出ないのはNUTの仕様であり、通知失敗ではない。
+起動時にupsmonが `/etc/killpower` を削除した。直後のupscは86%・OL CHRGで、FSD時の49%より高く出た。
+起動直後の表示として記録し、充電完了や残量の増加を証明する値には使わない。
 
-## BIOSと復帰
+### PR #172反映後のFSD試験（2026-11-01 01:50 JST）
 
-pve1（ASUS TUF GAMING X570-PLUS）のAC復帰時電源オンは未検証で、段階4で確認する。
-DGXの `Advanced → Power On Behavior → After Power Loss Behavior = Auto Boot` は、
-2026-10-31の試験Aで.51が復電で自動起動し、動作を確認できた。.52の復電起動は未検証。
-[NVIDIA公式UEFI手順](https://docs.nvidia.com/dgx/dgx-spark-uefi/advanced-tab.html#power-on-behavior)を参照。
-UPSがACを切らなかった早期停止では自動起動しない場合がある。DGXは電源ボタンで起動する。
-OSが戻っても推論は手動起動する。WoLは今回使わない。
-DGX起動途中に `mnt-ai.mount` が `Network is unreachable` で一度失敗するのは今回以前からの挙動で、
-2026-10-09の起動でも記録されている（運用者報告）。`/mnt/ai` にアクセスすればautomountで接続する。
-起動後は[Proxmoxホスト復旧の確認](proxmox-host-recovery.md#検証)に従いpool、NFS、VM、Appsを確認し、
-DGXは別repoの起動手順に従う。reconcileと端末DNSを戻し、NUT OL・接続元・通知も確認する。
+PR #172は10-31 20:49にpve1へ反映済み。商用電源を接続したまま、推論vllm-glm53-dflash2稼働中に
+pve1で `upsmon -c fsd` を実行した。入力プラグは抜いていない。以下は実機ログと運用者の目視で確認した。
+
+| 時刻 | 結果 |
+| --- | --- |
+| 01:50:04 | pve1がFSDを設定 |
+| 01:50:05 / 01:50:10 | DGX両台がforced shutdown in progressを受信 / 停止開始 |
+| 01:50:14 / 01:50:25 | .51 / .52の推論停止。所要時間は各3秒 / 14秒 |
+| 01:50:25 | pve1がHOSTSYNCでsecondaryのログアウトを待った後、Executing automatic power-fail shutdown。primary起点FSDで両DGXを待つ経路を初確認 |
+| 01:50:30 | pve1停止開始 |
+| 01:50:33 | order3停止開始。111・105は各2秒、104は6秒、103は9秒。続く101は19秒、102は2秒 |
+| 01:51:06 / 01:51:06.44 | VM全停止 / その後にnfs-server停止。drop-inどおり |
+| 01:51:12 | mergerfs unmount、pve1停止 |
+| 約01:52:06 | killpowerでUPS出力断。商用電源があるまま、約2分半、UPSボタンを押すまで出力は戻らなかった |
+| 01:55:09〜10 / 01:55:24 | UPSボタンで出力を戻しDGXがAC復帰で自動起動 / 運用者がpve1を電源ボタンで起動 |
+| 01:55:48.000 / 01:55:48.002 | nfs-serverがFinished / その後pve-guests開始。VMは102→101→103…の順に起動 |
+
+起動後は `/etc/killpower` なし、5 pool ONLINE、mergerfsとexport6つ復帰、NUTはOL・接続元3つ、
+Appsのhomelab-apps.serviceはactive、DGXの/mnt/aiもOKだった。
+CPJ1200のondelay=-1は商用電源ありでも自動再投入せず、UPSボタンでの出力復旧が必要だった。
+入力がない状態のstayoffは直接試していない。ただし入力がある状態でも戻らなかったことから、
+入力がなければ自動再投入しないと見てよいと判断する。**これは推測であり、入力なしでの直接確認ではない。**
+
+### 問題1: 停電中の出力再投入とstayoff方針
+
+CPJ1200はshutdown.return / ondelay=120で出力を切った後、商用電源がなくても出力を戻した。
+ユーザー決定で `nut_offdelay: 60`、`nut_ondelay: -1` をroleのdefaultsとし、長い停電後はUPS出力を手動で戻す。
+pve1のBIOSもAC復帰時の自動起動を無効にしたままとする。
+11-01の試験で、CPJ1200は商用電源があってもUPSボタンを押すまで約2分半stayoffを維持した。
+入力なしでも戻らないと見るのは、この結果に基づく推測であり直接は試していない。
+
+[NUT v2.8.1 usbhid-ups.c](https://github.com/networkupstools/nut/blob/v2.8.1/drivers/usbhid-ups.c)はondelayを
+strtolで符号付き整数としてups.delay.startへ読み、shutdown.returnでその値をload.on.delayへ渡す。
+[CPSマッピング](https://github.com/networkupstools/nut/blob/v2.8.1/drivers/cps-hid.c)はDelayBeforeStartupへ対応し、
+コマンド値はatol→HIDSetDataValueで送られるため-1を拒否しない。CPSにups.start.autoはなく、この書き込みはstayoff相当。
+ソース確認に加え、上記11-01の条件でCPJ1200のstayoffを実機確認した。2.8.1にsdcommandsはないので追加しない。
+
+[driver共通処理](https://github.com/networkupstools/nut/blob/v2.8.1/drivers/main.c)の-kはまず稼働中driverへ
+driver.killpowerを頼むため、新プロセスだけで値を変えても不十分。ups.conf変更は既存の
+Enumerate NUT driver→Restart NUT driver→server→monitorのhandlerで反映する。稼働中driverの新しい値も確認する。
+ondelay=0で「復電時だけ出力を戻す」可能性は将来の選択肢。CP1500系の
+[報告](https://alioth-lists.debian.net/pipermail/nut-upsuser/2022-June/012844.html)はあるがCPJ1200では未検証で、今回採用しない。
+
+### 問題2: VMより先にNFSが停止
+
+nfs-serverが20:15:00に止まり、pve-guestsは20:15:01から停止した。両unit間に順序指定がなかったため、
+AppsのNFS9 mountとHermesのbackup NFSがサーバー停止後に終了処理を行い、hard mountで待たされた。
+Hermes94秒・Apps終盤の約3分の待ちに影響し、書き込み中ならVM側に残ったデータを失うおそれがあった。
+PR #172のAfter=nfs-server.serviceで修正し、11-01にVM全停止後のNFS停止、mergerfs unmountと、
+NFS完了後のVM起動を実機確認した。Hermesは94→6秒、Appsは261→19秒へ短縮した。
+
+停止開始時の20:14:59にはmergerfsもsession-398.scopeの一部としてSIGTERMを受けていた。
+10-29にSSHセッションから手でmountし直したプロセスがセッションcgroupに残っていたためで、
+再起動後は `0::/system.slice/mnt-shared.mount` 配下になった。手動再mountもsystemd unitを通す。
+詳細は[Tiered Storage](tiered-storage.md#etcfstabmergerfsマウント)を参照する。
+
+## 長い停電後の手動復旧
+
+11-01の商用電源ありFSD試験で、UPSボタン→ネットワーク・DGX自動起動→pve1の電源ボタン→
+起動後の確認を実際に通した。長い停電後も商用電源の復帰を確認してから同じ手順を使う。
+
+1. 商用電源が安定して戻ったことを確認する。バッテリーだけの状態で出力を再投入しない。
+2. UPSの電源ボタンで出力を戻す。ondelay=-1で、商用電源があってもUPSボタンを押すまで戻らなかったことを確認済み。
+3. ネットワーク機器とDGXの自動起動を待つ。DGXはAfter Power Loss = Auto Bootを維持する。
+4. pve1を電源ボタンで起動する。BIOSのAC復帰自動起動は無効のままにする。
+5. [Proxmox起動後の確認](proxmox-host-recovery.md#検証)でpool5つ、mergerfs、NFS export6つ、VMとAppsの復帰を確認する。
+   drop-inとAfter=nfs-server.service、NUTのOL・FSDなし、ups.delay.start=-1、killpower flag不在も確認する。
+   flagが残っていたら正常なOL・FSDなし・停止処理中でないことを確認してから扱い、無条件に削除しない。
+6. DGXの `/mnt/ai` とsecondary接続元.51/.52を確認し、別repoの手順で推論を手動起動する。
+   最後にreconcileと作業端末のTailscale DNSを戻し、通知とアプリを確認する。
+
+DGXの起動途中に `mnt-ai.mount` が `Network is unreachable` で一度失敗するのは2026-10-09にもある既存挙動。
+`/mnt/ai` にアクセスすればautomountで接続する。NFSとUPS出力が戻るまで推論は起動しない。
+UPS出力が切れなかった短い停電では、停止済みDGXは電源ボタンで起動する場合がある。WoLは今回使わない。
+
+## 確認済みの範囲と今後の確認
+
+11-01は商用電源をつないだままのFSD試験で、primaryからのFSD→HOSTSYNC→VM全停止→NFS停止→
+mergerfs unmount→pve1停止→killpower→stayoff→UPSボタン復旧→NFS先行のVM起動を確認した。
+入力なしのstayoffは、商用電源ありでも戻らなかった結果から成立すると見る**推測**で、直接の試験はしていない。
+停止途中で商用電源が戻るケースや、別負荷・バッテリー劣化時の持続時間は引き続き未検証。
+HDD6本の同時スピンアップの電力余裕も継続確認する。
+
+通常の計画停止は下の手順に従い、flagなしの通常shutdownではUPSを切らない。
+追加の出力断試験は保守時間と全負荷の安全を確保した別の明示操作として行う。
+`upsmon -c fsd` は実際に全体を止める要求で、`upsdrvctl -t shutdown` は実出力を制御しない。
+[CPJ1200説明書](https://sakae-denshi.com/wp-content/uploads/2023/08/CPS_UM_CPJ1200_jp.pdf)に従い入力遮断方法を準備する。
 
 ## 計画停止（未検証）
 
@@ -270,4 +389,5 @@ startup設定が6台に反映済みであることを `qm config <VMID>` のstar
 2. pve1のrootで `shutdown -h now` を実行する。個別の `qm shutdown` 列挙は不要で、pve-guestsが
    order3→Apps→gatewayの順に停止する。PVEコンソールで停止の完了とtimeoutがないことを確認する。
 3. 通常shutdownではUPS出力を切らないので、起動はpve1/DGXの電源ボタンを使う。
+   計画停止時もpve-guestsのAfterにnfs-serverがあることとmergerfsのcgroupがmount unit配下であることを事前確認する。
    起動後は上の復帰確認を行う。UPSの出力を意図的に切る作業は別途計画する。

@@ -1,0 +1,48 @@
+---
+- name: Inspect pve-guests drop-in directory
+  ansible.builtin.stat:
+    path: /etc/systemd/system/pve-guests.service.d
+  register: guest_nfs_order_directory
+
+- name: Create pve-guests drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/pve-guests.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+# On an initial check the directory is only simulated, so copy would fail.
+- name: Install VM and NFS ordering drop-in
+  ansible.builtin.copy:
+    src: 50-homelab-nfs-order.conf
+    dest: /etc/systemd/system/pve-guests.service.d/50-homelab-nfs-order.conf
+    owner: root
+    group: root
+    mode: '0644'
+  when: not ansible_check_mode or guest_nfs_order_directory.stat.exists
+  notify: Reload systemd for guest NFS order
+
+- name: Report initial drop-in creation in check mode
+  ansible.builtin.debug:
+    msg: Would install pve-guests After=nfs-server.service and reload systemd without restarting guests.
+  changed_when: true
+  when:
+    - ansible_check_mode
+    - not guest_nfs_order_directory.stat.exists
+
+- name: Load ordering before verifying systemd dependencies
+  ansible.builtin.meta: flush_handlers
+
+- name: Read effective pve-guests ordering
+  ansible.builtin.command:
+    argv: [systemctl, show, pve-guests.service, --property=After, --value]
+  register: guest_nfs_order_after
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Require NFS before guest startup and after guest shutdown
+  ansible.builtin.assert:
+    that: "'nfs-server.service' in guest_nfs_order_after.stdout.split()"
+    fail_msg: pve-guests.service is missing After=nfs-server.service after daemon-reload.
+  when: not ansible_check_mode

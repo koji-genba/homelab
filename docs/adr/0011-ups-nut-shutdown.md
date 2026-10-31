@@ -3,7 +3,8 @@
 ## 状態
 
 承認済み。2026-10-31 JSTに導入・secondary接続・dry-run停電試験を確認（運用者報告）。
-本番の協調停止・killpower・一連の復電起動は未検証。
+同日20:00〜20:30に本番停止・killpower・起動後の復旧を確認。停電中の出力再投入とNFS先行停止を検出し、
+自動復帰・NFS順序の前提は[ADR-0012](0012-ups-stayoff-nfs-order.md)で置き換え、2026-11-01に商用電源ありFSDで確認した。
 
 ## 背景
 
@@ -36,9 +37,9 @@ LBのしきい値は導入後に負荷・残runtime・停止所要時間を測�
 Ansibleからignorelbとoverride.battery.charge.low/runtime.lowを指定できる。
 UPSのruntimeが正しいことも実測し、Apps420秒を含む全停止時間と余裕を確保する。
 
-offdelay=60、ondelay=120。POWERDOWNFLAGはDebian既定の/etc/killpower、最終段階のnutshutdownが
+採用時はoffdelay=60、ondelay=120。復旧方針はADR-0012で手動へ変更する。POWERDOWNFLAGはDebian既定の/etc/killpower、最終段階のnutshutdownが
 UPSの出力停止と復電後の復帰を要求する。BIOSのAC復帰時電源オンと組み合わせる。
-CPJ1200でのkillpower・遅延・復電タイミングごとの動作は実機検証が必要。
+採用時にはCPJ1200のkillpower・遅延・復電タイミングごとの実機検証が必要としていた。段階4の結果と新方針は後述する。
 
 dry-runはSHUTDOWNCMDをloggerだけにしPOWERDOWNFLAGを省く。古いflagがあるとAnsibleは拒否し、
 運用者が状態を確認して除去する。SHUTDOWNCMD/POWERDOWNFLAGの反映はupsmon restartとする。
@@ -87,7 +88,7 @@ DGXアイドル・全台稼働で負荷37〜39%（約275W）、150秒で残量10
 25%（約180W）と推定する。ネットワーク機器は停電中も稼働し、通知が届いた。
 
 input.voltageはpollfreq（30秒）ごとの更新で、ONBATT通知に100.0、ONLINEに0.0と前の値が出た。
-通知項目をups.statusへ変更する。変更後の実配送は未検証。
+通知項目をups.statusへ変更する。段階4ではONBATT・LOWBATT・SHUTDOWNの配送を確認した。
 DGXの起動時の `mnt-ai.mount: Network is unreachable` は2026-10-09にもある既存挙動で、
 `/mnt/ai` アクセス時のautomountで接続する。
 
@@ -100,14 +101,35 @@ tokenの権限は増やさず、pve1のroot接続で `guest_startup` roleが `qm
 キー順を正規化して異なる場合だけ更新し、checkは変更予定を表示する。VM不在は明示的に失敗する。
 startupの単独更新は設定の即時保存だけで、VMの再起動は不要。新規VM作成・再作成後はpve1 Ansibleを再適用する。
 PVEの権限・即時反映処理とprovider 0.117.0/ignore_changesの根拠は[runbook](../operations/ups-nut.md#シナリオ)を参照。
-このroleの実機反映は未検証。
+段階4では設定した順でVMの停止・起動を確認した。
+
+## 2026-10-31 20:00〜20:30 追記: 段階4の結果
+
+運用者が実機ログを確認した。推論vllm-glm53-dflash2稼働中、UPS入力プラグを抜いて停電試験を行った。
+説明書は禁止しており、今後は適切な入力スイッチ・ブレーカーを使う。
+DGXは20:00:26 ONBATT→20:02:26 timer満了→20:02:31停止開始。
+推論は.51が3秒、.52が14秒で停止し、Docker→NFS unmount→upsmonログアウト（.51 20:02:36、.52 20:02:47）と続いた。
+DGX停止後の負荷約25%、残量は20:03の83%→20:14の49%と約3%/分だった。
+
+pve1は20:14:54、残量49%・runtime908秒・負荷26%でLB/FSD。secondary不在で20:14:59に停止開始。
+order3は20:15:02から同時停止し、111と105は各2秒、103は10秒、104は94秒。
+Appsは20:16:37〜20:20:58の261秒（Composeは67秒）、gatewayは20:20:59から2秒。
+20:21:02 VM全停止、約20:21:15 pve1電源オフ、約20:22:10 UPS出力断（表示のカウントダウンも確認）。
+DiscordはONBATT・LOWBATT・SHUTDOWNが到達。primary自身のFSDではFSDイベントは出ず、secondary側のイベントとなる。
+
+出力断の約1分後、入力がないまま出力が戻ってDGXがバッテリーで起動した。
+pve1はBIOSのAC復帰起動を無効にしたユーザー設定により起動せず、電源ボタンで起動した。
+起動後はupsmonがkillpower flagを消し、5 pool ONLINE、mergerfsとNFS export6つが復帰した。
+VMは102→101→103→104→…、Appsは20:30:38 active、DGXの/mnt/aiもOK。
+upscの86%・OL CHRGは起動直後の表示で、FSD時49%からの実容量回復を示す値とは扱わない。
+
+NFSは20:15:00にpve-guests（20:15:01）より先に停止し、Apps/Hermesのhard NFSが待たされた。
+mergerfsも20:14:59にsession-398.scopeでSIGTERMを受けた。10-29の手動mountがSSHセッションのcgroupに
+残っていたためで、再起動後はsystem.slice/mnt-shared.mount配下になった。
+2つの対策・手動復旧の決定は[ADR-0012](0012-ups-stayoff-nfs-order.md)、詳細時系列と次回試験は[UPS運用](../operations/ups-nut.md)を参照。
 
 ## 未検証の点
 
-段階4の本番停止・killpower・復電起動は後日検証する。Appsを含む実停止時間、負荷のある推論の停止時間、
-HOSTSYNCの余裕、PVE stopall、pve1のflush、shutdown.returnの実動作、ACあり/なしの出力復帰、
-HDD 6本の同時スピンアップ、pve1のAC復帰設定、DGX .52の復電起動は未検証。
-USBの長期安定性とDGX停止後の持続時間も継続確認が必要。
-HOSTSYNCとVM等の待ち上限だけで1025秒あり、さらにpve1停止・offdelay・余裕が必要。
-今回の50%/300秒はこの最悪条件を保証せず、段階4の実測で負荷・停止猶予・しきい値の整合を確認する。
-試験結果と今後の手順は[UPS運用](../operations/ups-nut.md)に従う。
+ADR-0012のstayoff（商用電源あり）・UPSボタン復旧・VM/NFS順序と修正後の停止時間は2026-11-01に確認した。
+入力なしのstayoffは推測で直接は試しておらず、停止途中での復電、USBの長期安定性、HDD同時スピンアップの電力余裕は未検証。
+待ち上限1025秒＋ホスト停止等は維持する。修正前の実測約436秒と修正後の結果の比較はADR-0012とUPS運用を参照する。
