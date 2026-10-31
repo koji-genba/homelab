@@ -1,6 +1,6 @@
 # NFS export契約
 
-- 状態: marker・`ai` export反映済み。旧4 exportは2026-09-23にApps VM `/32`へ制限済み。`agent-backups` exportは2026-10-18に作成済み（client mount・backup確認済み）
+- 状態: `ai`・`archive`の切り替え完了時に適用する契約。pool運用は[tank-gen3運用](tank-gen3.md)を参照
 - `shared`は2026-10-29に`async`へ変更済み。`shared-hdd`とほかのexportは`sync`を維持。
 - サーバー: Proxmox/NFS host `192.168.10.11`
 - データ復旧: このリポジトリの対象外
@@ -19,13 +19,19 @@
 `/mnt/shared`の`fsid=100`と`/mnt/tank-gen2/data/shared`の`fsid=101`が契約どおりであることを再確認した。
 以下の表はその後の変更を反映しており、`/mnt/shared`の`async`は2026-10-29の変更後の値である。
 
-| サーバーpath | client範囲 | 主要option（実測） | 固有option |
+以下の表は切り替え完了時の契約。過去の実測が新pathを検証済みという意味ではない。
+
+| サーバーpath | client範囲 | 主要option（契約） | 固有option |
 | --- | --- | --- | --- |
 | `/mnt/tank-gen2/data/k8s-volumes` | `192.168.10.101/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | なし |
-| `/mnt/tank-gen1/data/archive` | `192.168.10.101/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | なし |
+| `/mnt/tank-gen3/data/archive` | `192.168.10.101/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | なし |
 | `/mnt/tank-gen2/data/shared` | `192.168.10.101/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid=101` |
 | `/mnt/shared` | `192.168.10.101/32` | `async,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid=100`（2026-10-29にasync化） |
 | `/mnt/tank-gen2/data/agent-backups` | `192.168.10.104/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid`なし（2026-10-18作成） |
+
+`ai`と`archive`には明示的な`fsid`を追加しない。marker名・値は移行前と同じで、
+`archive` markerは`0:0` / `0644`を保持する。archive exportとApps mountのrw契約は維持し、
+datasetも`readonly=off`（書き込み可）とし、毎日04:30の自動snapshotで世代を保持する。
 
 ## Apps VMの利用path
 
@@ -36,7 +42,7 @@
 | --- | --- | --- |
 | `/mnt/shared` | Samba `shared` | read/write |
 | `/mnt/tank-gen2/data/shared` | Samba `shared-hdd` | read/write |
-| `/mnt/tank-gen1/data/archive` | Samba `archive` | read/write |
+| `/mnt/tank-gen3/data/archive` | Samba `archive` | read/write（自動snapshotで世代保持） |
 | `/mnt/shared/koji-genba/stashPadLib` | stashPad media | container bind mountはread-only |
 | `/mnt/tank-gen2/data/k8s-volumes/sillytavern-sillytavern-data-pvc-85f01a24-9480-4341-a6ad-f44b17cbecaa` | SillyTavern data | read/write |
 | `/mnt/tank-gen2/data/k8s-volumes/stashpad-prod-stashpad-data-pvc-c96b1813-be70-49ca-865f-989e77359a6b` | stashPad prod metadata | read/write |
@@ -64,13 +70,13 @@ DGX Spark 2台とApps VMが共有する、モデルと学習データ（tar.gz�
 
 | 項目 | 値 |
 | --- | --- |
-| dataset | `tank-gen2/data/ai` |
+| dataset | `tank-gen3/data/ai` |
 | 明示するproperty | `recordsize=1M`のみ（`atime=off`と`compression=lz4`はpool継承） |
-| server側path | `/mnt/tank-gen2/data/ai` |
+| server側path | `/mnt/tank-gen3/data/ai` |
 | client範囲 | `192.168.10.0/24` |
 | option | `rw,sync,no_subtree_check,no_root_squash`（固有optionなし。`fsid`は指定しない） |
-| owner / mode | `root:root` / `0777` |
-| marker | `/mnt/tank-gen2/data/ai/.homelab-export`、内容は`ai` |
+| owner / mode | 既存の数値UID/GIDとmodeをsend/recvで保持。markerは`10002:10002` / `0644` |
+| marker | `/mnt/tank-gen3/data/ai/.homelab-export`、内容は`ai` |
 | snapshot | 取らない（再取得可能なデータとして扱う） |
 
 clientは次の3つで、いずれも同じ条件でmountする。read-only mountもclientごとのexport分割も行わない。
@@ -169,7 +175,7 @@ awk '/^device 192.168.10.11/{d=$2} /xprt:/{c[d]++} END{for(k in c) print c[k], k
 | --- | --- |
 | `/mnt/tank-gen2/data/shared/.homelab-export-shared` | `shared` |
 | `/mnt/tank-gen2/data/shared/.homelab-export-shared-hdd` | `shared-hdd` |
-| `/mnt/tank-gen1/data/archive/.homelab-export` | `archive` |
+| `/mnt/tank-gen3/data/archive/.homelab-export` | `archive` |
 | `/mnt/tank-gen2/data/shared/koji-genba/stashPadLib/.homelab-export` | `stashpad-media` |
 | `/mnt/tank-gen2/data/k8s-volumes/sillytavern-sillytavern-data-pvc-85f01a24-9480-4341-a6ad-f44b17cbecaa/.homelab-export` | `sillytavern-data` |
 | `/mnt/tank-gen2/data/k8s-volumes/stashpad-prod-stashpad-data-pvc-c96b1813-be70-49ca-865f-989e77359a6b/.homelab-export` | `stashpad-prod-data` |
@@ -179,7 +185,7 @@ ADR-0006の`ai` exportを追加した時点で、次の1件が加わって8つ�
 
 | server側の実体path | marker内容 |
 | --- | --- |
-| `/mnt/tank-gen2/data/ai/.homelab-export` | `ai` |
+| `/mnt/tank-gen3/data/ai/.homelab-export` | `ai` |
 
 Open WebUIのdata pathを追加した時点で、次の1件がさらに加わる（2026-10-10に作成）。
 
@@ -188,8 +194,8 @@ Open WebUIのdata pathを追加した時点で、次の1件がさらに加わる
 | `/mnt/tank-gen2/data/k8s-volumes/open-webui/.homelab-export` | `open-webui-data` |
 
 markerはApps VMの未mount directoryには絶対に作らない。NFS server local consoleで対象datasetとpathを
-確認して作成し、snapshot/backup対象に含める。`archive`と`k8s-volumes`には自動snapshotがないため、
-少なくとも移行前snapshotを別途取得してからフェーズ2へ進む。
+確認して作成し、snapshot/backup対象に含める。`archive`は毎日04:30の自動snapshot対象である。
+`k8s-volumes`には自動snapshotがないため、少なくとも移行前snapshotを別途取得してからフェーズ2へ進む。
 
 ## 手動反映の記録手順
 

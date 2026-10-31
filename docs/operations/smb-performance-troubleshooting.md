@@ -320,7 +320,7 @@ Apps VMの停止時間は約3分だった。
   `queues = 4`を追加した。4 vCPUに合わせ、2026-07のmultiqueue=4という記録との食い違いを解消する。
   固定版bpg/proxmox 0.117.0の[公式資料](https://github.com/bpg/terraform-provider-proxmox/blob/v0.117.0/docs/resources/virtual_environment_vm.md)で対応を確認した。
   実機では`qm set`でnet0へTerraformの定義と同じ`queues=4`を設定し、起動後の`eth0`がrx/txとも4キューであることを確認した。
-  `terraform plan`で差分が出ないことは未確認。
+  2026-10-29に`terraform plan`を実行し、差分が無い（No changes）ことを確認した。
 - **SambaのTCPバッファ**: `smb.conf`の`socket options`行を削除した。
   [公式資料](https://www.samba.org/samba/docs/current/man-html/smb.conf.5.html#SOCKETOPTIONS)が固定バッファによる
   自動調整の無効化を警告しているため、カーネルの自動調整に任せる。Sambaの既定は`TCP_NODELAY`。

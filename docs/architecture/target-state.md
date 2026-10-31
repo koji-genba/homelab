@@ -138,8 +138,8 @@ client側の経路・接続先は[Apps VM tailnet運用](../operations/apps-vm-t
 | stashPad media | `/mnt/shared/koji-genba/stashPadLib` |
 | Samba shared | `/mnt/shared` |
 | Samba shared-hdd | `/mnt/tank-gen2/data/shared` |
-| Samba archive | `/mnt/tank-gen1/data/archive` |
-| Samba ai / DGX Spark | `/mnt/tank-gen2/data/ai` |
+| Samba archive | `/mnt/tank-gen3/data/archive` |
+| Samba ai / DGX Spark | `/mnt/tank-gen3/data/ai` |
 
 現在もopaque PVC由来pathをmountする。`k8s-volumes`は現行のデータパスであり、削除対象ではない。
 `files/infrastructure/ansible/apps/group_vars/apps.yml`の`nfs_mounts`は9 mountである。
@@ -173,7 +173,7 @@ file `0666` / directory `0777`とする。本体は再取得可能で、ai共有
 
 ### NFS export契約
 
-`/mnt/tank-gen2/data/ai`はDGX Spark 2台とApps VMが共有する単一exportで、client範囲は
+`/mnt/tank-gen3/data/ai`はDGX Spark 2台とApps VMが共有する単一exportで、client範囲は
 `192.168.10.0/24`のままとする（[ADR-0006](../adr/0006-ai-dataset-single-export.md)）。
 
 既存4親exportのclientはApps VM `192.168.10.101/32`だけとし、基本optionは

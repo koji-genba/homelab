@@ -145,7 +145,7 @@ source /etc/network/interfaces.d/*
 
 ### ディスクとpoolの識別
 
-次は2026-10-12に`lsblk`、`zpool list`、`zpool status -P`で確認した配置である。
+既存diskの配置は2026-10-12の確認に基づく。tank-gen3は切り替え完了時の構成を示す。
 `sd*`の並びは6月版と変わっているため、`/dev/sd*` / `/dev/nvme*`の列挙順を識別子として使わず、
 by-idと再構築前の採取記録で照合する。
 
@@ -156,6 +156,7 @@ by-idと再構築前の採取記録で照合する。
 | sda / sdb | TOSHIBA HDWG62CUZSVA / 各20T | tank-gen2 mirror |
 | sdc / sde | TOSHIBA MD04ACA400 / 各3.6T | tank-gen1 mirror |
 | sdd | PLEXTOR PX-512M8VC / 476.9G | tank-gen2 L2ARC |
+| by-idで識別 | Seagate ST24000DM001-3Y7103 / 各24TB、DN02 | tank-gen3 mirror |
 | sdf / sdg | KIOXIA-EXCERIA SATA SSD / 各894.3G | cache-pool mirror |
 
 | pool / 配置 | by-id識別子（`/dev/disk/by-id/`配下） |
@@ -163,10 +164,11 @@ by-idと再構築前の採取記録で照合する。
 | vmpool（単一disk） | `nvme-WD_BLACK_SN770_1TB_22390J802169-part1` |
 | tank-gen1 mirror（SLOG / L2ARCなし） | `wwn-0x50000398bb903d0d-part1`、`wwn-0x50000398bb883e91-part1` |
 | tank-gen2 mirror | `ata-TOSHIBA_HDWG62CUZSVA_9562A00WFDQJ-part1`、`ata-TOSHIBA_HDWG62CUZSVA_9562A00QFDQJ-part1` |
+| tank-gen3 mirror | `ata-ST24000DM001-3Y7103_ZXA2KJFS`、`ata-ST24000DM001-3Y7103_K1N00Y6B`（disk全体。作成後はpartitionも照合） |
 | tank-gen2 L2ARC | `ata-PLEXTOR_PX-512M8VC_P02947400134-part1` |
 | cache-pool mirror（`autotrim=on`） | `ata-KIOXIA-EXCERIA_SATA_SSD_85LB61PUK0Z5-part1`、`ata-KIOXIA-EXCERIA_SATA_SSD_51VB81OWKJ72-part1` |
 
-4 poolとも確認時は`ONLINE`だった。`/var/lib/vz`はOSのroot filesystem（`pve-root`）上にある。
+現行契約は5 poolで、すべて`ONLINE`であることを復旧時に確認する。`/var/lib/vz`はOSのroot filesystem（`pve-root`）上にある。
 `tank-gen1` / `tank-gen2`は一部featureが未有効化であり、有効化は不可逆なので復旧手順では`zpool upgrade`を実行しない。
 
 ### vmpool
@@ -206,6 +208,7 @@ zpool status vmpool
 zpool import
 zpool import tank-gen1
 zpool import tank-gen2
+zpool import tank-gen3
 zpool import cache-pool
 zpool status
 zfs list -o name,mountpoint,mounted
@@ -216,7 +219,7 @@ vmpoolも対象とし、保持したvmpoolをimportした場合にも同じ登�
 pool名のハイフンは`\x2d`へエスケープする必要があるため、`systemd-escape`でunit名を生成する。
 
 ```bash
-for pool in vmpool tank-gen1 tank-gen2 cache-pool; do
+for pool in vmpool tank-gen1 tank-gen2 tank-gen3 cache-pool; do
   unit=$(systemd-escape --template=zfs-import@.service "$pool")
   systemctl enable "$unit"
 done
@@ -238,7 +241,8 @@ Linuxでは`/etc/zfs/zpool.cache`が0バイトになる。cache方式との混�
 個別unitを有効にし、`zfs-import.target`の依存一覧に追加されたことを確認する。
 次の計画再起動で自動importとdatasetのmountを[検証](#検証)し、追加作業の確認記録に残す。
 
-2026-10-12に`zfs list -d 2`で確認したdatasetとmountpointは次のとおりである。
+復旧時のdatasetとmountpointの契約は次のとおり。旧ai/archiveは検証完了までreadonly・非exportで保持し、削除は別作業とする。
+下表の旧2 datasetもこの退避用であり、現行exportはtank-gen3側だけを使う。
 
 ```text
 cache-pool                    /mnt/cache-sata
@@ -250,6 +254,10 @@ tank-gen2/data                /mnt/tank-gen2/data
 tank-gen2/data/ai             /mnt/tank-gen2/data/ai
 tank-gen2/data/k8s-volumes    /mnt/tank-gen2/data/k8s-volumes
 tank-gen2/data/shared         /mnt/tank-gen2/data/shared
+tank-gen3                     /mnt/tank-gen3
+tank-gen3/data                /mnt/tank-gen3/data
+tank-gen3/data/ai             /mnt/tank-gen3/data/ai
+tank-gen3/data/archive        /mnt/tank-gen3/data/archive
 vmpool                        /vmpool
 ```
 
@@ -296,6 +304,9 @@ Apps・Hermes・DGXのNFSも復帰した。ただし`pve-guests.service`によ�
 `nfs-server.service`の完了より前に始まっている。今回は問題なかったが、VMの起動がNFSの準備完了を
 待つ順序までは保証していない。
 
+tank-gen3の作成条件、smartd設定、四半期scrub、archiveの書き込み可と自動snapshotは
+[tank-gen3運用](tank-gen3.md)に従って復元する。新規poolの再起動後のimport・mountは未検証として別途記録する。
+
 ### mover、cron、logrotate
 
 2026-10-12に`/usr/local/bin/mover.sh`とrepoの`files/infrastructure/storage/mover.sh`のsha256が一致したことを確認した。
@@ -309,6 +320,7 @@ install -m 0644 files/infrastructure/storage/mover.logrotate /etc/logrotate.d/mo
 ```
 
 rootのcronへ[毎朝5時の設定](tiered-storage.md#moverスクリプト)を戻す。
+archiveのscript・logrotateと04:30のroot cronも[tank-gen3運用](tank-gen3.md#archiveの自動snapshot)に従って戻す。
 配置後にrepoのscriptと`/usr/local/bin/mover.sh`を照合し、両mountと所有者を確認してからcronを有効にする。
 移動・snapshot・logの仕組みと確認方法は同文書を参照する。
 
@@ -316,7 +328,7 @@ rootのcronへ[毎朝5時の設定](tiered-storage.md#moverスクリプト)を�
 
 [NFS export契約](nfs-export.md)を正として、pve1のNFS server設定とexport tableを手動で復元する。
 既存4 exportはApps VMの`192.168.10.101/32`、DGXも使う`ai`だけは`192.168.10.0/24`である。
-2026-10-12にpve1で`exportfs -v`を実行し、この契約どおりのexportを確認した。
+2026-10-12の確認は移行前のexportに対する記録である。復旧時は現行契約のtank-gen3側pathを照合する。
 
 現行の9 mountの正は`files/infrastructure/ansible/apps/group_vars/apps.yml`の`nfs_mounts`である。
 各exportと[marker](nfs-export.md#マーカー契約)が揃わないと、Apps VMのmount guardが失敗し、
@@ -557,6 +569,10 @@ zpool status
 zfs list -o name,mountpoint,mounted
 systemctl list-dependencies zfs-import.target
 zpool get autotrim cache-pool
+zfs get recordsize,readonly,compression,atime,xattr,dnodesize tank-gen3/data/ai tank-gen3/data/archive
+zfs get org.debian:periodic-scrub tank-gen3
+systemctl is-enabled "$(systemd-escape --template=zfs-import@.service tank-gen3)"
+systemctl list-timers tank-gen3-scrub.timer
 findmnt -M /mnt/cache-sata
 findmnt -M /mnt/tank-gen2/data/shared
 findmnt -M /mnt/shared -o TARGET,SOURCE,FSTYPE,OPTIONS
@@ -569,7 +585,7 @@ qm config 9000
 
 - poolがONLINEで、保持したdataset / snapshotが存在し、想定pathへmountされていること。
 - 起動後、`zfs-import.target`の依存一覧に全poolの個別インスタンスがあること。
-  現行はvmpool・tank-gen1・tank-gen2・cache-poolの4本で、新規追加したpoolも含める。
+  現行契約はvmpool・tank-gen1・tank-gen2・tank-gen3・cache-poolの5本で、新規追加したpoolも含める。
   `journalctl -b -o short-precise`で個別import → `zfs-mount.service` → `mnt-shared.mount` →
   `nfs-server.service`の順序と各unitの成功を確認する。依存一覧にあるだけでimport成功とは判断しない。
 - mergerfsのbranch順序・optionが[Tiered Storage](tiered-storage.md#設定)と一致すること。
@@ -598,7 +614,7 @@ KeePassXCや運用記録に保存して復旧時の照合元にする。
 | Proxmox VE 9.2.3 / Debian 13 (trixie) | `pveversion -v`、`cat /etc/os-release` |
 | `pve1` / `pve1.kojigenba-srv.com` / hosts行 | `hostname`、`hostname -f`、`cat /etc/hosts` |
 | OSのLVM + ext4 layout、diskモデル・配置、poolのby-id | `lsblk -o NAME,SIZE,MODEL,SERIAL,FSTYPE,MOUNTPOINTS`、`ls -l /dev/disk/by-id/`、`zpool status -P` |
-| 4 poolのtopology・ONLINE、cache-poolのautotrim | `zpool list`、`zpool status -P`、`zpool get autotrim cache-pool` |
+| 5 poolのtopology・ONLINE、cache-poolのautotrim | `zpool list`、`zpool status -P`、`zpool get autotrim cache-pool` |
 | dataset mountpoint、Phase 5直前snapshotの現存 | `zfs list -d 2`、`zfs list -t snapshot` |
 | NIC名`nic0`、bridge / VLAN 10設定 | `cat /etc/network/interfaces` |
 | mergerfs / NFS package、fstab、union mount | `dpkg-query -W mergerfs nfs-kernel-server`、`cat /etc/fstab`、`findmnt -M /mnt/shared -o SOURCE,FSTYPE,OPTIONS` |
