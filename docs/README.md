@@ -11,6 +11,8 @@
 
 - [アプリケーションのライフサイクル](operations/application-lifecycle.md): Git reconcile、stashPad promotion、Ansible反映、rollbackと再開。
 
+- [UPS / NUT運用](operations/ups-nut.md): pve1の導入、停電・復電試験、しきい値と計画停止（実機未検証）。
+
 ## 復旧
 
 - [Proxmoxホスト復旧手順](operations/proxmox-host-recovery.md): 2026-10-12に確認したpve1の構成に基づく、ホストOS、ネットワーク、ストレージからVM群までの復旧手順。
@@ -49,6 +51,7 @@
 | 文書 | 内容 |
 | --- | --- |
 | [runtime secrets](../files/infrastructure/secrets/README.md) | SOPS/age bundle、keyの形式とsecret編集・反映 |
+| [pve1 NUT Ansible](../files/infrastructure/ansible/pve1/README.md) | NUTだけを管理するhost root、check/applyと管理境界 |
 | [Ansible secrets role](../files/infrastructure/ansible/apps/roles/secrets/README.md) | 管理端末での復号とruntime secretの生成・転送 |
 | [Apps VM Terraform](../files/infrastructure/terraform/apps-vm/README.md) | Debian 13 VMとcloud-init、credentialとplan/applyの前提 |
 | [Tailscale gateway Terraform](../files/infrastructure/terraform/tailscale-gateway/README.md) | gateway VMの構築と手動登録 |

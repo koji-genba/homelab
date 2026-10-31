@@ -16,3 +16,4 @@ ADR は採用時点の判断を固定するもので、前提が変わった場�
 | [0008](0008-hermes-agent-hindsight-vms.md) | 実装済み（repo定義済み、2026-10-17）。実機では未検証（初回構築は未実施、ローカル品質閾値は一部達成、創作・rerank速度に残課題） | Hermes常駐エージェントとHindsight記憶をAgent VM（104）とRunner VM（105）へ分離して追加する。Ansible手動反映、Composeはreconcile対象外、記憶はRuri-v3 + PGroonga |
 | [0009](0009-elastiflow-caddy-fqdn.md) | 承認済み。2026-10-22に反映済み（PR #116） | ElastiFlow UIをCaddy経由のFQDNで公開する。0007のLAN管理UI経路の例外 |
 | [0010](0010-tank-gen3-cold-pool.md) | 採用。適用は切り替え時 | ai・archiveをtank-gen3 mirrorへ配置し、四半期scrubとarchiveの書き込み可・自動snapshotを運用する（2026-10-31変更） |
+| [0011](0011-ups-nut-shutdown.md) | 承認済み。repo定義済み、実機未検証 | pve1 NUT primary・DGX早期停止・VM逆順停止・killpowerとDiscord通知 |

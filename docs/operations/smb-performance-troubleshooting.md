@@ -225,6 +225,8 @@ mp3とflacが混ざった約200GB（1個3〜50MB）をSMBで`shared`へ書くと
 1回のWRITEで済みCOMMITが起きない小さいファイルは、変更前もACK時点で永続化されていなかった。
 UPS（CPJ1200）はあるが監視ソフトがなく、停電時の正常シャットダウンは
 [issue #158](https://github.com/koji-genba/homelab/issues/158)で別に扱う。
+軽減策としてpve1のNUT監視とDGX・VMの協調停止を導入予定。
+[UPS / NUT運用](ups-nut.md)に導入・試験と計画停止の手順を定義している（実機未検証）。
 
 ## 待ちが積み重なる仕組み
 
