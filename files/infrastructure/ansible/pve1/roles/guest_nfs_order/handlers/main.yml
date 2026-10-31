@@ -1,0 +1,5 @@
+---
+# pve-guests refuses manual start/stop; ordering only needs a daemon reload.
+- name: Reload systemd for guest NFS order
+  ansible.builtin.systemd_service:
+    daemon_reload: true

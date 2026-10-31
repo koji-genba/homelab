@@ -1,6 +1,9 @@
 ---
 nut_shutdown_dry_run: false
 nut_hostsync: 240
+nut_offdelay: 60
+# Stay off after killpower; CPJ1200 behavior must be verified on hardware.
+nut_ondelay: -1
 nut_ignorelb: false
 # null omits the override; retain the UPS's own LB until measurements exist.
 nut_battery_charge_low: null

@@ -3,6 +3,8 @@
   hosts: pve
   become: false
   roles:
+    - role: guest_nfs_order
+      tags: guest_nfs_order
     - role: guest_startup
       tags: guest_startup
     - nut

@@ -82,10 +82,18 @@ mergerfsを通さない直接経路として維持。大事なデータのコピ
 mergerfsプロセスの引数に`noforget`があることと、markerを確認した。
 
 マウントし直す際はApps VMを停止し、pve1で`exportfs -u`の後に`exportfs -f`で
-カーネルのNFS exportキャッシュを破棄してから`umount /mnt/shared`する。
+カーネルのNFS exportキャッシュを破棄してから`systemctl stop mnt-shared.mount`する。
 2026-10-29の保守では、`exportfs -u`だけではキャッシュがマウントを参照し続け、
 ユーザー空間のプロセスが掴んでいなくても`umount`がbusyになった。
+fstabを変更した場合は`systemctl daemon-reload`の後、`systemctl start mnt-shared.mount`で戻す。
 再マウント後は`exportfs -ra`で再exportしてからApps VMを起動する。
+停止・export解除済みで単に再マウントする場合も、`systemctl restart mnt-shared.mount`などunitを通す。
+
+2026-10-31の停電試験では、10-29にSSHから手でmountし直したmergerfsがsession-398.scopeに残り、
+ホスト停止開始と同時の20:14:59にSIGTERMを受けた（運用者のログ確認）。再起動後は
+`0::/system.slice/mnt-shared.mount`配下になった。SSHから直接mountしてセッションのcgroupへ残さず、
+再マウントは上記のsystemd unit経由とする。Apps停止・export解除・キャッシュ破棄の前提は省かない。
+VM→NFS→mergerfsの順序修正は[UPS運用](ups-nut.md#pve-guestsとnfsの順序)を参照する。
 
 `x-systemd.requires=zfs-mount.service`: `zfs-mount.service`へのRequires / After依存を加え、
 ZFSより先にmergerfsがmountされるのを防ぐ。2026-10-27にpve1へ反映し、再起動で順序を確認した。
