@@ -1,0 +1,156 @@
+---
+- name: Extract NUT credentials on the controller only
+  ansible.builtin.command:
+    argv: [sops, decrypt, --extract, '["nut"]', "{{ nut_runtime_secrets_file }}"]
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  changed_when: false
+  register: nut_credentials_result
+  no_log: true
+
+- name: Extract only the shared Gatus webhook on the controller
+  ansible.builtin.command:
+    argv: [sops, decrypt, --extract, '["gatus"]["discord_webhook_url"]', "{{ nut_apps_secrets_file }}"]
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  changed_when: false
+  register: nut_webhook_result
+  no_log: true
+
+- name: Parse transient NUT credentials
+  ansible.builtin.set_fact:
+    nut_credentials: "{{ nut_credentials_result.stdout | from_yaml }}"
+  no_log: true
+
+- name: Validate secret values before deployment
+  ansible.builtin.assert:
+    that:
+      - nut_credentials.upsmon_primary_password is match('^[A-Za-z0-9]{32,}$')
+      - nut_credentials.upsmon_secondary_password is match('^[A-Za-z0-9]{32,}$')
+      - nut_webhook_result.stdout is match('^https://[^\s"\\]+$')
+  no_log: true
+
+- name: Install only Debian NUT packages
+  ansible.builtin.apt:
+    name: [nut-server, nut-client]
+    state: present
+    install_recommends: false
+
+# On the first --check the package and nut group may not exist yet.
+- name: Detect installed NUT monitor
+  ansible.builtin.stat:
+    path: /usr/sbin/upsmon
+  register: nut_monitor_binary
+
+- name: Configure installed NUT
+  when: not ansible_check_mode or nut_monitor_binary.stat.exists
+  block:
+    - name: Create NUT configuration directory
+      ansible.builtin.file:
+        path: /etc/nut
+        state: directory
+        owner: root
+        group: nut
+        mode: '0750'
+
+    - name: Refuse to arm shutdown with a stale killpower flag
+      ansible.builtin.stat:
+        path: /etc/killpower
+      register: nut_killpower
+
+    - name: Require operator review of stale killpower flag
+      ansible.builtin.assert:
+        that: not nut_killpower.stat.exists
+        fail_msg: >-
+          /etc/killpower exists. Review the UPS/FSD state and follow ups-nut.md
+          before removing it and reapplying. Never arm shutdown with a stale flag.
+
+    - name: Configure driver and mode
+      ansible.builtin.template:
+        src: "{{ item }}.j2"
+        dest: "/etc/nut/{{ item }}"
+        owner: root
+        group: nut
+        mode: '0640'
+      loop: [nut.conf, ups.conf]
+      notify: Enumerate NUT driver
+
+    - name: Configure network listener
+      ansible.builtin.template:
+        src: upsd.conf.j2
+        dest: /etc/nut/upsd.conf
+        owner: root
+        group: nut
+        mode: '0640'
+      notify: Restart NUT server
+
+    - name: Configure authentication
+      ansible.builtin.template:
+        src: upsd.users.j2
+        dest: /etc/nut/upsd.users
+        owner: root
+        group: nut
+        mode: '0640'
+      no_log: true
+      diff: false
+      notify: Restart NUT server
+
+    - name: Configure primary monitor
+      ansible.builtin.template:
+        src: upsmon.conf.j2
+        dest: /etc/nut/upsmon.conf
+        owner: root
+        group: nut
+        mode: '0640'
+      no_log: true
+      diff: false
+      notify: Restart NUT monitor
+
+    - name: Store shared webhook without duplicating the bundle key
+      ansible.builtin.copy:
+        content: "{{ nut_webhook_result.stdout }}\n"
+        dest: /etc/nut/discord-webhook
+        owner: root
+        group: nut
+        mode: '0640'
+      no_log: true
+      diff: false
+
+    - name: Install asynchronous notifier
+      ansible.builtin.copy:
+        src: homelab-nut-notify
+        dest: /usr/local/sbin/homelab-nut-notify
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Apply configuration before enabling monitor
+      ansible.builtin.meta: flush_handlers
+
+    - name: Enable NUT units
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop:
+        - nut.target
+        - nut-driver-enumerator.path
+        - nut-driver@cpj1200.service
+        - nut-server.service
+        - nut-monitor.service
+
+    - name: Read UPS status after deployment
+      ansible.builtin.command: upsc cpj1200@localhost ups.status
+      register: nut_status
+      changed_when: false
+      retries: 6
+      delay: 5
+      until: nut_status.rc == 0
+      when: not ansible_check_mode
+
+- name: Explain initial check limitation
+  ansible.builtin.debug:
+    msg: NUT is not installed; initial check reports packages only. Re-run check with diff after installation.
+  when: ansible_check_mode and not nut_monitor_binary.stat.exists

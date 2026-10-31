@@ -1,0 +1,95 @@
+#!/usr/bin/python3
+"""upsmon NOTIFYCMD: detach immediately; never log webhook or curl output."""
+import json
+import os
+from pathlib import Path
+import socket
+import subprocess
+import sys
+
+WEBHOOK_FILE = Path('/etc/nut/discord-webhook')
+EVENTS = {
+    'ONBATT': '停電: バッテリー運転に切り替わりました',
+    'ONLINE': '復電: 商用電源に戻りました',
+    'LOWBATT': 'バッテリー残量が低下しました',
+    'FSD': '協調停止が要求されました',
+    'SHUTDOWN': 'ホストの停止を開始します',
+    'COMMBAD': 'UPS との通信に異常があります',
+    'COMMOK': 'UPS との通信が回復しました',
+    'NOCOMM': 'UPS と通信できません',
+    'REPLBATT': 'バッテリーの交換が必要です',
+    'NOPARENT': 'upsmon の親プロセスが応答しません',
+}
+
+
+def query(*args):
+    try:
+        result = subprocess.run(['upsc', *args], capture_output=True,
+                                text=True, timeout=3, check=False)
+        return result.stdout.strip() if result.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def message(event):
+    lines = [f'{socket.gethostname()} / {event}: {EVENTS.get(event, "UPS イベント")}']
+    # One bounded query rather than one process per value.
+    data = query('cpj1200@localhost')
+    values = dict(line.split(': ', 1) for line in (data or '').splitlines()
+                  if ': ' in line)
+    for key in ('battery.charge', 'battery.runtime', 'ups.load', 'input.voltage'):
+        lines.append(f'{key}: {values.get(key, "取得不可")}')
+    if event == 'ONLINE':
+        clients = query('-c', 'cpj1200@localhost')
+        if clients is None:
+            lines.append('secondary 接続元を取得できません。DGX の状態を確認してください。')
+        else:
+            addresses = {line.strip().removeprefix('::ffff:')
+                         for line in clients.splitlines()}
+            for suffix in ('51', '52'):
+                if f'192.168.10.{suffix}' not in addresses:
+                    lines.append(f'DGX(.{suffix}) は停止している可能性があります。'
+                                 '電源ボタンで起動し、推論は手で起動してください')
+    return '\n'.join(lines)
+
+
+def send(event):
+    try:
+        webhook = WEBHOOK_FILE.read_text().strip()
+        if not webhook or any(c in webhook for c in '\r\n'):
+            raise ValueError('invalid webhook')
+        # URL is passed on stdin, never in argv, stdout, stderr or logs.
+        config = 'url = ' + json.dumps(webhook) + '\n'
+        payload = json.dumps({'content': message(event),
+                              'allowed_mentions': {'parse': []}}, ensure_ascii=False)
+        config += 'data = ' + json.dumps(payload, ensure_ascii=False) + '\n'
+        result = subprocess.run(
+            ['curl', '--config', '-', '--silent', '--fail', '--max-time', '5',
+             '--connect-timeout', '3', '--header', 'Content-Type: application/json'],
+            input=config, text=True, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, timeout=7, check=False)
+        if result.returncode:
+            raise RuntimeError('delivery failed')
+    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
+        # Deliberately omit exceptions: they may contain sensitive input.
+        subprocess.run(['logger', '-t', 'homelab-nut',
+                        'Discord 通知に失敗しました'], check=False,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def main():
+    event = os.environ.get('NOTIFYTYPE', 'UNKNOWN')
+    if os.fork():
+        return
+    os.setsid()
+    if os.fork():
+        os._exit(0)
+    with open(os.devnull, 'r+b', buffering=0) as null:
+        for fd in (0, 1, 2):
+            os.dup2(null.fileno(), fd)
+    send(event)
+    os._exit(0)
+
+
+if __name__ == '__main__':
+    main()

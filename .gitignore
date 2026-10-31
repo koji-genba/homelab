@@ -115,3 +115,6 @@ files/infrastructure/secrets/agent/runtime.yaml
 files/services/compose/.env
 # Local live Tailscale ACL export; review outside Git before import.
 files/infrastructure/terraform/tailscale/acl-policy.live.json
+
+# pve1 NUT plaintext input
+files/infrastructure/secrets/pve1/runtime.yaml

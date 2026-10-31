@@ -1,0 +1,19 @@
+RUN_AS_USER nut
+MONITOR cpj1200@localhost 1 {{ nut_primary_user }} {{ nut_credentials.upsmon_primary_password }} primary
+MINSUPPLIES 1
+{% if nut_shutdown_dry_run | bool %}
+SHUTDOWNCMD "/usr/bin/logger -t homelab-nut dry-run: shutdown suppressed"
+# No POWERDOWNFLAG in dry-run, including at system shutdown.
+{% else %}
+SHUTDOWNCMD "/sbin/shutdown -h now"
+POWERDOWNFLAG /etc/killpower
+{% endif %}
+HOSTSYNC {{ nut_hostsync }}
+FINALDELAY 5
+DEADTIME 15
+POLLFREQ 5
+POLLFREQALERT 5
+NOTIFYCMD /usr/local/sbin/homelab-nut-notify
+{% for event in nut_notify_events %}
+NOTIFYFLAG {{ event }} SYSLOG+EXEC
+{% endfor %}

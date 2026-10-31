@@ -1,0 +1,6 @@
+---
+- name: Configure pve1 NUT only
+  hosts: pve
+  become: false
+  roles:
+    - nut

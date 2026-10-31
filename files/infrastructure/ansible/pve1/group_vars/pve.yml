@@ -1,0 +1,3 @@
+---
+nut_runtime_secrets_file: "{{ playbook_dir }}/../../secrets/pve1/runtime.sops.yaml"
+nut_apps_secrets_file: "{{ playbook_dir }}/../../secrets/runtime.sops.yaml"
