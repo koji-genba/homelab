@@ -479,5 +479,8 @@ with ignorelb (LB role defaults unchanged); notifications replace lagging input.
 The 2026-10-31 20:00–20:30 production outage test reached killpower (FSD to output off ~436s; Apps 261s),
 but CPJ1200 restored output while AC was absent and NFS stopped before VMs. [ADR-0012](adr/0012-ups-stayoff-nfs-order.md)
 selects nut_ondelay=-1/manual UPS and pve1 recovery, and a guest_nfs_order drop-in After=nfs-server.service
-(daemon-reload only). These fixes are not yet live-verified. The runbook records the timeline and next planned test;
+(daemon-reload only). Applied 2026-10-31 20:49; the 2026-11-01 01:50 AC-connected FSD test confirmed
+HOSTSYNC (~21s), FSD to host off ~70s, VM stop ~34s (Apps19s/Hermes6s), VM→NFS shutdown and NFS→VM startup.
+CPJ1200 stayed off ~2.5min with AC present until the UPS button was pressed; DGX auto-booted and pve1 was started manually.
+Staying off without AC is inferred from this result, not directly tested. The runbook records both test timelines and recovery;
 Tiered Storage documents mounting mergerfs through mnt-shared.mount to avoid SSH session cgroups.

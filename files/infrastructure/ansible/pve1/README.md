@@ -38,7 +38,7 @@ Debian 2.8.1-5 の配布 deb をローカル展開して unit、既定設定、�
 RUN_AS_USER は Debian の既定の nut。ホストの通常停止だけでは killpower を要求しない。
 
 [導入・試験・計画停止](../../../../docs/operations/ups-nut.md)と
-[secret作成](../../secrets/README.md#pve1-nut用bundle)を参照する。2026-10-31に実機の導入・再適用changed=0・dry-run停電試験を確認（運用者報告）。同日20:00〜20:30の本番停止・killpowerも確認した。ondelay=-1とNFS順序修正後の実機試験は未検証。
+[secret作成](../../secrets/README.md#pve1-nut用bundle)を参照する。2026-10-31に実機の導入・再適用changed=0・dry-run停電試験を確認（運用者報告）。同日20:00〜20:30の本番停止・killpowerも確認した。PR #172は同日20:49に反映し、11-01に商用電源ありFSDでondelay=-1・NFS順序・手動復旧を確認した。
 
 
 `guest_startup` roleはgroup_varsの `guest_startup_vms` に従い6台の `qm config` を読み、
@@ -60,6 +60,8 @@ RefuseManualStart/Stopのpve-guestsをrestartしない。初回checkはディレ
 
 NUTのoffdelay/ondelayは `nut_offdelay`（既定60）/ `nut_ondelay`（既定-1）。
 長い停電後はUPS出力を手動復旧し、pve1もBIOSの自動起動無効を維持して電源ボタンで起動する。
-CPJ1200でondelay=-1が停止を維持する動作は未検証。ups.conf変更は既存handlerでdriverまでrestartする。
+CPJ1200は商用電源ありでも約2分半、UPSボタンまで出力停止を維持した（2026-11-01）。
+入力なしでも戻らないと見るのは、この結果に基づく推測であり直接は試していない。
+ups.conf変更は既存handlerでdriverまでrestartする。
 -kは稼働中driverの値を使い得るため、反映後はupscのups.delay.start=-1も確認する。
 判断と復旧手順は[ADR-0012](../../../../docs/adr/0012-ups-stayoff-nfs-order.md)とrunbookを参照する。

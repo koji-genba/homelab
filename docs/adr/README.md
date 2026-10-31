@@ -17,4 +17,4 @@ ADR は採用時点の判断を固定するもので、前提が変わった場�
 | [0009](0009-elastiflow-caddy-fqdn.md) | 承認済み。2026-10-22に反映済み（PR #116） | ElastiFlow UIをCaddy経由のFQDNで公開する。0007のLAN管理UI経路の例外 |
 | [0010](0010-tank-gen3-cold-pool.md) | 採用。適用は切り替え時 | ai・archiveをtank-gen3 mirrorへ配置し、四半期scrubとarchiveの書き込み可・自動snapshotを運用する（2026-10-31変更） |
 | [0011](0011-ups-nut-shutdown.md) | 承認済み。2026-10-31に本番停止・killpowerを確認。復帰方針とNFS順序は0012で更新 | pve1 NUT primary・DGX早期停止・VM逆順停止（startupはAnsible管理）・killpowerとDiscord通知 |
-| [0012](0012-ups-stayoff-nfs-order.md) | 承認済み。repo定義済み、変更後の実機反映・試験は未検証 | UPSをondelay=-1で手動復旧し、pve-guestsをNFSより先に停止する |
+| [0012](0012-ups-stayoff-nfs-order.md) | 承認済み。2026-10-31反映、11-01の商用電源ありFSD試験でstayoff・手動復旧・NFS順序を確認 | UPSをondelay=-1で手動復旧し、pve-guestsをNFSより先に停止する |

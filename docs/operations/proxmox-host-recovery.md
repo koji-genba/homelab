@@ -304,8 +304,10 @@ Bug #4835は個別unitを先行させる順序修正であり、空cache問題�
 Apps・Hermes・DGXのNFSも復帰した。ただし`pve-guests.service`によるVM自動起動処理は
 `nfs-server.service`の完了より前に始まっている。今回は問題なかったが、VMの起動がNFSの準備完了を
 待つ順序までは保証していなかった（2026-10-27時点）。
-このPRでpve1 Ansibleのdrop-inに `After=nfs-server.service` を入れ、起動時はNFS→VM、停止時はVM→NFSの順にする。
-drop-inの定義と次の計画停止での確認事項は[ADR-0012](../adr/0012-ups-stayoff-nfs-order.md)を参照。
+PR #172のpve1 Ansible drop-in（After=nfs-server.service）は2026-10-31 20:49に反映した。
+11-01のFSD試験ではVM全停止01:51:06→NFS停止01:51:06.44→mergerfs unmount01:51:12、
+起動時はNFS Finished01:55:48.000→pve-guests開始01:55:48.002を確認した。
+2026-10-27時点の順序の不足はこのdrop-inで解消した。[ADR-0012](../adr/0012-ups-stayoff-nfs-order.md)を参照。
 
 tank-gen3の作成条件、smartd設定、四半期scrub、archiveの書き込み可と自動snapshotは
 [tank-gen3運用](tank-gen3.md)に従って復元する。新規poolの再起動後のimport・mountは未検証として別途記録する。
@@ -589,7 +591,7 @@ systemctl show pve-guests.service -p After
 ```
 
 - pve-guestsの `50-homelab-nfs-order.conf` とAfterの `nfs-server.service` を確認する。
-  起動ログでNFS→VM、次の計画停止でVM→NFSの順も確認する（このPRの順序修正後は未検証）。
+  起動ログでNFS→VM、停止ログでVM→NFSの順も確認する（2026-11-01のFSD試験で両方確認済み）。
 - poolがONLINEで、保持したdataset / snapshotが存在し、想定pathへmountされていること。
 - 起動後、`zfs-import.target`の依存一覧に全poolの個別インスタンスがあること。
   現行契約はvmpool・tank-gen1・tank-gen2・tank-gen3・cache-poolの5本で、新規追加したpoolも含める。
