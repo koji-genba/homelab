@@ -1,7 +1,8 @@
 # UPS / NUT運用
 
 [ADR-0011](../adr/0011-ups-nut-shutdown.md) / [issue #158](https://github.com/koji-genba/homelab/issues/158)。
-この手順による実機の導入・停止・復電は**未検証**。repo定義と事前調査に基づく手順であり、実施履歴ではない。
+2026-10-31 JSTに段階1〜3（導入・secondary接続・dry-run停電試験）を確認した（運用者報告）。
+段階4の本番停止・killpower・復電後の一連の起動は**未検証**。以下では確認結果と残る試験を分ける。
 
 ## 構成
 
@@ -44,31 +45,55 @@ provider 0.117.0の既定は-1でAPIにupを送らず、PVE既定の起動遅延
 実際のplanで他の変更が混ざらないことは運用者が確認する。
 [PVEの起動・停止仕様](https://pve.proxmox.com/pve-docs/qm.1.html#_automatic_start_and_shutdown_of_virtual_machines)も参照。
 
-## しきい値を決める（未検証）
+## LBしきい値の決定と測定（2026-10-31 JST）
 
-初期値はUPSのLBをそのまま使う。安全な時間予算の確定前に、無人の停電保護が成立したとは扱わない。
-通常負荷・推論中・DGX停止後に、次を読み日時、負荷、経過秒、実際の停止時間を記録する。
+運用者がpve1のgroup_varsに次の値を採用した。roleのdefaultsは変更せず、未指定時はUPS自身のLBを使う。
+この値の実機反映・LB/FSDからの停止完了は、段階1〜3の結果だけでは検証済みとしない。
+
+```yaml
+nut_ignorelb: true
+nut_battery_charge_low: 50
+nut_battery_runtime_low: 300
+```
+
+DGX停止後のpve1中心の区間では残量50%が先に効く想定。battery.runtimeは秒で、同じ負荷でも約±25%揺れる。
+推論中の約500Wでは持ち時間が約9分しかなく、runtimeを600秒にすると停電直後にOB+LBとなり、
+瞬停でも全台停止につながる。pve1の `/lib/nut/upsmon` でNUT 2.8.1には `OBLBDURATION` がないことを
+運用者が確認したため、runtimeはUPS既定と同じ300秒にした。
+ignorelbはUPSのLBを無視し、driverが残量またはruntimeのしきい値でLBを作る。
+overrideはUPS firmwareを書き換えない。[2.8.1 ups.conf](https://networkupstools.org/historic/v2.8.1/docs/man/ups.conf.html)を参照。
+
+段階3での実測と推定（2026-10-31、運用者報告）:
+
+| 条件 | 結果 |
+| --- | --- |
+| 全台稼働、DGXアイドル | ups.load約37〜39%（約275W）、150秒でbattery.charge 100→88% |
+| 上記の放電率 | 約4.8%/分。満充電から約20分の見積もりであり、全放電の実測ではない |
+| 同じ負荷でのbattery.runtime | 1033〜1410秒に変動 |
+| アイドルDGX 1台 | 負荷約6〜7%（約45W） |
+| DGX停止後のpve1とネットワーク | 負荷約25%（約180W）と推定。停止後の持続時間は未検証 |
+
+### 停止時間予算と残る確認
+
+待ち上限の合計はHOSTSYNC240 + FINALDELAY5 + order3の180 + Apps420 + gateway180 = **1025秒**。
+さらにpve1自身のNFS/ZFS flush・OS停止、UPS offdelay60と安全余裕が必要。
+これは各上限を使い切る最悪条件であり、早く停止すれば次に進む。
+DGXが120秒で先に停止済みならHOSTSYNCを全て使うとは限らないが、本番停止時間はまだ未検証。
+
+runtime300秒は停止に必要な全時間を保証する値ではなく、高負荷時の瞬停による即時FSDを避けるための判断。
+残量50%も、上記1025秒以上の最悪条件を支えられると証明した値ではない。
+段階4でDGX停止後の負荷・残時間、Appsを含む実停止時間を測り、時間不足なら負荷・停止猶予・しきい値を見直す。
+バッテリー劣化、表示の揺れ、USB通信の遅れを含む余裕を取り、アイドル時の見積もりを推論中へ流用しない。
+確認には次を使い、日時・負荷・経過秒・実停止時間を記録する。
 
 ```sh
-upsc cpj1200@localhost
 upsc cpj1200@localhost ups.load
 upsc cpj1200@localhost battery.runtime
 upsc cpj1200@localhost battery.charge
+upsc cpj1200@localhost ups.status
 ```
 
-battery.runtimeの単位は秒。表示値が実測と合うか、DGX停止後の負荷低下が反映されるか確認する。
-最大の停止予算はHOSTSYNC240 + FINALDELAY5 + order3の180 + Apps420 + gateway180 = **1025秒**に、
-pve1自身のNFS/ZFS flush・OS停止・UPS offdelay60と安全余裕を加える。実際は早く停止すれば次に進むが、
-最悪時間をUPSが支えられないならtimeoutだけで保護は成立しない。負荷・停止時間・設定を見直す。
-バッテリー劣化、計測誤差、USB通信の遅れも含む余裕を取る。低負荷でのruntimeを推論中へ流用しない。
-
-測定後、pve1のgroup_varsで `nut_ignorelb: true` と
-`nut_battery_charge_low`（%）/ `nut_battery_runtime_low`（秒）を設定できる。
-nullならそのoverrideは出力しない。ignorelbはUPSのLBを無視して、driverが残量またはruntimeのしきい値でLBを作る。
-overrideはUPS firmwareを書き換えない。片方のしきい値だけ変更しても、もう片方の値でLBになるので両方を確認する。
-[2.8.1 ups.conf](https://networkupstools.org/historic/v2.8.1/docs/man/ups.conf.html)を参照。
-
-## シークレットと反映（未検証）
+## シークレットと反映
 
 1. pve1 bundleは[作成手順](../../files/infrastructure/secrets/README.md#pve1-nut用bundle)で2026-10-31に作成済み
    （運用者報告。既存bundleと同じage recipient、`make secrets-scan` はclean）。再作成が必要な場合だけ同手順を参照する。
@@ -95,7 +120,7 @@ passwordを含むupsmon.conf、upsd.usersとwebhookはdiff非表示。設定変�
 5. Terraformの6 rootのstartupを、既存の各rootのplan/保存plan確認/apply手順で運用者が反映する。
    startupだけのin-place変更であることを確認する。AnsibleはVM startupを変更しない。
 
-## 導入後の確認（未検証）
+## 導入後の確認
 
 pve1のrootコンソールで行う。secretを含む設定ファイルをcatしない。
 
@@ -110,7 +135,8 @@ upsdrvctl -t shutdown
 journalctl -u nut-server -u nut-monitor --since '-10 minutes'
 ```
 
-upscでOL（通常時）、USB製品、battery.charge/runtime、ups.load、input.voltageを確認。
+upscでOL（通常時）、USB製品、battery.charge/runtime、ups.load、ups.statusを確認。
+以下は導入後の確認手順。2026-10-31の実施結果は段階1〜3に記録し、`upsdrvctl -t shutdown`の実機確認は未検証とする。
 `upsc -c`で192.168.10.51/.52の接続元を確認。IPv4-mapped IPv6も通知では認識する。
 `upscmd -l` / 引数なしの`upsrw`は利用可能なコマンド・変数の一覧だけを読む。
 monitorアカウントにinstcmd/set権限は付けない。`upsdrvctl -t shutdown`は手順を表示するだけで、
@@ -123,57 +149,99 @@ runuser -u nut -- env NOTIFYTYPE=ONLINE UPSNAME=cpj1200@localhost /usr/local/sbi
 journalctl -t homelab-nut --since '-5 minutes'
 ```
 
-Discordに日本語、ホスト名、ONLINE、4測定値が届くこととDGX不在時の案内を確認。
+Discordに日本語、ホスト名、ONLINE、battery.charge/runtime・ups.load・ups.statusが届くこととDGX不在時の案内を確認。
+従来のinput.voltageはdriverのpollfreq（30秒）ごとの更新のため、ONBATT通知で100.0、ONLINEで0.0と
+前の状態の値が出た（2026-10-31実機確認）。通知項目をups.statusへ変更した。変更後の実配送は未検証。
 スクリプトは二段forkで切り離し、upsc各3秒、curl最大5秒で打ち切る。失敗はURLを含めずloggerへ残す。
 送信完了をシェルの終了コードから判断しない。停電中は外部通信が使えない場合もある。
 `upsmon -c fsd`は通知試験ではなく全体の停止要求なので通常設定で実行しない。
 
-## 段階的な試験（未検証）
+## 段階的な試験
+
+### 共通の準備・入力遮断方法
 
 試験前にbackupと復旧経路、UPS容量・バッテリー状態・接続負荷を確認し、保守時間を確保する。
 HDD 6本の同時スピンアップがUPSの定格を超えないか確認する。ローカルコンソールを確保する。
 AppsのAdGuardが止まるので作業端末のTailscale DNSを先に外し、IP直指定等で管理経路を確保する。
 Appsのreconcileを[アプリ運用](application-lifecycle.md)に従い一時停止し、終了後に戻す。
 Hermesの作業・Runnerジョブ、書き込み・転送・backup・mover等を調整し、DGX担当と試験を合わせる。
+接続対象がUPSのバッテリー給電側に挿さっていることも各機で確認する。
 
-1. 通常電源のまま導入して値と通知を読む。再適用changed=0と全secondary接続を確認する。
-2. pve1を `PVE1_ANSIBLE_ARGS='-e nut_shutdown_dry_run=true'` で適用し、SHUTDOWNCMDがloggerのみ、
-   POWERDOWNFLAGが省略されることを、rootで
-   `grep -E '^(SHUTDOWNCMD|POWERDOWNFLAG)' /etc/nut/upsmon.conf` によりsecretを表示せず確認する。
-   `test ! -e /etc/killpower`を確認。
-   DGX両台も別repoの `scripts/setup-nut-client.sh --dry-run-shutdown` でdry-runにする。
-   **pve1とDGXの両方をdry-runにして**、実際には停止せず、停電時の処理をログで確認する。
-   DGX側の詳細は別repoの手順に従う。
-   CPJ1200説明書は運転中に入力プラグを抜くことを禁じる。
-   接地を維持できる適切なスイッチ付き電源タップかブレーカーでUPS入力を遮断し、ONBATT、
-   DGXの120秒タイマーの開始・満了、満了前のONLINEによる取消、FSDの流れを条件を分けてログで確認する。
-   pve1・DGXとも停止要求がloggerだけになることを確認する。UPSの出力側は切らない。
-   LBまで放電する試験は、UPS出力で稼働を続ける負荷を保護できる状態でのみ行い、深放電を避ける。
-   任意のFSD模擬はpve1・DGX両方のdry-run設定確認後の明示操作としてのみ行う。
-3. 復電しOLを確認する。FSDは自動解除されないので、両方のdry-runを維持したまま
-   `systemctl restart nut-server.service nut-monitor.service` し、upscのFSD消失とOLを確認する。
-   `/etc/killpower`が残っていたら、停止処理中でないことを確認し、OL・FSDなしを再確認してrootで
-   `rm -- /etc/killpower`。Ansibleはstale flagを自動削除せず拒否する。
-   DGX側も別repoの手順に従いFSD後の状態を復旧してからdry-runを解除する。
-   pve1は`nut_shutdown_dry_run=false`で再適用し、monitorのrestartとflag不在を確認する。
-4. pve1・DGXとも本番設定で、短い停電、DGX早期停止後の復電、LB/FSD後の復電（VM停止中・出力断後）の条件を分けて試す。
-   DGXの実際の停止はこの段階で確認する。
-   FSD後は復電しても停止を完遂すること、VM順とtimeout、NFS解除、pve1停止、出力断、復帰を観察する。
-   CPJ1200のoffdelay=60 / ondelay=120が実際にどう丸められるかも記録する。
-   出力断の失敗や復帰しない場合は無人運転を保留し、安全を確認して電源操作で復旧する。
+**CPJ1200説明書は運転中の入力プラグ抜去を禁じている。** 今後の試験は接地を維持できる適切な
+スイッチ付き電源タップかブレーカーで入力を遮断し、UPS出力側は切らない。
+以下のプラグ抜去の記録は実施事実であり、推奨手順ではない。
+
+### 段階1: pve1導入の結果（2026-10-31 JST）
+
+以下の段階1〜3はすべて運用者報告に基づく。
+pve1にdry-run設定で適用した。初回はパッケージより前に挿さっていたUPSへ `62-nut-usbups.rules` が当たらず、
+driverが `insufficient permissions` で起動しなかった。roleのudev当て直しで解決した（commit `9481bbd`）。
+再applyはchanged=0。通知試験はDiscordに届いた。
+
+`upscmd -l` は `shutdown.return`、`load.off.delay`、`load.on.delay`、`test.battery.start.quick` などを表示した。
+`upsrw` の書き換え可能な値は `battery.charge.low`（既定10）、`battery.runtime.low`（既定300）、
+`ups.delay.shutdown`、`ups.delay.start`。一覧にあることは実際の出力制御の成功を意味しない。
+driverは30秒ごとに `nut_libusb_get_string: Invalid parameter` を出すが、今回の試験では動作に害はなかった。
+
+### 段階2: DGX接続・停止順の結果（2026-10-31 JST）
+
+DGX両台を別repoの `scripts/setup-nut-client.sh --dry-run-shutdown` でdry-run secondaryとして接続し、
+pve1の `upsc -c` に.51・.52が出ることを確認した。private repoの設定詳細はそちらの手順に従う。
+DGXを手で再起動した際、推論を止めるunit→ `/mnt/ai` のunmount→upsmon終了→pve1のログアウト記録の順になった。
+.52では15:55:57.112→.189→.190→pve1 .194と、各記録が数十ミリ秒以内に続いた。
+この記録は手動再起動時の順序確認であり、負荷のある推論の停止時間やFSD時のHOSTSYNCの余裕は未検証。
+
+### 段階3: dry-run停電試験の結果（2026-10-31 JST）
+
+pve1・DGXともdry-runで実施した。スイッチ付きタップがなかったため、説明書の禁止事項に反して
+UPS入力プラグを短時間抜いた。今後は上記の入力遮断方法を準備する。
+
+| 試験 | 結果 |
+| --- | --- |
+| A: 60秒 | ONBATT/ONLINEがDiscordに届いた。.51がバッテリー給電側に接続されておらず電源断し、復電で自動起動した。After Power Loss = Auto Bootの動作を確認。ONLINEは「DGX(.51) は停止している可能性」と正しく通知した。運用者が.51をバッテリー給電側へ挿し替えた |
+| B: 150秒 | .51・.52ともONBATTからちょうど120秒でタイマー満了。dry-runなのでloggerだけが実行され、両台とも稼働を継続した。ONLINE通知にはDGX不在の案内は付かなかった |
+
+NUT 2.8.1のupsschedはタイマー開始・取消を通常ログに出さない。満了はCMDSCRIPTの
+`logger -t upssched` で確認できる。開始・取消のログがないことだけを異常と判定しない。
+ネットワーク機器はUPSで動き続け、停電中も通知が届いた。負荷・放電率・runtimeは上のしきい値の節に記録した。
+このA/Bの結果からFSD経路を検証済みとはしない。
+
+### 段階4: 本番どおりの停止・復帰（未検証、後日実施）
+
+pve1・DGXの実際の協調停止、killpower、復電での一連の起動はまだ未検証。
+本番設定へ切り替える前に、dry-runとflagの状態を確認する。
+
+- pve1はSHUTDOWNCMDがloggerのみ、POWERDOWNFLAG省略であることをrootで
+  `grep -E '^(SHUTDOWNCMD|POWERDOWNFLAG)' /etc/nut/upsmon.conf` によりsecretを表示せず確認し、
+  `test ! -e /etc/killpower` を確認する。DGXも別repoのdry-run手順に従う。
+- FSD模擬が必要なら、両方のdry-run設定確認後の明示操作として行う。FSDは復電だけでは解除されない。
+  試験後はOLを確認し、dry-runを維持して `systemctl restart nut-server.service nut-monitor.service`、
+  upscでFSD消失を確認する。flagが残る場合は停止処理中でないこととOL・FSDなしを確認してから
+  rootで `rm -- /etc/killpower`。Ansibleはstale flagを自動削除しない。このFSD復旧経路も未検証。
+- DGXは別repoの手順で状態を戻してdry-runを解除する。pve1は決定したLB値を反映し、
+  `nut_shutdown_dry_run=false` で再適用する。monitorのrestartとflag不在を確認する。
+- 短い停電、DGX早期停止後の復電、LB/FSD後の復電（VM停止中・出力断後）を分けて試す。
+  DGXの実停止・NFS解除、HOSTSYNC、VM順とAppsを含む実停止時間、pve1のflush・停止、UPS出力断を確認する。
+- FSD後は復電しても停止を完遂すること、`shutdown.return` の実動作、offdelay=60 / ondelay=120の
+  実遅延と復帰を観察する。pve1のAC復帰設定、HDD 6本の同時スピンアップも確認する。
+- 出力断・復帰に失敗する場合や停止時間予算が足りない場合は無人運転を保留し、
+  安全を確認して電源操作で復旧する。reconcile・端末DNSも戻す。
 
 killpowerはDebianの `/usr/lib/systemd/system-shutdown/nutshutdown` が最後に `upsmon -K` を確認して
 実行する。通常の計画停止ではflagを立てない。CPJ1200のACあり/なしでのshutdown.returnの挙動は未検証。
 [CPJ1200取扱説明書](https://sakae-denshi.com/wp-content/uploads/2023/08/CPS_UM_CPJ1200_jp.pdf)と
 [NUT 2.8.1 usbhid-ups](https://networkupstools.org/historic/v2.8.1/docs/man/usbhid-ups.html)を参照する。
 
-## BIOSと復帰（未検証）
+## BIOSと復帰
 
-pve1（ASUS TUF GAMING X570-PLUS）はAC復帰で電源オンになる設定を確認する。
-DGXは `Advanced → Power On Behavior → After Power Loss Behavior = Auto Boot` を確認する。
+pve1（ASUS TUF GAMING X570-PLUS）のAC復帰時電源オンは未検証で、段階4で確認する。
+DGXの `Advanced → Power On Behavior → After Power Loss Behavior = Auto Boot` は、
+2026-10-31の試験Aで.51が復電で自動起動し、動作を確認できた。.52の復電起動は未検証。
 [NVIDIA公式UEFI手順](https://docs.nvidia.com/dgx/dgx-spark-uefi/advanced-tab.html#power-on-behavior)を参照。
 UPSがACを切らなかった早期停止では自動起動しない場合がある。DGXは電源ボタンで起動する。
 OSが戻っても推論は手動起動する。WoLは今回使わない。
+DGX起動途中に `mnt-ai.mount` が `Network is unreachable` で一度失敗するのは今回以前からの挙動で、
+2026-10-09の起動でも記録されている（運用者報告）。`/mnt/ai` にアクセスすればautomountで接続する。
 起動後は[Proxmoxホスト復旧の確認](proxmox-host-recovery.md#検証)に従いpool、NFS、VM、Appsを確認し、
 DGXは別repoの起動手順に従う。reconcileと端末DNSを戻し、NUT OL・接続元・通知も確認する。
 

@@ -37,7 +37,8 @@ def message(event):
     data = query('cpj1200@localhost')
     values = dict(line.split(': ', 1) for line in (data or '').splitlines()
                   if ': ' in line)
-    for key in ('battery.charge', 'battery.runtime', 'ups.load', 'input.voltage'):
+    # input.voltage can lag events by pollfreq (30s); report status instead.
+    for key in ('battery.charge', 'battery.runtime', 'ups.load', 'ups.status'):
         lines.append(f'{key}: {values.get(key, "取得不可")}')
     if event == 'ONLINE':
         clients = query('-c', 'cpj1200@localhost')

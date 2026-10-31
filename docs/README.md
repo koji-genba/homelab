@@ -11,7 +11,7 @@
 
 - [アプリケーションのライフサイクル](operations/application-lifecycle.md): Git reconcile、stashPad promotion、Ansible反映、rollbackと再開。
 
-- [UPS / NUT運用](operations/ups-nut.md): pve1の導入、停電・復電試験、しきい値と計画停止（実機未検証）。
+- [UPS / NUT運用](operations/ups-nut.md): pve1の導入、停電・復電試験、しきい値と計画停止（2026-10-31に導入・dry-run試験を確認、本番停止は未検証）。
 
 ## 復旧
 

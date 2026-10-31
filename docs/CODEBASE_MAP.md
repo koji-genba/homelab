@@ -472,4 +472,7 @@ and monitor changes restart upsmon. Six VM roots define startup order 1=gateway,
 shutdown timeout 420s for Apps / 180s for others; startup alone updates in place without reboot.
 DGX 120s secondary timers belong to edgexpert-ai-stack; pve1 waits for LB, HOSTSYNC defaults to 240s.
 See [ADR-0011](adr/0011-ups-nut-shutdown.md) and [UPS operations](operations/ups-nut.md).
-Live installation, killpower and recovery remain unverified; local notifier tests use dummy HTTP only.
+2026-10-31 operator report: installation/re-apply (changed=0), both DGX secondary connections, manual reboot NFS/upsmon stop order,
+and 60s/150s dry-run outage tests verified; Discord reached during the outage. pve1 group_vars now select LB charge50/runtime300
+with ignorelb (role defaults unchanged); notifications replace lagging input.voltage with ups.status. Production shutdown,
+killpower and full recovery remain unverified; see the runbook for measurements and stage 4.

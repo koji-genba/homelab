@@ -42,7 +42,7 @@ class NotificationTest(unittest.TestCase):
             def query(*args):
                 if args[0] == '-c':
                     return '127.0.0.1\n::ffff:192.168.10.51'
-                return 'battery.charge: 90\nbattery.runtime: 1000\nups.load: 20\ninput.voltage: 100'
+                return 'battery.charge: 90\nbattery.runtime: 1000\nups.load: 20\nups.status: OL\ninput.voltage: 0.0'
             with patch.object(notify, 'WEBHOOK_FILE', webhook), \
                     patch.object(notify, 'query', query), \
                     patch.object(notify.socket, 'gethostname', return_value='pve1 "test"\n日本語'):
@@ -52,6 +52,8 @@ class NotificationTest(unittest.TestCase):
         text = received[0]['content']
         self.assertIn('pve1 "test"\n日本語', text)
         self.assertIn('battery.runtime: 1000', text)
+        self.assertIn('ups.status: OL', text)
+        self.assertNotIn('input.voltage', text)
         self.assertIn('DGX(.52)', text)
         self.assertNotIn('DGX(.51)', text)
         self.assertEqual(received[0]['allowed_mentions'], {'parse': []})

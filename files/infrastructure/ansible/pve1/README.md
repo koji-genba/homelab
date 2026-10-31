@@ -24,8 +24,9 @@ check/apply は controller で pve1 bundle の `nut` と Apps bundle の
 `SHUTDOWNCMD` / `POWERDOWNFLAG` の反映には reload でなく restart を使う。
 
 既定値は `roles/nut/defaults/main.yml`、controller の bundle path は `group_vars/pve.yml`。
-LB の既定は UPS 任せ。`nut_ignorelb` と `nut_battery_charge_low` / `nut_battery_runtime_low`
-（null は省略）を測定後に設定する。`nut_hostsync` は既定240秒。
+roleのLB既定はUPS任せ。pve1のgroup_varsは2026-10-31のユーザー決定でignorelb・残量50%・runtime300秒。
+`nut_ignorelb` と `nut_battery_charge_low` / `nut_battery_runtime_low`（null は省略）で調整する。
+`nut_hostsync` は既定240秒。
 `nut_shutdown_dry_run=true` は logger のみ、POWERDOWNFLAG は省略する。
 `/etc/killpower` があれば適用を拒否するので、[runbook](../../../../docs/operations/ups-nut.md)に従い状態を確認する。
 
@@ -37,4 +38,4 @@ Debian 2.8.1-5 の配布 deb をローカル展開して unit、既定設定、�
 RUN_AS_USER は Debian の既定の nut。ホストの通常停止だけでは killpower を要求しない。
 
 [導入・試験・計画停止](../../../../docs/operations/ups-nut.md)と
-[secret作成](../../secrets/README.md#pve1-nut用bundle)を参照する。実機での導入・停止・復帰は未検証。
+[secret作成](../../secrets/README.md#pve1-nut用bundle)を参照する。2026-10-31に実機の導入・再適用changed=0・dry-run停電試験を確認（運用者報告）。本番停止・killpower・一連の復帰は未検証。
