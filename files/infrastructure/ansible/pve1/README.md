@@ -19,7 +19,7 @@ AGE_IDENTITY_FILE=/secure/path/age-identity.txt make ansible-apply-pve1
 
 check/apply は controller で pve1 bundle の `nut` と Apps bundle の
 `gatus.discord_webhook_url` だけを抽出する。secret task は `no_log`、secret file は diff 無効。
-初回 check で NUT 未導入なら、package の予定だけを検査し、nut group が必要な配置は省く。
+初回 check で NUT 未導入なら、package の予定とUSB接続を検査し、nut group が必要な配置は省く。
 導入後に check/diff を再実行する。upsmon.conf は password を含むため通常設定部分も diff 非表示。
 `SHUTDOWNCMD` / `POWERDOWNFLAG` の反映には reload でなく restart を使う。
 

@@ -38,6 +38,98 @@
     state: present
     install_recommends: false
 
+# Reading sysfs is safe in check mode, including before NUT is installed.
+- name: Find connected CPJ1200 USB devices
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import json
+        from pathlib import Path
+
+        devices = []
+        for device in Path('/sys/bus/usb/devices').iterdir():
+            try:
+                if (device.joinpath('idVendor').read_text().strip() != '0764'
+                        or device.joinpath('idProduct').read_text().strip() != '0501'):
+                    continue
+                bus = int(device.joinpath('busnum').read_text())
+                number = int(device.joinpath('devnum').read_text())
+            except FileNotFoundError:
+                continue
+            devices.append({'sysfs_path': str(device.resolve()),
+                            'node_path': f'/dev/bus/usb/{bus:03d}/{number:03d}'})
+        print(json.dumps(devices))
+  register: nut_usb_discovery
+  check_mode: false
+  changed_when: false
+
+- name: Parse connected UPS devices
+  ansible.builtin.set_fact:
+    nut_usb_devices: "{{ nut_usb_discovery.stdout | from_json }}"
+
+- name: Require the connected CPJ1200
+  ansible.builtin.assert:
+    that: nut_usb_devices | length > 0
+    fail_msg: >-
+      CPJ1200 (USB 0764:0501) was not found. Connect the UPS USB cable to
+      pve1 and re-run this playbook before starting the NUT driver.
+
+- name: Inspect connected UPS device nodes
+  ansible.builtin.stat:
+    path: "{{ item.node_path }}"
+  loop: "{{ nut_usb_devices }}"
+  register: nut_usb_node_stats
+
+- name: Require UPS character device nodes
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.ischr | default(false)
+    fail_msg: >-
+      CPJ1200 USB device node {{ item.item.node_path }} is missing or is not
+      a character device. Check the USB connection and udev before retrying.
+  loop: "{{ nut_usb_node_stats.results }}"
+
+# Only retrigger already-connected UPSes whose package rule has not taken effect.
+- name: Apply NUT udev rules to connected UPS nodes needing access
+  ansible.builtin.command:
+    argv: [udevadm, trigger, --action=add, "{{ item.item.sysfs_path }}"]
+  loop: "{{ nut_usb_node_stats.results }}"
+  when:
+    - not ansible_check_mode
+    - item.stat.gr_name | default('') != 'nut'
+  register: nut_udev_trigger
+  changed_when: true
+  notify: Restart NUT driver
+
+# This must finish before the permission assertion, not at flush_handlers.
+- name: Wait for UPS udev permissions  # noqa: no-handler
+  ansible.builtin.command:
+    argv: [udevadm, settle, --timeout=30]
+  when: nut_udev_trigger is changed
+  changed_when: false
+
+- name: Recheck UPS device permissions after udev
+  ansible.builtin.stat:
+    path: "{{ item.node_path }}"
+  loop: "{{ nut_usb_devices }}"
+  register: nut_usb_nodes_after_udev
+  when: not ansible_check_mode
+
+- name: Require NUT access before starting the driver
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.ischr | default(false)
+      - item.stat.gr_name | default('') == 'nut'
+    fail_msg: >-
+      CPJ1200 node {{ item.item.node_path }} is not accessible to group nut
+      after udev processing. Check 62-nut-usbups.rules and the USB connection.
+  loop: "{{ nut_usb_nodes_after_udev.results | default([]) }}"
+  when: not ansible_check_mode
+
 # On the first --check the package and nut group may not exist yet.
 - name: Detect installed NUT monitor
   ansible.builtin.stat:
@@ -134,12 +226,14 @@
         name: "{{ item }}"
         enabled: true
         state: started
+      # Start each daemon explicitly even when a prior apply left configs unchanged.
+      # Start nut.target last: it can otherwise pull in all daemons concurrently.
       loop:
-        - nut.target
-        - nut-driver-enumerator.path
         - nut-driver@cpj1200.service
         - nut-server.service
         - nut-monitor.service
+        - nut-driver-enumerator.path
+        - nut.target
 
     - name: Read UPS status after deployment
       ansible.builtin.command: upsc cpj1200@localhost ups.status
@@ -152,5 +246,5 @@
 
 - name: Explain initial check limitation
   ansible.builtin.debug:
-    msg: NUT is not installed; initial check reports packages only. Re-run check with diff after installation.
+    msg: NUT is not installed; initial check reports packages and USB connection only. Re-run check with diff after installation.
   when: ansible_check_mode and not nut_monitor_binary.stat.exists

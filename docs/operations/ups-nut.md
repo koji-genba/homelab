@@ -84,7 +84,9 @@ AGE_IDENTITY_FILE=/secure/path/age-identity.txt \
 AGE_IDENTITY_FILE=/secure/path/age-identity.txt make ansible-apply-pve1
 ```
 
-初回checkでNUT未導入ならpackage予定だけになり、配置は省略する。適用後にcheck/diffを再実行しchanged=0を確認する。
+パッケージ導入前からUPSが接続されていると、NUTのudevルールが既存USBノードに当たらない場合がある。
+roleは接続済み0764:0501のグループがnutでない場合だけ対象デバイスへルールを当て直す（check時は変更しない）。
+初回checkでNUT未導入ならpackage予定とUSB接続を検査し、配置は省略する。適用後にcheck/diffを再実行しchanged=0を確認する。
 passwordを含むupsmon.conf、upsd.usersとwebhookはdiff非表示。設定変更時はupsmonをrestartする。
 既存curl/python3/loggerを使用し、sudo/jqは導入しない。pve1 rootの範囲はNUTだけ。
 
