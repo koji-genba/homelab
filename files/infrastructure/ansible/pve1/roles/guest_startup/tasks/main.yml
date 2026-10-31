@@ -1,0 +1,7 @@
+---
+- name: Manage startup settings for each UPS guest
+  ansible.builtin.include_tasks: guest.yml
+  loop: "{{ guest_startup_vms }}"
+  loop_control:
+    loop_var: guest_startup_vm
+    label: "VM {{ guest_startup_vm.vmid }}"

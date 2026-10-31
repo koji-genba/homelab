@@ -1,0 +1,27 @@
+---
+nut_runtime_secrets_file: "{{ playbook_dir }}/../../secrets/pve1/runtime.sops.yaml"
+nut_apps_secrets_file: "{{ playbook_dir }}/../../secrets/runtime.sops.yaml"
+
+# 2026-10-31: DGX停止後のpve1中心の区間は残量50%が先に効く。
+# runtimeは同じ負荷でも約±25%揺れ、推論中約500Wでは持続約9分。
+# 600秒だと瞬停でもOB+LBになり得る。2.8.1のupsmonにOBLBDURATIONが
+# ないことを実機で確認したため、runtimeはUPS既定と同じ300秒にする。
+nut_ignorelb: true
+nut_battery_charge_low: 50
+nut_battery_runtime_low: 300
+
+# UPS stop order: order 3 guests in parallel, then Apps, then gateway.
+# Root on pve1 manages startup; Terraform's token keeps its existing privileges.
+guest_startup_vms:
+  - vmid: 102
+    startup: order=1,down=180
+  - vmid: 101
+    startup: order=2,down=420
+  - vmid: 103
+    startup: order=3,down=180
+  - vmid: 104
+    startup: order=3,down=180
+  - vmid: 105
+    startup: order=3,down=180
+  - vmid: 111
+    startup: order=3,down=180

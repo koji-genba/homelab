@@ -1,0 +1,54 @@
+---
+- name: Read guest configuration
+  ansible.builtin.command:
+    argv: [qm, config, "{{ guest_startup_vm.vmid | string }}"]
+  register: guest_startup_config
+  check_mode: false
+  changed_when: false
+  failed_when: false
+  # Other config fields can contain credentials; retain only startup below.
+  no_log: true
+
+- name: Require the guest to exist on pve1
+  ansible.builtin.assert:
+    that: guest_startup_config.rc == 0
+    fail_msg: >-
+      Cannot read VM {{ guest_startup_vm.vmid }} on pve1. Check that the VM
+      exists on this node and qm config succeeds before re-running Ansible.
+
+- name: Extract startup properties only
+  ansible.builtin.set_fact:
+    guest_startup_current: >-
+      {{ (guest_startup_config.stdout | regex_findall('(?m)^startup: *(.*)$')
+          | first | default('') | trim).split(',')
+         | map('trim') | reject('equalto', '') | list }}
+
+# PVE accepts a bare order number; absent up and up=0 both add no startup delay.
+# Sorting properties avoids changes caused only by qm's stored key order.
+- name: Compare startup properties independent of order
+  ansible.builtin.set_fact:
+    guest_startup_differs: >-
+      {{ (((guest_startup_current | reject('match', '^[0-9]+$')
+              | reject('equalto', 'up=0') | list)
+           + (guest_startup_current | select('match', '^[0-9]+$')
+              | map('regex_replace', '^', 'order=') | list)) | sort)
+         != (guest_startup_vm.startup.split(',') | map('trim') | sort) }}
+
+- name: Report planned guest startup change
+  ansible.builtin.debug:
+    msg: >-
+      VM {{ guest_startup_vm.vmid }} startup would change from
+      {{ guest_startup_current | join(',') | default('(unset)', true) }}
+      to {{ guest_startup_vm.startup }}. No VM restart is required.
+  changed_when: true
+  when:
+    - ansible_check_mode
+    - guest_startup_differs
+
+- name: Set guest startup without restarting the VM
+  ansible.builtin.command:
+    argv: [qm, set, "{{ guest_startup_vm.vmid | string }}", --startup, "{{ guest_startup_vm.startup }}"]
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - guest_startup_differs

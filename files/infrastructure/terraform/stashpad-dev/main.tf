@@ -131,6 +131,8 @@ resource "proxmox_virtual_environment_vm" "stashpad_dev" {
 
   lifecycle {
     ignore_changes = [
+      # startup is managed by pve1 Ansible; the token lacks Sys.Modify on /.
+      startup,
       initialization[0].user_data_file_id,
       clone[0].vm_id,
       tags,

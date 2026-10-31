@@ -645,3 +645,17 @@ Hermes Agentについて、2026-10-17のローカル試験では暗号化scratch
 VM初回構築・OS reboot・本番DR・Runner/NFSは実機未検証である。ローカルの品質再試験では主要閾値を満たしたが、
 創作1件とrerank速度の残課題があり、
 この復旧手順が通しで検証済みという意味ではない。詳細は[Hermes Agent運用](hermes-agent.md)を参照する。
+
+
+## NUTとVM停止順の復元（未検証）
+
+ホストを作り直したら、USBのCPJ1200を接続し、管理端末からpve1専用Ansible rootを反映する。
+NUTとUPS停止に使うVM startupを管理し、上記のmover・exports・mergerfs・zfs-import@は引き続き個別の復旧手順に従う。
+シークレット・known_hostsの準備、check→apply、UPSの読み取りと停止・復電試験は
+[UPS / NUT運用](ups-nut.md)に従う。pve1へage鍵を配置しない。
+
+VMの作成後、pve1 Ansibleのguest_startup roleでstartupを復元し、gateway order1/down180、Apps order2/down420、
+ElastiFlow/Hermes/Runner/stashPadDev order3/down180を確認する。
+Terraformの6 rootはstartupをignoreする。tokenの権限は増やさず、VM再作成後もAnsibleを再適用する。
+停止はorder3内を並列→Apps→gateway。起動順はreadyを保証しないため、[検証](#検証)が必要。
+通常の計画停止はDGXを先に止めてからpve1をshutdownする。[手順](ups-nut.md#計画停止未検証)を参照する。

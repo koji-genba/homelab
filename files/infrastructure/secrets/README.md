@@ -118,3 +118,36 @@ sops_toolbox set files/infrastructure/secrets/runtime.sops.yaml '["hf_downloader
 tokenの追加・変更・空への変更でも`secrets_runtime_changed`が立ち、全12 projectsが再作成される。
 Daguの初期管理者はbundleに含めず、デプロイ直後に`/setup`で作成する。
 初回反映・確認は[hf-downloader運用](../../../docs/operations/hf-downloader.md)を参照する。
+
+## pve1 NUT用bundle
+
+`pve1/runtime.sops.yaml` は、運用者が下記の手順で2026-10-31に作成済み。
+ageのrecipientは既存bundleと同じで、`make secrets-scan` はcleanだった（運用者報告）。
+[example](pve1/runtime.yaml.example)の
+`nut.upsmon_primary_password` と `nut.upsmon_secondary_password` を含める。
+webhook は複製せず、pve1 play が Apps bundle の `gatus.discord_webhook_url` だけを抽出する。
+以下は作り直す際のために残す初回作成手順。管理端末の Python 3 で独立したランダムな64桁hexを作り、
+値を端末・引数に出さず、ignore済みの平文へ mode 0600 で書く。既存ファイルがあれば拒否する。
+
+```sh
+python3 - <<'PY'
+import os
+import secrets
+path = 'files/infrastructure/secrets/pve1/runtime.yaml'
+fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+with os.fdopen(fd, 'w') as out:
+    out.write('nut:\n')
+    for name in ('primary', 'secondary'):
+        out.write(f'  upsmon_{name}_password: {secrets.token_hex(32)}\n')
+PY
+export AGE_RECIPIENT='age1...'
+make secrets-encrypt-pve1
+rm files/infrastructure/secrets/pve1/runtime.yaml
+make secrets-scan
+```
+
+`secrets-encrypt-pve1` は既存bundleを上書きしない。作り直す際も、既存bundleの扱いを別途確認してから行う。
+復号の確認は、鍵を指定した pve1 の `--check --diff` で必要keyの検証とともに行う。
+平文は暗号化成功を確認してから削除し、管理端末のstorage暗号化を前提とする。
+既存の plaintext/state scan は全階層の `runtime.yaml` を拒否し、SOPS metadata も全bundleを検査する。
+DGX担当へは承認済みの秘密情報受け渡し経路で secondary の値だけを渡す。docs・ログには書かない。

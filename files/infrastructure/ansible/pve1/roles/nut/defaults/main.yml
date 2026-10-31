@@ -1,0 +1,20 @@
+---
+nut_shutdown_dry_run: false
+nut_hostsync: 240
+nut_ignorelb: false
+# null omits the override; retain the UPS's own LB until measurements exist.
+nut_battery_charge_low: null
+nut_battery_runtime_low: null
+nut_primary_user: upsmon-pve1
+nut_secondary_user: upsmon-dgx
+nut_notify_events:
+  - ONBATT
+  - ONLINE
+  - LOWBATT
+  - FSD
+  - SHUTDOWN
+  - COMMBAD
+  - COMMOK
+  - NOCOMM
+  - REPLBATT
+  - NOPARENT

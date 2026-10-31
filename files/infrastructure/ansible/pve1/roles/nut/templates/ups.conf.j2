@@ -1,0 +1,18 @@
+# Managed by Ansible; CPJ1200 USB on pve1.
+[cpj1200]
+    driver = usbhid-ups
+    port = auto
+    vendorid = 0764
+    productid = 0501
+    desc = "CyberPower CPJ1200"
+    offdelay = 60
+    ondelay = 120
+{% if nut_ignorelb | bool %}
+    ignorelb
+{% endif %}
+{% if nut_battery_charge_low is not none %}
+    override.battery.charge.low = {{ nut_battery_charge_low }}
+{% endif %}
+{% if nut_battery_runtime_low is not none %}
+    override.battery.runtime.low = {{ nut_battery_runtime_low }}
+{% endif %}

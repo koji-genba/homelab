@@ -430,3 +430,25 @@ rollback-app:
 .PHONY: agent-compose-config
 agent-compose-config:
 	./scripts/agent-compose-config.sh
+
+# pve1 manages NUT and UPS guest startup. check is syntax-only; apply --check contacts pve1.
+PVE1_ANSIBLE_ROOT ?= files/infrastructure/ansible/pve1
+PVE1_ANSIBLE_INVENTORY ?= $(PVE1_ANSIBLE_ROOT)/inventory/hosts.yml
+PVE1_ANSIBLE_CONFIG ?= $(PVE1_ANSIBLE_ROOT)/ansible.cfg
+PVE1_ANSIBLE_ARGS ?=
+.PHONY: ansible-lint-pve1 ansible-check-pve1 ansible-apply-pve1 secrets-encrypt-pve1
+ansible-lint-pve1:
+	$(TOOLBOX_RUN) env ANSIBLE_CONFIG=$(PVE1_ANSIBLE_CONFIG) ansible-lint $(PVE1_ANSIBLE_ROOT)/site.yml
+
+ansible-check-pve1:
+	$(TOOLBOX_RUN) env ANSIBLE_CONFIG=$(PVE1_ANSIBLE_CONFIG) ansible-playbook -i $(PVE1_ANSIBLE_INVENTORY) $(PVE1_ANSIBLE_ROOT)/site.yml --syntax-check
+
+ansible-apply-pve1:
+	$(TOOLBOX_RUN) env ANSIBLE_CONFIG=$(PVE1_ANSIBLE_CONFIG) ansible-playbook -i $(PVE1_ANSIBLE_INVENTORY) $(PVE1_ANSIBLE_ROOT)/site.yml $(PVE1_ANSIBLE_ARGS)
+
+secrets-encrypt-pve1:
+	test -n "$(AGE_RECIPIENT)" || { echo "AGE_RECIPIENT is required" >&2; exit 1; }
+	test -f files/infrastructure/secrets/pve1/runtime.yaml
+	test ! -e files/infrastructure/secrets/pve1/runtime.sops.yaml || { echo "refusing to overwrite pve1 bundle" >&2; exit 1; }
+	$(TOOLBOX_RUN) sops encrypt --age "$(AGE_RECIPIENT)" --output files/infrastructure/secrets/pve1/runtime.sops.yaml files/infrastructure/secrets/pve1/runtime.yaml
+	chmod 0600 files/infrastructure/secrets/pve1/runtime.sops.yaml

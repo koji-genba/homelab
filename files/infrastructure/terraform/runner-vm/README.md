@@ -59,3 +59,12 @@ Proxmoxのuser/role/token/ACLはTerraformで管理しない。applyの前に、�
 stateはlocalで管理し、mode `0600`を維持する。明示的なage暗号化recovery copyにはrepositoryの
 `make state-backup`を使う。`make state-backup`は`files/infrastructure/terraform`以下の`*.tfstate`を
 探索するため、このrootの`terraform.tfstate`も対象になる。
+
+
+## UPS停止用のstartup設定
+
+VMのstartupは[pve1 Ansible](../../ansible/pve1/README.md)の `guest_startup` roleで管理し、
+このrootではstartupブロックを置かず `lifecycle.ignore_changes` に含める。
+Terraform tokenには `/` の `Sys.Modify` がないため、権限を増やさずrootの `qm set --startup` で反映する。
+VM作成・再作成後はpve1 Ansibleのcheck→applyが必要。値・順序・確認は
+[UPS運用](../../../../docs/operations/ups-nut.md)に従う。startupの単独更新にVMの再起動は不要。

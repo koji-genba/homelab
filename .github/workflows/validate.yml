@@ -50,6 +50,10 @@ jobs:
         run: |
           make ansible-lint-elastiflow
           make ansible-check-elastiflow
+      - name: pve1 NUT lint, syntax and local notification check
+        run: |
+          make ansible-lint-pve1 ansible-check-pve1
+          python3 scripts/tests/nut-notify-test.py
       - name: Ansible bootstrap path regression
         run: make ansible-bootstrap-paths-test
       - name: Gateway advertisement and Terraform approval contract
