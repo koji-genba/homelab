@@ -86,6 +86,7 @@ resource "proxmox_virtual_environment_vm" "apps" {
   network_device {
     bridge  = var.network_bridge
     model   = "virtio"
+    queues  = 4
     vlan_id = var.management_vlan_id
   }
 

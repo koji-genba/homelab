@@ -7,12 +7,13 @@ LAN経路は`\\192.168.10.101\<share>`を指定して比較する。NFS transpor
 `group_vars/apps.yml`の`nfs_mounts`にある現在9 mountで、[NFS export契約](nfs-export.md#apps-vmのnconnect)を参照する。
 以下の`.10.23` / `.10.30`、7 mount、NFS PVは調査当時の値である。
 
-WindowsクライアントからSambaへの転送が遅い件の調査記録。現時点で2件ある。
+WindowsクライアントからSambaへの転送が遅い件の調査記録。現時点で3件ある。
 
 | 時期 | 症状 | 原因 |
 | --- | --- | --- |
 | 2026-07 | 読み書きとも約50MB/sで頭打ち | Tailscale subnet routeによるヘアピン |
 | 2026-09 | 速度が出たり0になったりを繰り返す | cache-pool SSDにTRIMが通っていなかった |
+| 2026-10 | 小さめのファイルを大量に書くと速度が出ない | ファイルごとのNFS COMMITがmergerfsのfsyncを待つ |
 
 # 2026-07: 読み書きとも約50MB/sで頭打ち
 
@@ -199,4 +200,142 @@ grep -E '^(Dirty|Writeback):' /proc/meminfo  # 小さい値で推移すること
 - **NFSの`sync` export + mergerfsのfsync経路**: COMMITは78msまで下がったが、経路としては残っている。
   さらに詰めるなら`sync=disabled`やexportの`async`になるが、停電時に直近数秒の書き込みを失う。
   cache-poolはmover前の唯一のコピーを持つため、採用は要判断。
+  2026-10-29に`shared`だけを`async`へ変更した。判断と計測は[2026-10の結論](#2026-10-小さめのファイルを大量に書くと速度が出ない)を参照する。
 - **cache-pool 2台のレイテンシ差**: 計測ごとに差が出る。片方は稼働17,666時間の個体。
+
+# 2026-10: 小さめのファイルを大量に書くと速度が出ない
+
+mp3とflacが混ざった約200GB（1個3〜50MB）をSMBで`shared`へ書くと、
+大きいファイルの連続書き込み（約84MB/s）ほどの速度が出なかった。2026-10-28〜29に経路の実装と段ごとの計測で調べた。
+
+## 結論
+
+**ファイルごとのNFS COMMITがmergerfsのfsyncを待ち、逐次コピーで待ち時間が積み重なっていた。**
+2026-10-29 00:56（JST）、pve1で`/etc/exports`の`/mnt/shared`だけを手動で
+`rw,sync,...,fsid=100`から`rw,async,no_subtree_check,no_root_squash,fsid=100`へ変更し、`exportfs -ra`で反映した。
+バックアップは`/etc/exports.bak.20261029T005646`。`shared-hdd`（`/mnt/tank-gen2/data/shared`、`fsid=101`）と
+ほかのexportは変更せず`sync`を維持した。現在の契約は[NFS export契約](nfs-export.md)を参照する。
+
+`shared`の8MiB・40MiBの逐次コピーは改善した。300KiBは改善せず、async化だけで小さいファイル全般が速くなるわけではない。
+大量のコピーには`robocopy /MT:8`も有効だった。
+
+この変更では、**pve1の異常停止（電源断、カーネルpanic、ハードウェア故障）時に、クライアントへ完了と返した
+直近の書き込みを失う危険**を受け入れる。未永続化の範囲はZFSのtxgの間隔に相当する数秒程度で、
+`shared`への書き込みは主に元ファイルがPCに残るコピーである。後述のmergerfsの性質により、
+1回のWRITEで済みCOMMITが起きない小さいファイルは、変更前もACK時点で永続化されていなかった。
+UPS（CPJ1200）はあるが監視ソフトがなく、停電時の正常シャットダウンは
+[issue #158](https://github.com/koji-genba/homelab/issues/158)で別に扱う。
+
+## 待ちが積み重なる仕組み
+
+1. Windowsがファイルのデータを書き、コピーの最後にmtimeを設定する。
+2. Linux NFSクライアントは通常ファイルのSETATTR前とclose時に、未送信WRITEの完了と必要なCOMMITを待つ。
+3. knfsdの`sync` exportではCOMMITが`vfs_fsync_range`になり、FUSEのFSYNC、mergerfsの実体ファイルのfsync、
+   ZFSのZIL書き込みへ進む。
+4. 逐次コピーでは、この待ちがファイルの数だけ直列に積み重なる。`async` exportではCOMMITで永続化を待たず応答できる。
+
+COMMITは常に1ファイル1回ではない。mergerfs 2.40.2はWRITEの同期フラグ（FILE_SYNC）を下層へ伝えておらず、
+今回の300KiBのように1回のWRITEで済みCOMMITが起きない場合は、`sync` exportでもACK時点の永続化を保証できていなかった。
+COMMITからfsyncへ進む経路と、WRITEの同期フラグの扱いは区別する必要がある。
+
+新規ファイルの書き込み先がHDDになっていたわけではない。mergerfs 2.40.2のcreate用`ff`はパスの存在を条件にせず、
+先頭の書き込み可能で空き容量があるSSDを選ぶ。親ディレクトリがHDD側にしかなくてもSSD側へ親を複製して作成する。
+既にHDDにある同名ファイルの更新は別である。
+
+一方、ZFSを直接exportする`shared-hdd`では、OPENによる作成やSETATTRのたびに`zpl_commit_metadata`から
+HDDのZIL書き込みを約12msずつ待つ。これが小さいファイルの低速につながる。
+mergerfs側のメタデータ処理とは経路が異なるため、両shareの差をSSDとHDDの速度差だけで説明しない。
+
+## 計測結果
+
+Windows → SambaをLANのIPで接続し、1GbEで2026-10-29に計測した。
+`sync` / `async`列は`File.Copy`による逐次コピーの全体スループットで、括弧内は1ファイルの所要時間の中央値。
+`/MT:8`列はrobocopyによる並列コピーである。
+
+| shared（新規ファイルはSSD） | sync | async | async + robocopy /MT:8 |
+| --- | --- | --- | --- |
+| 8MiB × 300 | 72MB/s（109ms/個） | 89MB/s（86ms/個） | 100MB/s |
+| 40MiB × 50 | 76MB/s（539ms/個） | 99MB/s（424ms/個） | 106MB/s |
+| 300KiB × 300 | 23MB/s（9.4ms/個） | 21MB/s | 29MB/s |
+
+`sync`時のrobocopy `/MT:8`は8MiBで77MB/s、40MiBで88MB/sだった。
+比較用の`shared-hdd`は`sync`のままで、逐次コピーは8MiBで約31MB/s、40MiBで約54MB/s、300KiBで約2.4MB/s。
+2回の計測で同等だった。
+
+### 01:06〜01:09 JSTの保守後の再計測
+
+後述の3件の設定変更を反映後、同じくWindows → Samba、LANのIP、1GbEで計測した。
+`shared`は`async`のまま、`shared-hdd`は`sync`のままである。
+逐次コピー列の括弧内は1ファイルの所要時間の中央値。
+
+| sharedのファイルサイズ | 変更前（asyncのみ）の逐次コピー | 変更後の逐次コピー | 変更前の /MT:8 | 変更後の /MT:8 |
+| --- | --- | --- | --- | --- |
+| 8MiB | 89MB/s（86ms/個） | 92MB/s（88ms/個） | 100MB/s | 102MB/s |
+| 40MiB | 99MB/s（424ms/個） | 100MB/s（417ms/個） | 106MB/s | 109MB/s |
+| 300KiB | 21MB/s | 24MB/s（9.4ms/個） | 29MB/s | 34MB/s |
+
+| shared-hddのファイルサイズ | 変更前の逐次コピー（sync） | 変更後の逐次コピー（sync） |
+| --- | --- | --- |
+| 8MiB | 約31MB/s | 34MB/s |
+| 40MiB | 約54MB/s | 56MB/s |
+| 300KiB | 約2.4MB/s | 2.9MB/s |
+
+各条件のスループットは数値上改善し、悪化は見られなかった。ただし改善幅は計測の揺らぎと同程度で、
+この3件の設定変更の効果とは断定できない。全体スループットと1ファイルの中央値は別の指標である。
+
+### pve1上の経路別計測（保守前）
+
+Linux側はpython3の計測スクリプトで、段ごとに測った。次の表はpve1上でファイルごとにfsyncした場合の
+**1ファイルの合計所要時間の中央値**であり、fsync呼び出しだけの時間ではない。
+
+| pve1上の経路 | 8MiB | 40MiB | 300KiB |
+| --- | --- | --- | --- |
+| SSDのZFS直 | 24ms | 108ms | 4ms |
+| HDDのZFS直 | 71ms | 335ms | 12ms |
+| mergerfs | 28ms | 449ms | 4ms |
+
+40MiBではmergerfs経由がSSD直の約4倍だった。8MiBではほぼ差がない。
+`sync`時にApps VMからNFS経由で測った40MiBのCOMMITの平均RTTは、mergerfsで355ms、HDD直で244msだった
+（明示fsyncなしの試験）。この平均RTTと、上表のファイルごとの中央値は別の指標である。
+
+## 確認方法
+
+- pve1の`exportfs -v`で、`/mnt/shared`だけが`async,fsid=100`、`shared-hdd`が`sync,fsid=101`であることを確認する。
+- Apps VMの`/proc/self/mountstats`をコピー直前・直後に読み、対象mountのWRITE・COMMIT・OPEN・SETATTRの
+  回数とRTTの差分を比較する。起動以来の累計値だけではコピー中の待ちを評価しない。
+- 再計測時は同じサイズ・個数の新規ファイルを使い、LANのIPで逐次コピーとrobocopy `/MT:8`を分ける。
+  ファイルの作成・削除を伴うため専用ディレクトリを使い、moverの実行時間を避ける。
+- pve1ローカルのcloseだけでは永続化を待たない。段ごとの比較ではfsyncの有無を分け、
+  ファイルごとの中央値とRPCの平均RTTを混同しない。
+
+## 2026-10-29に併せて反映した設定変更
+
+2026-10-29 01:06〜01:09（JST）の保守で、次の3件をpve1とApps VMへ反映した。
+Apps VMの停止時間は約3分だった。
+
+- **NFS向けの`noforget`**: [mergerfsのfstab手順](tiered-storage.md#etcfstabmergerfsマウント)に`noforget`を追加した。
+  NFSのファイルハンドルの安定性のためで、pve1のfstabにも追加し、`/mnt/shared`をマウントし直した。
+  mergerfsプロセスの引数に`noforget`があることと、markerを確認した。
+- **Apps VMのNICの`queues`**: `files/infrastructure/terraform/apps-vm/main.tf`の1つ目の`network_device`に
+  `queues = 4`を追加した。4 vCPUに合わせ、2026-07のmultiqueue=4という記録との食い違いを解消する。
+  固定版bpg/proxmox 0.117.0の[公式資料](https://github.com/bpg/terraform-provider-proxmox/blob/v0.117.0/docs/resources/virtual_environment_vm.md)で対応を確認した。
+  実機では`qm set`でnet0へTerraformの定義と同じ`queues=4`を設定し、起動後の`eth0`がrx/txとも4キューであることを確認した。
+  2026-10-29に`terraform plan`を実行し、差分が無い（No changes）ことを確認した。
+- **SambaのTCPバッファ**: `smb.conf`の`socket options`行を削除した。
+  [公式資料](https://www.samba.org/samba/docs/current/man-html/smb.conf.5.html#SOCKETOPTIONS)が固定バッファによる
+  自動調整の無効化を警告しているため、カーネルの自動調整に任せる。Sambaの既定は`TCP_NODELAY`。
+  PR #159のマージ後、Appsのreconcileで反映し、`testparm`で既定値になったことを確認した。
+
+保守はAppsのreconcile → Apps VMの停止 → pve1で`exportfs -u` → `umount` → fstabの変更 →
+`mount` → `exportfs -ra` → `qm set` → Apps VMの起動の順で実施した。
+
+**mergerfsをマウントし直す際の注意**: 今回はApps VMを停止して`exportfs -u`した後も、
+`umount /mnt/shared`がbusyになった。`fuser`ではkernel mountだけが見え、ユーザー空間のプロセスは
+掴んでいなかった。カーネルのNFS exportキャッシュがマウントを参照していたため、
+`exportfs -u`の後に`exportfs -f`でキャッシュを破棄してから`umount`すると成功した。
+
+## 残課題
+
+- **mergerfsのfsync経路とFILE_SYNCの伝達**: `shared`を`async`にしたため、knfsdのCOMMITはfsyncを呼ばない。
+  この2件は現在の`shared`の経路では、性能にも永続性の保証にも影響しない。
+  `shared`を`sync`に戻す場合や、mergerfsを通る`sync` exportを新しく作る場合に改めて検討する。
