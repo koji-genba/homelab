@@ -5,8 +5,8 @@
     vendorid = 0764
     productid = 0501
     desc = "CyberPower CPJ1200"
-    offdelay = 60
-    ondelay = 120
+    offdelay = {{ nut_offdelay }}
+    ondelay = {{ nut_ondelay }}
 {% if nut_ignorelb | bool %}
     ignorelb
 {% endif %}

@@ -1,6 +1,6 @@
 # pve1 UPS root
 
-今回は **NUT と、UPSの停止に使うVMのstartupを管理する**。mover・exports・mergerfs・zfs-import@ などの管理は将来の issue。
+今回は **NUT、UPS停止に使うVM startup、pve-guestsとNFSの順序を管理する**。mover・exports・mergerfs・zfs-import@ などの管理は将来の issue。
 Apps / Agent / gateway / ElastiFlow の root とは独立し、reconcile からは実行しない。
 対象は `root@192.168.10.11`。sudo は使わず、追加パッケージは Debian の
 `nut-server` / `nut-client`（必須依存を含む）だけ。python3、curl、logger は既存のものを使う。
@@ -38,7 +38,7 @@ Debian 2.8.1-5 の配布 deb をローカル展開して unit、既定設定、�
 RUN_AS_USER は Debian の既定の nut。ホストの通常停止だけでは killpower を要求しない。
 
 [導入・試験・計画停止](../../../../docs/operations/ups-nut.md)と
-[secret作成](../../secrets/README.md#pve1-nut用bundle)を参照する。2026-10-31に実機の導入・再適用changed=0・dry-run停電試験を確認（運用者報告）。本番停止・killpower・一連の復帰は未検証。
+[secret作成](../../secrets/README.md#pve1-nut用bundle)を参照する。2026-10-31に実機の導入・再適用changed=0・dry-run停電試験を確認（運用者報告）。同日20:00〜20:30の本番停止・killpowerも確認した。ondelay=-1とNFS順序修正後の実機試験は未検証。
 
 
 `guest_startup` roleはgroup_varsの `guest_startup_vms` に従い6台の `qm config` を読み、
@@ -48,6 +48,18 @@ checkでは読み取りと変更予定の表示だけを行い、存在しない
 全体configには機密項目があり得るためログへ出さない。startup単独の更新でVMの再起動は行わない。
 Terraformの6 rootはstartupを `ignore_changes` に入れる。tokenに `/` の `Sys.Modify` がなく、
 2026-10-31のVM102への適用が403で失敗したため、権限を増やさずroot接続のAnsibleへ管理を移した。
-このroleの実機反映は未検証。VMをTerraformで新規作成・再作成した後も、pve1 Ansibleを再適用する。
+段階4では設定した順でVMの停止・起動を確認した。VMをTerraformで新規作成・再作成した後も、pve1 Ansibleを再適用する。
 `PVE1_ANSIBLE_ARGS='--tags guest_startup --check'`（確認）/ `'--tags guest_startup'`（反映）で
 startupだけを扱える。この場合NUT roleの復号・サービス操作は行わない。
+
+
+`guest_nfs_order` roleはpve-guestsのdrop-inへ `After=nfs-server.service` を配置し、
+VM→NFSの停止順（起動時は逆順）を管理する。handlerはdaemon-reloadだけで、
+RefuseManualStart/Stopのpve-guestsをrestartしない。初回checkはディレクトリ未作成でも予定を表示する。
+実機反映後はAfterへのnfs-server追加を確認する。`--tags guest_nfs_order` でこの設定だけを扱える。
+
+NUTのoffdelay/ondelayは `nut_offdelay`（既定60）/ `nut_ondelay`（既定-1）。
+長い停電後はUPS出力を手動復旧し、pve1もBIOSの自動起動無効を維持して電源ボタンで起動する。
+CPJ1200でondelay=-1が停止を維持する動作は未検証。ups.conf変更は既存handlerでdriverまでrestartする。
+-kは稼働中driverの値を使い得るため、反映後はupscのups.delay.start=-1も確認する。
+判断と復旧手順は[ADR-0012](../../../../docs/adr/0012-ups-stayoff-nfs-order.md)とrunbookを参照する。
