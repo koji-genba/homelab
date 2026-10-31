@@ -33,6 +33,12 @@ resource "proxmox_virtual_environment_vm" "apps" {
   started = true
   on_boot = true
 
+  # PVE stopall reverses order; down_delay is the shutdown timeout.
+  startup {
+    order      = 2
+    down_delay = 420
+  }
+
   agent {
     enabled = true
     trim    = true

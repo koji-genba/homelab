@@ -60,6 +60,12 @@ resource "proxmox_virtual_environment_vm" "stashpad_dev" {
   started = true
   on_boot = true
 
+  # PVE stopall reverses order; down_delay is the shutdown timeout.
+  startup {
+    order      = 3
+    down_delay = 180
+  }
+
   agent {
     enabled = true
     trim    = true

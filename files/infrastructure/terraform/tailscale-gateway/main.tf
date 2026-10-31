@@ -75,6 +75,12 @@ resource "proxmox_virtual_environment_vm" "tailscale_gateway" {
   started = true
   on_boot = true
 
+  # PVE stopall reverses order; down_delay is the shutdown timeout.
+  startup {
+    order      = 1
+    down_delay = 180
+  }
+
   # k8s実績ベースのagent設定
   agent {
     enabled = true
