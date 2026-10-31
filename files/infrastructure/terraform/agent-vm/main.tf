@@ -37,12 +37,6 @@ resource "proxmox_virtual_environment_vm" "agent" {
   started = true
   on_boot = true
 
-  # PVE stopall reverses order; down_delay is the shutdown timeout.
-  startup {
-    order      = 3
-    down_delay = 180
-  }
-
   agent {
     enabled = true
     trim    = true
@@ -123,6 +117,8 @@ resource "proxmox_virtual_environment_vm" "agent" {
 
   lifecycle {
     ignore_changes = [
+      # startup is managed by pve1 Ansible; the token lacks Sys.Modify on /.
+      startup,
       initialization[0].user_data_file_id,
     ]
   }

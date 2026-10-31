@@ -15,8 +15,8 @@ I/Oが待ち続ける。AppsのCompose停止には最大300秒必要で、PVE既
 ## 決定
 
 pve1へDebian公式nut-server/nut-clientを入れる。ハードウェアの電源管理として、ホストにソフトを
-極力入れない方針の例外とする。sudo・jq等は追加しない。新しいAnsible pve1 rootはNUTだけを管理し、
-mover・exports・mergerfs・zfs-import@の管理は将来のissueとする。
+極力入れない方針の例外とする。sudo・jq等は追加しない。採用時はAnsible pve1 rootをNUTだけの管理としたが、
+下記追記でVM startupも対象に加える。mover・exports・mergerfs・zfs-import@の管理は将来のissueとする。
 
 pve1はMODE=netserver、UPS名cpj1200、driver=usbhid-ups、USB 0764:0501。
 upsdは127.0.0.1と192.168.10.11の3493/tcpでlistenする。firewallは追加しない。
@@ -29,7 +29,7 @@ HOSTSYNC既定240秒でsecondaryの切断を待つ。通信断時はNUT標準の
 
 VMは起動order 1=gateway、2=Apps、3=ElastiFlow/Hermes/Runner/stashPadDev。
 停止は逆順、同orderは並列。shutdown timeoutはApps420秒、他180秒。
-up_delayはprovider既定の省略を使い、追加の待ちは入れない。起動順だけでサービスreadyは保証しない。
+upは省略し、追加の待ちは入れない。起動順だけでサービスreadyは保証しない。
 
 LBのしきい値は導入後に負荷・残runtime・停止所要時間を測って決める。既定はUPS自身のLB。
 2026-10-31の測定後の具体値は下記の追記を参照する。
@@ -90,6 +90,17 @@ input.voltageはpollfreq（30秒）ごとの更新で、ONBATT通知に100.0、O
 通知項目をups.statusへ変更する。変更後の実配送は未検証。
 DGXの起動時の `mnt-ai.mount: Network is unreachable` は2026-10-09にもある既存挙動で、
 `/mnt/ai` アクセス時のautomountで接続する。
+
+## 2026-10-31 追記: VM startupの管理をAnsibleへ移管
+
+TerraformでVM102のstartup更新が `/` の `Sys.Modify` 不足で403となり、VM102は変化しなかった（運用者報告）。
+tokenの権限は増やさず、pve1のroot接続で `guest_startup` roleが `qm set --startup` を管理し、Terraformの6 rootはstartupをignoreする。
+
+値はgateway order1/down180、Apps order2/down420、他4台order3/down180を維持する。
+キー順を正規化して異なる場合だけ更新し、checkは変更予定を表示する。VM不在は明示的に失敗する。
+startupの単独更新は設定の即時保存だけで、VMの再起動は不要。新規VM作成・再作成後はpve1 Ansibleを再適用する。
+PVEの権限・即時反映処理とprovider 0.117.0/ignore_changesの根拠は[runbook](../operations/ups-nut.md#シナリオ)を参照。
+このroleの実機反映は未検証。
 
 ## 未検証の点
 

@@ -75,12 +75,6 @@ resource "proxmox_virtual_environment_vm" "tailscale_gateway" {
   started = true
   on_boot = true
 
-  # PVE stopall reverses order; down_delay is the shutdown timeout.
-  startup {
-    order      = 1
-    down_delay = 180
-  }
-
   # k8s実績ベースのagent設定
   agent {
     enabled = true
@@ -166,6 +160,8 @@ resource "proxmox_virtual_environment_vm" "tailscale_gateway" {
   # ライフサイクル（k8s実績ベース）
   lifecycle {
     ignore_changes = [
+      # startup is managed by pve1 Ansible; the token lacks Sys.Modify on /.
+      startup,
       initialization[0].user_data_file_id,
       clone[0].vm_id,
       tags,

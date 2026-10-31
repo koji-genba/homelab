@@ -431,7 +431,7 @@ rollback-app:
 agent-compose-config:
 	./scripts/agent-compose-config.sh
 
-# pve1 manages NUT only. check is syntax-only; apply --check contacts pve1.
+# pve1 manages NUT and UPS guest startup. check is syntax-only; apply --check contacts pve1.
 PVE1_ANSIBLE_ROOT ?= files/infrastructure/ansible/pve1
 PVE1_ANSIBLE_INVENTORY ?= $(PVE1_ANSIBLE_ROOT)/inventory/hosts.yml
 PVE1_ANSIBLE_CONFIG ?= $(PVE1_ANSIBLE_ROOT)/ansible.cfg

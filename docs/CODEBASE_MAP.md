@@ -120,7 +120,7 @@ homelab/
 │   │   ├── ansible/apps/         # site.yml + 8 roles + group_vars/inventory (+ *.example)
 │   │   ├── ansible/gateway/      # registered gateway prefs: site.yml, group_vars/gateway.yml, ansible.cfg; tracked inventory/hosts.yml + example
 │   │   ├── ansible/elastiflow/   # VM 103 native packages/config + commit/checksum-pinned dashboards; separate manual apply
-│   │   ├── ansible/pve1/         # NUT only: CPJ1200 primary, Discord notifier; manual apply (live unverified)
+│   │   ├── ansible/pve1/         # NUT + guest_startup: CPJ1200 primary, notifier, qm startup; manual apply
 │   │   ├── ansible/agent/        # Agent/Runner VM OS root: site.yml, inventories, group_vars/{all,agent,runner}, roles
 │   │   │                         #   (common, docker, firewall, agent_storage, agent_stack, agent_ops, runner)
 │   │   ├── terraform/            # apps-vm, tailscale, agent-vm, runner-vm, elastiflow, tailscale-gateway, stashpad-dev (CI-validated)
@@ -158,7 +158,7 @@ Module token estimates were measured on 2026-10-16 with the Cartographer scanner
 | Ansible, Hermes Agent/Runner root | `ansible-lint-agent`, `ansible-check-agent` (CI); `ansible-apply-agent` (manual, live VMs) |
 | Terraform agent-vm / runner-vm | `terraform-validate-agent-vm`, `terraform-validate-runner-vm` (CI, `-backend=false`); per-root `terraform-plan` / `terraform-apply` via `TERRAFORM_ROOT` |
 | Terraform ElastiFlow / gateway / stashPadDev | `terraform-validate-elastiflow`, `terraform-validate-tailscale-gateway`, `terraform-validate-stashpad-dev` (CI, `-backend=false`); roots selected by `ELASTIFLOW_ROOT`, `TAILSCALE_GATEWAY_ROOT`, `STASHPAD_DEV_ROOT` |
-| pve1 NUT Ansible | `ansible-lint-pve1`, `ansible-check-pve1` (CI syntax only); manual `ansible-apply-pve1 PVE1_ANSIBLE_ARGS='--check --diff'` contacts host; NUT only, no sudo; `secrets-encrypt-pve1` creates operator-supplied bundle |
+| pve1 NUT Ansible | `ansible-lint-pve1`, `ansible-check-pve1` (CI syntax only); manual `ansible-apply-pve1 PVE1_ANSIBLE_ARGS='--check --diff'` contacts host; NUT + VM startup, no sudo; `secrets-encrypt-pve1` creates operator-supplied bundle |
 | ElastiFlow Ansible | `ansible-lint-elastiflow`, `ansible-check-elastiflow` (CI syntax-check); manual `ansible-apply-elastiflow`, separate from Apps reconcile; `ELASTIFLOW_ANSIBLE_{ROOT,INVENTORY,CONFIG,ARGS}` |
 | CI fixtures | `gateway-routes-test`, `ansible-bootstrap-paths-test`, `terraform-apps-vm-lifecycle-test`, `toolbox-uid-test`, `cloud-init-test`, `compose-config`, `adguard-config-check`, `gatus-config-check`, `compose-reconcile-fixture`, `mover-test`, `shellcheck`, `secrets-scan`, `state-backup-test`, `state-restore-test`, `state-backup-preflight-test`, `tailscale-acl-path-test`, `tailscale-import-gates-test`, `agent-compose-config`, `agent-vm-cloud-init-test`, `runner-vm-cloud-init-test`, `terraform-agent-runner-vm-lifecycle-test`, `runner-privilege-fixture`, `runner-firewall-fixture`, `agent-runner-scope-fixture`, `agent-dnat-guard-fixture`, `agent-backup-fixture`, `agent-healthcheck-fixture`, `agent-restore-fixture`, `agent-rebuild-fixture`（restore fixtureからmodel-fetch/ops-cleanup/ops-behaviorも実行） |
 | Not in CI | `preflight` |
@@ -463,13 +463,14 @@ TEI 429 retries are bounded; exhausted embedding/rerank retries fail recall. See
 WS18 (2026-10-18): reranker uses `images/tei-reranker-onnx/` (FP32 opset17, tanh GELU matching Candle) and `--model-id /model`; Ansible fetches only embedding. CI `tei-reranker-onnx-image.yml` runs `scripts/tests/tei-reranker-parity.py` (all ranks, score error ≤1e-4, 24 synthetic inputs) before publishing; the existing all-zero gate blocks startup until digest transcription. Reranker retains C64 / workers6 / 6 CPU / 4g, now no swap; ORT batch ceiling is 8 and intra-op threads use quota-aware num_cpus 1.17 (6). Embedding stays Candle (C128 / threads4 / 4 CPU / 8g). See the dated ADR-0008 supplement and runbook for licenses, export provenance and measurements.
 
 
-UPS implementation (#158): [pve1 root](../files/infrastructure/ansible/pve1/README.md) manages only Debian NUT;
+UPS implementation (#158): [pve1 root](../files/infrastructure/ansible/pve1/README.md) manages Debian NUT and UPS guest startup;
 exports/mover/mergerfs/ZFS remain outside its scope. Primary listens on loopback and 192.168.10.11:3493.
 The `secrets/pve1/runtime.sops.yaml` bundle was created on 2026-10-31 using the documented procedure
 (operator-reported: same age recipient as existing bundles; `make secrets-scan` clean); the existing Apps
 Gatus webhook is extracted by key on the controller. Dry-run omits POWERDOWNFLAG, stale flags block apply,
-and monitor changes restart upsmon. Six VM roots define startup order 1=gateway, 2=Apps, 3=others,
-shutdown timeout 420s for Apps / 180s for others; startup alone updates in place without reboot.
+and monitor changes restart upsmon. The guest_startup role defines order 1=gateway, 2=Apps, 3=others,
+shutdown timeout 420s for Apps / 180s for others via qm set, without reboot. Six Terraform roots ignore startup: a VM102
+update failed with 403 (Sys.Modify on /) on 2026-10-31; token privileges remain unchanged. Live role application is unverified.
 DGX 120s secondary timers belong to edgexpert-ai-stack; pve1 waits for LB, HOSTSYNC defaults to 240s.
 See [ADR-0011](adr/0011-ups-nut-shutdown.md) and [UPS operations](operations/ups-nut.md).
 2026-10-31 operator report: installation/re-apply (changed=0), both DGX secondary connections, manual reboot NFS/upsmon stop order,

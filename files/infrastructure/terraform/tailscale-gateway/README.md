@@ -213,3 +213,12 @@ sudo ufw status
 - [Tailscale Subnet Routers](https://tailscale.com/kb/1019/subnets/)
 - [tailnet側のTerraform管理](../tailscale/README.md)
 - [プロジェクトルートREADME](../../../../README.md)
+
+
+## UPS停止用のstartup設定
+
+VMのstartupは[pve1 Ansible](../../ansible/pve1/README.md)の `guest_startup` roleで管理し、
+このrootではstartupブロックを置かず `lifecycle.ignore_changes` に含める。
+Terraform tokenには `/` の `Sys.Modify` がないため、権限を増やさずrootの `qm set --startup` で反映する。
+VM作成・再作成後はpve1 Ansibleのcheck→applyが必要。値・順序・確認は
+[UPS運用](../../../../docs/operations/ups-nut.md)に従う。startupの単独更新にVMの再起動は不要。

@@ -9,3 +9,19 @@ nut_apps_secrets_file: "{{ playbook_dir }}/../../secrets/runtime.sops.yaml"
 nut_ignorelb: true
 nut_battery_charge_low: 50
 nut_battery_runtime_low: 300
+
+# UPS stop order: order 3 guests in parallel, then Apps, then gateway.
+# Root on pve1 manages startup; Terraform's token keeps its existing privileges.
+guest_startup_vms:
+  - vmid: 102
+    startup: order=1,down=180
+  - vmid: 101
+    startup: order=2,down=420
+  - vmid: 103
+    startup: order=3,down=180
+  - vmid: 104
+    startup: order=3,down=180
+  - vmid: 105
+    startup: order=3,down=180
+  - vmid: 111
+    startup: order=3,down=180

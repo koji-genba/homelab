@@ -2,7 +2,7 @@
 
 ## Codebase Overview
 
-Infrastructure-as-code for a single-node homelab: Proxmox host `pve1` plus one Debian 13 Apps VM defining 12 Docker Compose projects behind Caddy, reached over Tailscale. Terraform defines the VMs and tailnet, Ansible configures the Apps VM, other service VMs, and pve1 NUT, and a 15-minute reconcile timer deploys Compose changes from main.
+Infrastructure-as-code for a single-node homelab: Proxmox host `pve1` plus one Debian 13 Apps VM defining 12 Docker Compose projects behind Caddy, reached over Tailscale. Terraform defines the VMs and tailnet, Ansible configures the Apps VM, other service VMs, and pve1 NUT/VM startup, and a 15-minute reconcile timer deploys Compose changes from main.
 
 **Stack**: Proxmox VE + ZFS/NFS, Terraform (`bpg/proxmox`, `tailscale`), Ansible, Docker Compose, Caddy, AdGuard Home, SOPS+age, GitHub Actions; Makefile entry points use the pinned `homelab-toolbox` container plus documented host-side helpers.
 

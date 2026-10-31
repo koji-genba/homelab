@@ -320,3 +320,12 @@ backup / restoreの仕組みと前提は[ADR-0005](../../../../docs/adr/0005-sec
 - [Homelab Project Overview](../../../../README.md)
 - [Network (IX2215) README](../../network/README.md)
 - [ElastiFlow Documentation](https://docs.elastiflow.com/)
+
+
+## UPS停止用のstartup設定
+
+VMのstartupは[pve1 Ansible](../../ansible/pve1/README.md)の `guest_startup` roleで管理し、
+このrootではstartupブロックを置かず `lifecycle.ignore_changes` に含める。
+Terraform tokenには `/` の `Sys.Modify` がないため、権限を増やさずrootの `qm set --startup` で反映する。
+VM作成・再作成後はpve1 Ansibleのcheck→applyが必要。値・順序・確認は
+[UPS運用](../../../../docs/operations/ups-nut.md)に従う。startupの単独更新にVMの再起動は不要。

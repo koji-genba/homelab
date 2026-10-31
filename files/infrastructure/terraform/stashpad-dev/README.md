@@ -227,3 +227,12 @@ ssh -i ~/.ssh/id_ed25519 ubuntu@192.168.10.41
 `.terraform/`を退避してinitし直すと通りました。同じ症状では、このrootの`.terraform/`だけを削除し、
 repository rootから`make terraform-init TERRAFORM_ROOT=files/infrastructure/terraform/stashpad-dev`で
 initし直してください。
+
+
+## UPS停止用のstartup設定
+
+VMのstartupは[pve1 Ansible](../../ansible/pve1/README.md)の `guest_startup` roleで管理し、
+このrootではstartupブロックを置かず `lifecycle.ignore_changes` に含める。
+Terraform tokenには `/` の `Sys.Modify` がないため、権限を増やさずrootの `qm set --startup` で反映する。
+VM作成・再作成後はpve1 Ansibleのcheck→applyが必要。値・順序・確認は
+[UPS運用](../../../../docs/operations/ups-nut.md)に従う。startupの単独更新にVMの再起動は不要。

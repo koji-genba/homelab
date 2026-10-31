@@ -38,12 +38,23 @@ pve1には停電タイマーを置かず、通常はOB+LBで停止する。VMの
 | 101 Apps | 2 | 420秒（homelab-apps.serviceのTimeoutStopSec=300 + OS停止） |
 | 103 ElastiFlow / 104 Hermes / 105 Runner / 111 stashPadDev | 3 | 各180秒 |
 
-停止はorder 3（同orderは並列）→2→1→pve1。up_delayは省略し追加の起動待ちは設けない。
-provider 0.117.0の既定は-1でAPIにupを送らず、PVE既定の起動遅延0秒に委ねる。
-[固定版のschemaと更新処理](https://github.com/bpg/terraform-provider-proxmox/blob/v0.117.0/proxmoxtf/resource/vm/vm.go)
-ではstartupにForceNewがなく、startup更新はrebootRequiredを立てないため、単独変更はin-placeで再起動不要。
-実際のplanで他の変更が混ざらないことは運用者が確認する。
+停止はorder 3（同orderは並列）→2→1→pve1。startupはpve1 Ansibleの `guest_startup` roleで管理し、
+`qm set --startup order=...,down=...` をrootで実行する。upは省略し追加の起動待ちは設けない。
+`qm config` のstartup行を比較し、キー順が違うだけなら変更しない。VM不在・読み取り失敗は明示的に失敗する。
+checkでは変更予定だけを表示する。startupの単独更新はVM再起動を必要としない。
+[PVEの実装](https://github.com/proxmox/qemu-server/blob/master/src/PVE/QemuServer.pm)ではstartupは
+fast_plug_optionとして設定を即時保存し、QEMUへの操作はしない。
 [PVEの起動・停止仕様](https://pve.proxmox.com/pve-docs/qm.1.html#_automatic_start_and_shutdown_of_virtual_machines)も参照。
+
+2026-10-31、TerraformでVM102のstartupを更新しようとして `/` の `Sys.Modify` 不足による403で失敗した。
+VM102に変更はなかった（運用者報告）。tokenの権限は増やさず、pve1 Ansibleへ移管する。
+Terraformの6 rootにはstartupブロックを置かず、`lifecycle.ignore_changes = [startup, ...]` で管理対象から外す。
+[provider 0.117.0の実装](https://github.com/bpg/terraform-provider-proxmox/blob/v0.117.0/proxmoxtf/resource/vm/vm.go)
+ではstartupはoptionalのlistで、通常更新はHasChange(startup)の場合だけAPIへ送る。
+[Terraformのignore_changes仕様](https://developer.hashicorp.com/terraform/language/meta-arguments/lifecycle#ignore_changes)
+と合わせると、Ansibleが設定したstartupだけでは更新差分が出ず、他に差分がなければNo changesとなる。
+cloneの読み取りでは未指定startupをstateへ取り込まない分岐もあるが、startupを除去する更新は発生しない。
+これはソースと仕様による確認で、実機planは今回実行していない。新しいroleの実機反映も未検証。
 
 ## LBしきい値の決定と測定（2026-10-31 JST）
 
@@ -113,12 +124,15 @@ AGE_IDENTITY_FILE=/secure/path/age-identity.txt make ansible-apply-pve1
 roleは接続済み0764:0501のグループがnutでない場合だけ対象デバイスへルールを当て直す（check時は変更しない）。
 初回checkでNUT未導入ならpackage予定とUSB接続を検査し、配置は省略する。適用後にcheck/diffを再実行しchanged=0を確認する。
 passwordを含むupsmon.conf、upsd.usersとwebhookはdiff非表示。設定変更時はupsmonをrestartする。
-既存curl/python3/loggerを使用し、sudo/jqは導入しない。pve1 rootの範囲はNUTだけ。
+既存curl/python3/loggerを使用し、sudo/jqは導入しない。pve1 rootの範囲はNUTとUPS停止に使うVM startup。
 
 4. DGX担当とsecondary資格情報を安全な経路で共有し、別repoの手順で両台を反映する。
    DGX側の120秒timer・停止順・SHUTDOWNEXIT・NFS解除後のログアウトが必要。
-5. Terraformの6 rootのstartupを、既存の各rootのplan/保存plan確認/apply手順で運用者が反映する。
-   startupだけのin-place変更であることを確認する。AnsibleはVM startupを変更しない。
+5. VM作成後、同じpve1 Ansibleのcheck→applyで `guest_startup_vms` を反映する。
+   `qm config <VMID>` で6台のstartupを確認する。Terraformはstartupをignoreするため、VM再作成後もAnsibleが必要。
+   `nut_shutdown_dry_run=true` はNUTの停止だけを模擬し、通常applyではstartup設定は更新される。
+   startupだけの確認・反映は `PVE1_ANSIBLE_ARGS='--tags guest_startup --check'` /
+   `PVE1_ANSIBLE_ARGS='--tags guest_startup'` を使える（実機反映は未検証）。
 
 ## 導入後の確認
 
