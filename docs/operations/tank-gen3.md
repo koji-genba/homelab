@@ -15,7 +15,7 @@
 | poolのdataset既定値 | `compression=lz4`、`atime=off`、`xattr=sa`、`dnodesize=legacy` |
 | mountpoint | `/mnt/tank-gen3`、用途別は`/mnt/tank-gen3/data/<用途>` |
 | `data/ai` | `recordsize=1M`、通常のsnapshot取得対象外 |
-| `data/archive` | `recordsize=1M`、投入・検証ごとに`@verified-YYYYMMDD`、通常`readonly=on` |
+| `data/archive` | `recordsize=1M`、`readonly=off`（書き込み可）、毎日04:30に自動snapshot（日14・週8・月12） |
 
 CMRの製品で、HAMR採用の可能性は高いが、当該型番・FWのメーカーによる直接の明記は未確認。
 HAMR採用を断定して保守方針を変えない。導入前のSMART long test合格を必須にする。
@@ -121,10 +121,38 @@ ai markerの`10002:10002`、archive markerの`0:0`と、それぞれ0644・値�
 Samba readと小さいhf-downloader取得を確認する。mainへのマージは切り替えの完了時とする。
 Ansibleはアプリやtimerを起動し得るので、差分send前には適用しない。
 
-## archiveへの追加
+## archiveの自動snapshot
 
-Samba writerを停止・確認してから`readonly=off`へ変更し、追加作業中だけwriterを再開する。
-追加後にwriterを再停止し、内容・所有者・代表ファイルのchecksumを検証してから
-`@verified-$(date +%Y%m%d)`を取得し、`readonly=on`へ戻す。通常はSambaも含め読取りだけになる。
-同日のverified snapshotが既存なら上書き・削除せず、保持方法を判断してから進める。
-検証snapshotは同じpool上の世代であり、別媒体backupの代わりではない。
+archiveは通常も`readonly=off`とし、Sambaから書き込み可能にする。
+誤削除・誤上書き・ランサムウェアに備え、pve1のroot cronから毎日04:30（ホストのローカル時刻）に
+[`archive-snapshot.sh`](../../files/infrastructure/storage/archive-snapshot.sh)を実行する。
+変更のない日も`@daily-YYYYMMDD`を取得し、14世代を保持する。
+毎月1日は`@monthly-YYYYMMDD`（12世代）、月初以外の月曜は`@weekly-YYYYMMDD`（8世代）も取得する。
+月次を週次より優先する規則はmoverと同じ。dailyは毎日取得し、moverの日付形式`YYYY-MM-DD`とは異なる。
+同日の同名snapshotが既存なら再作成しない。対象datasetが存在しない・未mountならエラーで停止する。
+
+初期の移行記録`@to-gen3-1`、`@to-gen3-2`、`@verified-20261031`は保持する。
+自動削除は対象dataset直下の`daily-`・`weekly-`・`monthly-`に8桁日付を付けた名前だけに限定する。
+これら初期記録やその他の手動snapshot、子datasetは削除対象外。
+新しいsnapshotの取得に失敗した場合は削除しない。同じpool上の世代保持であり、別媒体backupの代わりではない。
+
+repoのscript・logrotateは手動でpve1へ配置する（Apps向けAnsibleの対象外）。
+既存ファイルとroot crontabは編集前に時刻入りbackupを取る。
+以下はrepoを置いたpve1上での配置例。作業端末からはscpで転送してからinstallする。
+
+```sh
+install -o root -g root -m 0755 files/infrastructure/storage/archive-snapshot.sh /usr/local/bin/archive-snapshot.sh
+install -o root -g root -m 0644 files/infrastructure/storage/archive-snapshot.logrotate /etc/logrotate.d/archive-snapshot.logrotate
+```
+
+rootの`crontab -e`で既存行を維持して次の1行を追加する。同じ行が既存なら重複させない。
+mover（05:00）とは開始時刻をずらし、ログはmoverと同じくscript内部で出力する。
+
+```cron
+30 4 * * * /usr/local/bin/archive-snapshot.sh
+```
+
+手動確認は`/usr/local/bin/archive-snapshot.sh`を1回実行し、当日の日次と該当する週次・月次を
+`zfs list -t snapshot -s creation tank-gen3/data/archive`で確認する。
+`flock`でcronとの二重起動を防ぐ。ログは`/var/log/archive-snapshot.log`、lockは`/var/run/archive-snapshot.lock`。
+logrotateはmoverと同じく週次・8世代・圧縮とする。

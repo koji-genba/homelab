@@ -304,7 +304,7 @@ Apps・Hermes・DGXのNFSも復帰した。ただし`pve-guests.service`によ�
 `nfs-server.service`の完了より前に始まっている。今回は問題なかったが、VMの起動がNFSの準備完了を
 待つ順序までは保証していない。
 
-tank-gen3の作成条件、smartd設定、四半期scrub、archiveのreadonlyと検証snapshotは
+tank-gen3の作成条件、smartd設定、四半期scrub、archiveの書き込み可と自動snapshotは
 [tank-gen3運用](tank-gen3.md)に従って復元する。新規poolの再起動後のimport・mountは未検証として別途記録する。
 
 ### mover、cron、logrotate
@@ -320,6 +320,7 @@ install -m 0644 files/infrastructure/storage/mover.logrotate /etc/logrotate.d/mo
 ```
 
 rootのcronへ[毎朝5時の設定](tiered-storage.md#moverスクリプト)を戻す。
+archiveのscript・logrotateと04:30のroot cronも[tank-gen3運用](tank-gen3.md#archiveの自動snapshot)に従って戻す。
 配置後にrepoのscriptと`/usr/local/bin/mover.sh`を照合し、両mountと所有者を確認してからcronを有効にする。
 移動・snapshot・logの仕組みと確認方法は同文書を参照する。
 

@@ -1,0 +1,8 @@
+/var/log/archive-snapshot.log {
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+}

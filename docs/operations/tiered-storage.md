@@ -17,7 +17,7 @@ pve1上のtank-gen2に対してSSDライトキャッシュ層をmergerfsで構�
 
 tank-gen3 (Seagate BarraCuda 24TB ×2 mirror)
   ├─ data/ai       → DGX / Apps（SSDキャッシュ・mover対象外）
-  └─ data/archive  → Apps Samba（通常readonly、verified snapshot）
+  └─ data/archive  → Apps Samba（書き込み可、毎日04:30に自動snapshot）
 tank-gen1 → アーカイブの2つ目のコピーの置き場にする案（未決定）
 vmpool → VM disk
 
@@ -144,17 +144,28 @@ modeやmtimeは元のSSDディレクトリが削除されていると復元元�
 
 ## ZFS snapshotポリシー
 
-対象: `tank-gen2/data/shared`のみ（moverスクリプトの`DATASET`で指定し自動取得）。
+moverの対象: `tank-gen2/data/shared`のみ（スクリプトの`DATASET`で指定し自動取得）。
 この自動取得には`cache-pool`上の残存ファイル、`ai`、`archive`、`k8s-volumes`、VM内named volumeは含まれない。
-`archive`は別途、投入・検証ごとに`@verified-YYYYMMDD`を手動取得する。
+`archive`は別の`archive-snapshot.sh`で毎日04:30に自動取得する（後述）。
 snapshotは同じdataset上の世代保持であり、backupと同義ではない。SSDに残るファイルの復旧方針と、
-pool喪失に備える別媒体へのbackupは別に確認する。保持世代の正は同スクリプトのprune処理である。
+pool喪失に備える別媒体へのbackupは別に確認する。保持世代の正は各スクリプトのprune処理である。
 
 | 種別 | タイミング | 保持世代 |
 |---|---|---|
 | 日次 | 毎日（月次・週次以外） | 14世代 |
 | 週次 | 月曜 | 8世代 |
 | 月次 | 毎月1日 | 12世代 |
+
+archiveは書き込み可能な`tank-gen3/data/archive`を対象に、毎日`daily-YYYYMMDD`を14世代、
+毎月1日に`monthly-YYYYMMDD`を12世代、月初以外の月曜に`weekly-YYYYMMDD`を8世代保持する。
+moverは上表どおり1日1種類だが、archiveは日次を毎日取り、日付もハイフンなしにする。
+変更のない日も取得する。同日の既存snapshotは維持し、未mount・dataset不在ならエラーで停止する。
+自動削除は対象dataset直下の3種類の接頭辞と8桁日付に一致する名前のみ。
+`@to-gen3-*`・`@verified-20261031`など初期記録は保持する。
+配置・root cron（`30 4 * * * /usr/local/bin/archive-snapshot.sh`）・logrotateの手順は
+[tank-gen3運用](tank-gen3.md#archiveの自動snapshot)を参照する。repoからの自動適用はしない。
+ログは`/var/log/archive-snapshot.log`、logrotateは`files/infrastructure/storage/archive-snapshot.logrotate`を
+`/etc/logrotate.d/archive-snapshot.logrotate`へ手動配置する。
 
 手動snapshot（大量書き込み前後など）はautoprune対象外なので個別にdestroyすること:
 ```bash

@@ -31,7 +31,7 @@
 
 `ai`と`archive`には明示的な`fsid`を追加しない。marker名・値は移行前と同じで、
 `archive` markerは`0:0` / `0644`を保持する。archive exportとApps mountのrw契約は維持し、
-通常の書込みはdatasetの`readonly=on`で防ぐ。
+datasetも`readonly=off`（書き込み可）とし、毎日04:30の自動snapshotで世代を保持する。
 
 ## Apps VMの利用path
 
@@ -42,7 +42,7 @@
 | --- | --- | --- |
 | `/mnt/shared` | Samba `shared` | read/write |
 | `/mnt/tank-gen2/data/shared` | Samba `shared-hdd` | read/write |
-| `/mnt/tank-gen3/data/archive` | Samba `archive` | 通常はdataset readonly、追加時のみread/write |
+| `/mnt/tank-gen3/data/archive` | Samba `archive` | read/write（自動snapshotで世代保持） |
 | `/mnt/shared/koji-genba/stashPadLib` | stashPad media | container bind mountはread-only |
 | `/mnt/tank-gen2/data/k8s-volumes/sillytavern-sillytavern-data-pvc-85f01a24-9480-4341-a6ad-f44b17cbecaa` | SillyTavern data | read/write |
 | `/mnt/tank-gen2/data/k8s-volumes/stashpad-prod-stashpad-data-pvc-c96b1813-be70-49ca-865f-989e77359a6b` | stashPad prod metadata | read/write |
@@ -194,8 +194,8 @@ Open WebUIのdata pathを追加した時点で、次の1件がさらに加わる
 | `/mnt/tank-gen2/data/k8s-volumes/open-webui/.homelab-export` | `open-webui-data` |
 
 markerはApps VMの未mount directoryには絶対に作らない。NFS server local consoleで対象datasetとpathを
-確認して作成し、snapshot/backup対象に含める。`archive`と`k8s-volumes`には自動snapshotがないため、
-少なくとも移行前snapshotを別途取得してからフェーズ2へ進む。
+確認して作成し、snapshot/backup対象に含める。`archive`は毎日04:30の自動snapshot対象である。
+`k8s-volumes`には自動snapshotがないため、少なくとも移行前snapshotを別途取得してからフェーズ2へ進む。
 
 ## 手動反映の記録手順
 

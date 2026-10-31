@@ -90,7 +90,7 @@ TOOLBOX_TAILSCALE_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_TAILSCALE_ENV) $(TOOLBOX_I
 
 .PHONY: toolbox-build toolbox-requirements terraform-init terraform-fmt terraform-validate terraform-validate-tailscale terraform-validate-agent-vm terraform-validate-runner-vm terraform-validate-elastiflow terraform-validate-tailscale-gateway terraform-validate-stashpad-dev terraform-plan terraform-apply
 .PHONY: ansible-lint-elastiflow ansible-check-elastiflow ansible-apply-elastiflow
-.PHONY: ansible-lint ansible-check ansible-apply ansible-lint-agent ansible-check-agent ansible-apply-agent ansible-lint-gateway ansible-check-gateway ansible-apply-gateway gateway-routes-test ansible-bootstrap-paths-test compose-reconcile-fixture terraform-apps-vm-lifecycle-test terraform-agent-runner-vm-lifecycle-test toolbox-uid-test cloud-init-test agent-vm-cloud-init-test runner-vm-cloud-init-test runner-privilege-fixture runner-firewall-fixture agent-runner-scope-fixture agent-dnat-guard-fixture compose-config adguard-config-check gatus-config-check mover-test shellcheck secrets-scan preflight
+.PHONY: ansible-lint ansible-check ansible-apply ansible-lint-agent ansible-check-agent ansible-apply-agent ansible-lint-gateway ansible-check-gateway ansible-apply-gateway gateway-routes-test ansible-bootstrap-paths-test compose-reconcile-fixture terraform-apps-vm-lifecycle-test terraform-agent-runner-vm-lifecycle-test toolbox-uid-test cloud-init-test agent-vm-cloud-init-test runner-vm-cloud-init-test runner-privilege-fixture runner-firewall-fixture agent-runner-scope-fixture agent-dnat-guard-fixture compose-config adguard-config-check gatus-config-check mover-test archive-snapshot-test shellcheck secrets-scan preflight
 .PHONY: state-backup-preflight state-backup-preflight-test state-backup state-backup-push state-restore state-restore-test state-backup-test rollback-app
 .PHONY: secrets-encrypt secrets-decrypt-check secrets-encrypt-agent secrets-decrypt-check-agent
 .PHONY: tailscale-acl-encrypt tailscale-acl-decrypt tailscale-init tailscale-acl-preflight tailscale-plan tailscale-apply tailscale-import-core tailscale-import-acl tailscale-import-dns tailscale-import-router tailscale-acl-path-test tailscale-import-gates-test
@@ -320,12 +320,15 @@ compose-reconcile-fixture:
 mover-test:
 	./scripts/tests/mover-fixture.sh
 
+archive-snapshot-test:
+	./scripts/tests/archive-snapshot-fixture.sh
+
 .PHONY: hf-downloader-test
 hf-downloader-test:
 	$(TOOLBOX_RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/tests/hf-downloader-test.py
 
 shellcheck:
-	$(TOOLBOX_RUN) shellcheck scripts/*.sh scripts/tests/*.sh
+	$(TOOLBOX_RUN) shellcheck scripts/*.sh scripts/tests/*.sh files/infrastructure/storage/archive-snapshot.sh
 
 secrets-scan:
 	./scripts/validate-secrets.sh
