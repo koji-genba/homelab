@@ -167,9 +167,10 @@ helper/DAG/config変更もreconcileでcontainer再作成になる。image用dire
 - gated（auto）の`orcarouter/Qwen3.8-Flash-Next-Uncensored-GGUF`を`include=*.md`で取得し、
   `README.md`を保存。未認証警告0件でtoken使用を確認し、Daguのログ・データにtokenらしき文字列は0件だった。
 - HomepageのDaguリンクとアイコン表示を運用者が確認した。Gatusのhf-downloader監視は直近5回とも成功していた。
+- 複数ジョブを積むと実行中1件・2件目以降がqueuedになることを、2026-10-31までに運用者が本番で確認した。
 
-本番では、複数ジョブを積んだときの直列実行（ローカルでは確認済み）、Stopと再開、存在しないrepoの失敗とDAG全体Retry、
-大きなモデルの取得、gatedの手動承認型repoは未検証。
+本番では、Stopと再開、存在しないrepoの失敗とDAG全体Retry、大きなモデルの取得完了、
+gatedの手動承認型repoは未検証。
 
 ## ローカル検証（2026-10-26〜27）
 
