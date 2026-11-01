@@ -111,6 +111,7 @@ Tailscale gatewayのVM定義とtailnet ACL/DNSはTerraformで管理し、gateway
 | `dns.kojigenba-srv.com` | Caddy -> AdGuard Home UI | AdGuard内蔵ログイン |
 | `status.kojigenba-srv.com` | Caddy -> Gatus | Caddy Basic Auth |
 | `homepage.kojigenba-srv.com` | Caddy -> Homepage:3000 | 信頼network/tailnet制限 + Caddy Basic Auth（Gatusと共用） |
+| `hermes.kojigenba-srv.com` | Apps Caddy（TLS終端） -> Agent VM `192.168.10.104:9120`（HTTP） | `admin_networks` と同じ接続元制限 + Hermes basic provider（Caddy Basic Authなし） |
 | DNS | Apps VM port 53 | Server/Trusted/Tailscaleからの接続制限 |
 | SMB | Apps VM port 445 | 既存Sambaローカルユーザー |
 
@@ -119,6 +120,12 @@ Tailscaleのglobal nameserverはApps VMのtailnet IPを参照する。AdGuardの
 DNSの定義元は`files/infrastructure/terraform/tailscale/`と
 `files/infrastructure/ansible/apps/roles/secrets/templates/AdGuardHome.yaml.j2`である。
 client側の経路・接続先は[Apps VM tailnet運用](../operations/apps-vm-tailnet.md)を参照する。
+
+Hermes の DNS rewrite は Apps の Web 用 IP を返す。Agent VM は tailnet 外を維持し、9120 は
+Apps VM（`192.168.10.101`）からのみ受ける。Agent 側の設定と判断は
+[Hermes Agent 運用](../operations/hermes-agent.md)と [ADR-0013](../adr/0013-hermes-webapp-caddy.md) を参照する。コンテナ内 shell を開く Webapp terminal は
+Caddy で `/api/host-terminal*` を403にする。Apps 側の反映順と監視範囲は
+[Homepage 運用](../operations/homepage.md#hermes-webapp-のカード)を参照する。
 
 管理UI、SSH、SMB、DNSの到達元はnftablesとIX2215 ACLで制限する。Internetへ公開サービスを
 公開しない。CloudflareはDNS-01 challengeだけに利用する。

@@ -82,6 +82,25 @@ elastiflow.kojigenba-srv.com {
 	import admin_networks 192.168.10.103:5601
 }
 
+# Agent VM Webapp; sign-in is handled by Hermes's basic provider.
+hermes.kojigenba-srv.com {
+	@trusted remote_ip {$CADDY_TRUSTED_NETWORKS}
+	handle @trusted {
+		# The Webapp terminal opens a shell inside Hermes, bypassing Runner.
+		# Upstream has no disable setting. Agent nftables must restrict :9120
+		# to the Apps VM, so this Caddy route blocks the browser's terminal.
+		# path matches decoded, cleaned paths case-insensitively, merging //.
+		@host_terminal path /api/host-terminal*
+		handle @host_terminal {
+			respond "Forbidden" 403
+		}
+		handle {
+			reverse_proxy 192.168.10.104:9120
+		}
+	}
+	respond "Forbidden" 403
+}
+
 hf-downloader.kojigenba-srv.com {
 	@trusted remote_ip {$CADDY_TRUSTED_NETWORKS}
 	handle @trusted {
