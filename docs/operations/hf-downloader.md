@@ -268,7 +268,9 @@ Progress: 0.4 / 1.0 GB (41.4%)  files 9/10  now 54 MB/s  avg 40 MB/s  ETA 1m  cu
 Progress: 1.0 / 1.0 GB (100.0%)  files 10/10  now 63 MB/s  avg 49 MB/s  ETA 0m
 ```
 
-本番NFSでの進捗表示と、非空tokenでのファイル一覧取得は今回未検証。新imageのCI公開と匿名pullは2026-11-01に確認した。
+新imageのCI公開と匿名pullは2026-11-01に確認した。同日、本番で`unsloth/gemma-4-31B-it-GGUF`（465 GB）の取得中に、
+tokenありの一覧取得で合計465.0 GB・35 filesが出ること、NFS上で取得中fileを含めて取得量・速度・ETAが進むこと、
+subdirectory内のfile名（`BF16/...`）が`current`に出ること、stderrが0行（hfの案内・進捗警告なし）であることを確認した。
 過去の本番受け入れ記録・初回公開tagは履歴として旧版表記を保持する。
 
 ## 制約・トラブルシュート
