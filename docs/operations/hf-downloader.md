@@ -24,7 +24,8 @@ NFS ai: /srv/homelab/nfs/ai -> /data/ai (ro、marker確認)
 Host portは公開しない。実行UID/GIDは`10002:10002`、capabilityなし、rootfsはread-only。
 volumeはimageから`10002:10002 0700`を引き継ぐ。DAG・設定・helperはcheckoutからread-only bindする。
 共通DAG設定もcheckoutの`base.yaml`を`/etc/dagu/base.yaml`へread-only bindする。
-Daguは`2.22.4`、huggingface_hubは`2.3.0`。image tagは`2.22.4-hf2.3.0`。
+次期採用版はDagu `2.22.4`、huggingface_hub `2.4.0`（hf-xet `1.8.0`）、image tagは`2.22.4-hf2.4.0`。
+Composeの本番digestは旧公開版のまま。新imageをCIで公開・確認してから、別PRで固定する。
 Dagu coordinator、terminal、git sync、Cloud report / remote accessは無効。
 `permissions.write_dags: false`でUIからDAGを変更できない。healthは`/api/v1/health`。
 `public_url: https://hf-downloader.kojigenba-srv.com`で初回setupのHostとCaddy越しのHTTPS Originを許可する。
@@ -64,6 +65,25 @@ globは前後の空白を除去する。各256文字、32件、入力全体4096�
 - dataset: `repo_id=lhoestq/demo1`、`repo_type=dataset`、`include=*.csv`。
 - revision指定: `repo_id=org/repo`、`revision=refs/pr/42`なら
   `models/huggingface/org/repo@refs--pr--42/`に保存する。
+
+## 進捗ログ
+
+`download` stepのstdoutへ、開始時・30秒ごと・hf終了時に1行出す。成功時の最終行は100%になる。
+
+```text
+Progress: 412.6 / 1503.2 GB (27.4%)  files 38/131  now 108 MB/s  avg 96 MB/s  ETA 3h09m  current model-00039-of-00131.safetensors
+```
+
+取得量は対象の完了fileと取得中の`.incomplete`のサイズ。合計とfile件数は指定revisionの一覧に
+include / excludeを適用したもの。対象外の既存fileは含まない。GBは10億bytes、MB/sは100万bytes/秒。
+`files`は完了件数、`now`は前回表示からの速度、`avg`は今回の開始からの平均で、開始時の既存分を除く。
+`ETA`は残量÷直近速度（速度0・不明なら`--`）、`current`は分かる範囲の取得中file名。
+並列取得ではそのうち1件だけを表示する。再投入時は完了済みfileを最初から数える。
+一覧取得が失敗してもhfを続行し、警告1行と、合計・割合なしの新規取得量／速度を出す。
+この場合、対象を特定できない既存fileは量にも含めない。進捗処理の失敗も警告だけで取得を続ける。
+保存先サイズからの推定なので、通信量そのものや厳密な残り時間ではない。
+試験時だけcontainer環境変数`HFDL_PROGRESS_INTERVAL`で秒数を変えられる。UIのparamsでは指定できず、
+本番Composeは既定30秒のまま。
 
 ## Startを使わない理由と排他
 
@@ -143,6 +163,25 @@ Dagu / huggingface_hubを上げるときもimage PRとdigest反映PRを分ける
 推移依存のwheel hashを再生成する。Dagu baseはtagだけでなくregistryから取得したdigestも更新する。
 Dockerfile label、workflow tag、本書の版を揃える。
 
+2026-11-01のhub 2.3.0 → 2.4.0確認（[release](https://github.com/huggingface/huggingface_hub/releases/tag/v2.4.0)、
+[tag間差分](https://github.com/huggingface/huggingface_hub/compare/v2.3.0...v2.4.0)）:
+
+- `hf download`の`--repo-type`・`--revision`・`--include`・`--exclude`・`--local-dir`・`--max-workers`・`--`終端と終了コード処理は変更なし。
+  `list_repo_tree`と`utils.filter_repo_objects`を使用でき、snapshotと同じglobを適用できる。
+- local-dirの`.cache/huggingface/`、metadataの再利用、一時fileの命名・rename・例外時削除は変更なし。
+  一時fileは`<metadata名のSHA1のURL-safe Base64>.<etag>.<uuid8>.incomplete`（subdirectoryは保持）。
+  形式が変わっても取得量には数えるが、対応づけできないfileは`current`のファイル名が出なくなる。
+- `HF_TOKEN_PATH`・`HF_HUB_DISABLE_IMPLICIT_TOKEN`・`HF_HUB_DISABLE_TELEMETRY`・`HF_HUB_DISABLE_PROGRESS_BARS`は変更なし。
+  `HF_HUB_DISABLE_UPDATE_CHECK=1`は従来の更新通知に加え、extensionの更新確認・通知も抑止する。
+  cache参照時のpath traversal検証とcache verifyでlocal-dir metadataを除外する修正は、通常の取得手順を変えない。
+- lock再生成でhf-xetは1.7.0 → 1.8.0、filelockは4.2.4 → 4.2.6。他の依存版は同じ。
+  [hf-xet 1.7.1](https://github.com/huggingface/xet-core/releases/tag/v1.7.1)はdownload group構築失敗後のsession破損等を修正。
+  [1.8.0](https://github.com/huggingface/xet-core/releases/tag/v1.8.0)は既知fileサイズを超える再構成要求と、
+  書き込み失敗時に未完成fileを公開する問題を修正（明示的close成功時だけrenameし、drop時はabort）。
+  S3直接uploadは実験的追加で、このdownload用途には使わない。
+  [Xet差分](https://github.com/huggingface/xet-core/compare/v1.7.0...v1.8.0)の並列permit共有変更は複数requestのupload用で、
+  downloaderの`max_workers`やdownload側の既定並列度を変える差分は見当たらなかった。
+
 Dagu更新ではconfig/DAG schema、UIのStart / Enqueue / Retry client、serverの全API versionとrouteを確認し、
 Caddyの許可ルールを見直す。ローカルで認証・権限・3件queue・直接起動時のflock・停止・Retry・
 実ダウンロードを再確認する。公開後にComposeのdigestを更新し、静かな時間帯にreconcileする。
@@ -203,6 +242,34 @@ Docker Desktop / WSL2の偽ai bindを使用し、mount種別だけ試験用overr
 本番Apps VMは既存のupstream DNSを使う。2026-10-27にAdGuardで`*.hf.co`（Xet・LFS・CDN）の名前解決を確認し、翌日に本番での取得を確認した。
 初回の実取得試験の受信量は停止前1.31GB、再起動後約1.46GBで、合計3GB以内。
 清掃追加試験の受信量は504,488,197 bytesで1.5GB以内。いずれも取得物は試験後に削除済み。
+
+## 進捗・hub 2.4.0のローカル検証（2026-11-01）
+
+Dagu 2.22.4 / hub 2.4.0 / hf-xet 1.8.0を`dagu-hf:local-test`でbuildし、実行版を確認。
+2GB上限の試験container、匿名token、偽aiのbind mount、試験DNS、表示間隔5秒を使用した。
+本番への接続・反映・image公開は行っていない。
+
+- 単体試験30件（huggingface_hubなしのtoolbox、一覧取得はmock）、`make hf-downloader-test`・`make compose-config`・`make shellcheck`が成功。
+- Qwen/Qwen2.5-0.5B-Instruct（988,097,824 bytesのsafetensors）を実際のEnqueue APIで投入し、途中進捗・Stop・再Enqueue・100%完了を確認。
+  再投入は既存9/10 files、avg 0 MB/sから開始し、既存fileのmtimeは不変。Stop後の`.incomplete`は0件。
+- `include=*.json`では5件・9,816,684 bytesだけ、さらに`exclude=tokenizer*`では3件・2,777,734 bytesだけを合計に数えた。
+  GBの小数1桁ではこれらの小さい合計は0.0と表示される。
+- 前後空白付きrepo/revisionは成功、`../../etc`は元入力付き`Download refused`で拒否。
+  存在しないrepoは一覧警告後もhfを起動して失敗し、新規保存先・namespaceは残らなかった。
+- 匿名のmeta-llama/Llama-3.2-1Bはapprovalエラー。通常指定で公開LICENSEを取得した場合は既存仕様どおり保持。
+  `include=*.safetensors`で保護対象だけを指定した場合は、cache管理fileと空の保存先・namespaceを清掃した。
+- 試験全体のcontainer受信量は約2.47GB（初回の再試行を含む）で3GB以内。試験container・volume・network・取得物は終了後に削除。
+
+実ログ（再投入後）:
+
+```text
+Progress: 0.0 / 1.0 GB (1.2%)  files 9/10  now 0 MB/s  avg 0 MB/s  ETA --
+Progress: 0.4 / 1.0 GB (41.4%)  files 9/10  now 54 MB/s  avg 40 MB/s  ETA 1m  current model.safetensors
+Progress: 1.0 / 1.0 GB (100.0%)  files 10/10  now 63 MB/s  avg 49 MB/s  ETA 0m
+```
+
+本番NFSでの進捗表示、非空tokenでの新API認証、新imageのCI公開・digest固定は今回未検証。
+過去の本番受け入れ記録・初回公開tagは履歴として旧版表記を保持する。
 
 ## 制約・トラブルシュート
 

@@ -1,8 +1,12 @@
 """Dagu の JSON パラメータを検証し、共有 AI 保存先へ直列で取得する。"""
+import base64
+from contextlib import ExitStack
 import errno
 import fcntl
-from contextlib import ExitStack
+from fnmatch import fnmatchcase
+import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -11,6 +15,7 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 
 
@@ -291,6 +296,192 @@ def cleanup_empty_destination(target, target_existed, namespace_existed):
                   f'created by this run: {target}', flush=True)
 
 
+def list_targets(params):
+    # Import only at runtime, after main has configured the same auth as hf.
+    from huggingface_hub import HfApi, RepoFile
+    from huggingface_hub.utils import filter_repo_objects
+
+    entries = HfApi().list_repo_tree(params['repo_id'], recursive=True,
+                                     repo_type=params['repo_type'], revision=params['revision'])
+    files = (entry for entry in entries if isinstance(entry, RepoFile))
+    return {entry.path: entry.size for entry in filter_repo_objects(
+        files, allow_patterns=params['include'] or None,
+        ignore_patterns=params['exclude'] or None, key=lambda entry: entry.path)}
+
+
+def scan_progress(target):
+    """Snapshot regular files via descriptors; never follow any symlink."""
+    files = {}
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+    def visit(directory, prefix=''):
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                name = prefix + entry.name
+                try:
+                    info = entry.stat(follow_symlinks=False)
+                    if stat.S_ISDIR(info.st_mode):
+                        child = os.open(entry.name, flags, dir_fd=directory)
+                        try:
+                            visit(child, name + '/')
+                        finally:
+                            os.close(child)
+                    elif stat.S_ISREG(info.st_mode):
+                        files[name] = info.st_size
+                except FileNotFoundError:
+                    # hf can rename an incomplete file between scandir/stat.
+                    continue
+
+    try:
+        with ExitStack() as stack:
+            directory = os.open('/', flags)
+            stack.callback(os.close, directory)
+            for part in target.absolute().parts[1:]:
+                directory = os.open(part, flags, dir_fd=directory)
+                stack.callback(os.close, directory)
+            visit(directory)
+    except FileNotFoundError:
+        pass
+    return files
+
+
+def incomplete_key(name):
+    # huggingface_hub 2.4.0 LocalDownloadFilePaths.incomplete_path:
+    # <parent>/<urlsafe_b64(sha1(<basename>.metadata))>.<etag>.<uuid8>.incomplete
+    path = Path(name)
+    digest = base64.urlsafe_b64encode(hashlib.sha1((path.name + '.metadata').encode()).digest()).decode()
+    return str(path.parent / digest)
+
+
+def progress_amount(files, targets, params, baseline):
+    cache = '.cache/huggingface/download/'
+    payload = {name: size for name, size in files.items() if not name.startswith('.cache/huggingface/')}
+    if targets is None:
+        # Without a remote inventory, unchanged pre-existing files cannot be
+        # attributed to this download. Count only new matching payload files.
+        def matches(name):
+            def match(pattern):
+                pattern = pattern.replace('\\', '/')
+                return fnmatchcase(name, pattern + '*' if pattern.endswith('/') else pattern)
+            return (not params['include'] or any(map(match, params['include']))) and not any(map(match, params['exclude']))
+        selected = {name: size for name, size in payload.items() if name not in baseline and matches(name)}
+        partials = [size for name, size in files.items() if name.startswith(cache) and name.endswith('.incomplete')]
+        return sum(selected.values()) + sum(partials), len(selected), None
+    keys = {incomplete_key(name): name for name in targets}
+    partials = {}
+    unmatched_bytes = 0
+    for name, size in files.items():
+        if name.startswith(cache) and name.endswith('.incomplete'):
+            relative = Path(name[len(cache):])
+            key = str(relative.parent / relative.name.split('.', 1)[0])
+            original = keys.get(key)
+            if original is not None:
+                partials[original] = partials.get(original, 0) + size
+            else:
+                # The lock and startup cleanup make these this run's bytes,
+                # even if upstream changes its internal filename format.
+                unmatched_bytes += size
+    done = sum(name in payload for name in targets)
+    amount = sum(payload.get(name, 0) + partials.get(name, 0) for name in targets) + unmatched_bytes
+    current = next(iter(partials), None)
+    return amount, done, current
+
+
+def format_eta(seconds):
+    if seconds is None:
+        return '--'
+    minutes = max(0, math.ceil(seconds / 60))
+    hours, minutes = divmod(minutes, 60)
+    return f'{hours}h{minutes:02d}m' if hours else f'{minutes}m'
+
+
+class Progress:
+    def __init__(self, target, params):
+        self.target, self.params = target, params
+        self.warned = False
+        self.enabled = True
+        self.stopped = threading.Event()
+        self.thread = None
+        self.targets = None
+        try:
+            self.targets = list_targets(params)
+        except InterruptedError:
+            raise
+        except Exception:
+            self.warning('file list unavailable; showing new local bytes without total')
+        try:
+            self.interval = float(os.environ.get('HFDL_PROGRESS_INTERVAL', '30'))
+            if not math.isfinite(self.interval) or self.interval <= 0:
+                raise ValueError('invalid interval')
+            self.baseline = scan_progress(target)
+            self.initial = progress_amount(self.baseline, self.targets, params, self.baseline)[0]
+            self.previous = self.initial
+            self.started = self.last_time = time.monotonic()
+        except InterruptedError:
+            raise
+        except Exception:
+            self.enabled = False
+            self.warning('initialization failed; progress disabled')
+
+    def warning(self, message):
+        if not self.warned:
+            self.warned = True
+            print('Progress warning: ' + message, file=sys.stderr, flush=True)
+
+    def emit(self, success=False):
+        if not self.enabled:
+            return
+        try:
+            amount, done, current = progress_amount(scan_progress(self.target), self.targets, self.params, self.baseline)
+            now = time.monotonic()
+            speed = max(0, amount - self.previous) / max(now - self.last_time, 1e-9)
+            average = max(0, amount - self.initial) / max(now - self.started, 1e-9)
+            self.previous, self.last_time = amount, now
+            if self.targets is None:
+                status = f'{amount / 1e9:.1f} GB'
+                eta = None
+            else:
+                total = sum(self.targets.values())
+                percent = 100 if success or not total else min(100, amount / total * 100)
+                status = f'{amount / 1e9:.1f} / {total / 1e9:.1f} GB ({percent:.1f}%)  files {done}/{len(self.targets)}'
+                eta = max(0, total - amount) / speed if speed > 0 else None
+            line = f'Progress: {status}  now {speed / 1e6:.0f} MB/s  avg {average / 1e6:.0f} MB/s  ETA {format_eta(eta)}'
+            if current:
+                # Repo filenames may contain controls; keep logs on one line.
+                line += '  current ' + ''.join(c if c.isprintable() else '?' for c in current)
+            print(line, flush=True)
+        except InterruptedError:
+            raise
+        except Exception:
+            self.enabled = False
+            self.warning('sampling failed; progress disabled')
+
+    def start(self):
+        try:
+            self.emit()
+            if self.enabled:
+                self.thread = threading.Thread(target=self.run, daemon=True)
+                self.thread.start()
+        except InterruptedError:
+            raise
+        except Exception:
+            self.enabled = False
+            self.warning('worker failed; progress disabled')
+
+    def run(self):
+        while not self.stopped.wait(self.interval):
+            self.emit()
+
+    def finish(self, success):
+        try:
+            self.stopped.set()
+            if self.thread is not None and self.thread.ident is not None:
+                self.thread.join()
+            self.emit(success)
+        except Exception:
+            self.warning('final sampling failed; progress disabled')
+
+
 def main():
     # Raising on termination interrupts lock waits too. Dagu signals the process
     # group; also forward explicitly and reap hf before closing the lock descriptor.
@@ -333,13 +524,23 @@ def main():
                 env['HF_HUB_DISABLE_IMPLICIT_TOKEN'] = '1'
             env.update(HF_HUB_DISABLE_TELEMETRY='1', HF_HUB_DISABLE_PROGRESS_BARS='1',
                        HF_HUB_DISABLE_UPDATE_CHECK='1')
+            # Configure Python API auth before its first runtime import too.
+            for key in ('HF_TOKEN', 'HUGGING_FACE_HUB_TOKEN', 'HF_TOKEN_PATH',
+                        'HF_HUB_DISABLE_IMPLICIT_TOKEN', 'HF_HUB_DISABLE_TELEMETRY',
+                        'HF_HUB_DISABLE_PROGRESS_BARS', 'HF_HUB_DISABLE_UPDATE_CHECK'):
+                if key in env:
+                    os.environ[key] = env[key]
+                else:
+                    os.environ.pop(key, None)
             check_target(target)
+            progress = Progress(target, params)
             print(f'Destination: {target}\nExecuting: {shlex.join(command)}', flush=True)
             target_existed = target.exists()
             namespace_existed = target.parent.exists()
             exit_code = None
             try:
                 child = subprocess.Popen(command, shell=False, env=env, umask=0, pass_fds=(lock.fileno(),))
+                progress.start()
                 exit_code = child.wait()
                 return exit_code
             finally:
@@ -356,6 +557,7 @@ def main():
                     elif child is not None and exit_code is None:
                         exit_code = child.wait()
                 finally:
+                    progress.finish(exit_code == 0)
                     try:
                         check_target(target)
                     except InvalidInput as error:
