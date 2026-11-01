@@ -1,4 +1,4 @@
-"""固定ベースの Python/PM で制約と hash lock を再生成する。README.md 参照。"""
+"""Regenerate constraints and the hash lock with the pinned-base Python/PM. See README.md."""
 
 from importlib.metadata import distributions
 from pathlib import Path
@@ -15,13 +15,13 @@ versions = {
     if dist.metadata["Name"].lower() != "hermes-agent"
 }
 (root / "base-constraints.txt").write_text(
-    "# 固定ベースの Python 3.14 venv に存在する全依存。手編集しない。\n"
-    "# 再生成: README.md の regenerate-requirements.py 実行手順を参照。\n"
+    "# All dependencies present in the pinned-base Python 3.14 venv. Do not edit by hand.\n"
+    "# Regenerate: see the regenerate-requirements.py procedure in README.md.\n"
     + "".join(f"{name}=={version}\n" for name, version in sorted(versions.items()))
 )
 subprocess.run([
     str(uv_launcher("uv")), "pip", "compile", "--quiet", "--generate-hashes",
     "--python-version", "3.14", "--upgrade", "-c", "base-constraints.txt",
     "requirements.in", "-o", "requirements.txt",
-    "--custom-compile-command", "python /lock/regenerate-requirements.py (README.md 参照)",
+    "--custom-compile-command", "python /lock/regenerate-requirements.py (see README.md)",
 ], cwd=root, check=True)

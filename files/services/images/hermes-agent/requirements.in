@@ -1,7 +1,7 @@
 # Hindsight Hermes integration runtime dependencies (mode: local_external).
 #
-# Python 3.14 の固定ベースで hash lock を生成し、ビルド時に hash 検証する。
-# pin 更新後は README.md のコンテナ内での再生成手順に従う。
+# Generate the hash lock against the pinned Python 3.14 base and verify hashes at build time.
+# After updating a pin, follow the in-container regeneration procedure in README.md.
 #
 # hindsight-embed is intentionally NOT listed: it is only imported by the
 # plugin's local_embedded daemon path (`embedded.py::_start_daemon`, reached

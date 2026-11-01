@@ -1,5 +1,5 @@
-# 固定ベースの Python 3.14 venv に存在する全依存。手編集しない。
-# 再生成: README.md の regenerate-requirements.py 実行手順を参照。
+# All dependencies present in the pinned-base Python 3.14 venv. Do not edit by hand.
+# Regenerate: see the regenerate-requirements.py procedure in README.md.
 agent-client-protocol==0.9.0
 aiohappyeyeballs==2.7.1
 aiohttp==3.14.5

@@ -1,4 +1,4 @@
-"""PM が配置したツールで依存を追加し、上流の版を維持する（ビルド専用）。"""
+"""Add dependencies with the tools provisioned by PM, keeping upstream versions (build-only)."""
 
 from importlib.metadata import distributions
 import json
@@ -24,7 +24,7 @@ subprocess.run([
     "--python", sys.executable,
     "-r", str(Path(__file__).with_name("requirements.txt")),
 ], cwd="/tmp", check=True)
-# metadata のキャッシュを共有しない別プロセスで採取する。
+# Collect in a separate process that does not share the metadata cache.
 result = subprocess.check_output([
     sys.executable, "-c",
     "import json; from importlib.metadata import distributions; import re; "
@@ -35,5 +35,5 @@ after = json.loads(result)
 changed = {name: (version, after.get(name)) for name, version in before.items()
            if after.get(name) != version}
 if changed:
-    raise RuntimeError(f"上流依存の版が変更された: {changed}")
-print(f"PASS: 上流依存 {len(before)} 件の版を維持")
+    raise RuntimeError(f"Upstream dependency versions changed: {changed}")
+print(f"PASS: kept versions of {len(before)} upstream dependencies")

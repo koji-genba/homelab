@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ビルド済み Hermes イメージをネットワークなしで検査する。"""
+"""Inspect the built Hermes image without network access."""
 
 from importlib.metadata import version
 import inspect
@@ -17,15 +17,15 @@ module = import_provider_module("hindsight")
 assert module is not None
 with patch.object(module, "register", wraps=module.register) as register:
     provider = load_memory_provider("hindsight", register_skills=False)
-    assert provider is not None, "Hindsight provider の登録失敗"
+    assert provider is not None, "Failed to register the Hindsight provider"
     register.assert_called_once()
 assert provider.__class__.__module__ == module.__name__
-print("PASS: Python 3.14 / hindsight-client 0.10.2 / provider import・登録")
+print("PASS: Python 3.14 / hindsight-client 0.10.2 / provider import and registration")
 
 bundle = Path("/opt/hermes/apps/desktop/dist-webapp")
 assert (bundle / "index.html").is_file()
 assert any((bundle / "assets").glob("*.js"))
-print("PASS: Webapp index.html と JavaScript bundle")
+print("PASS: Webapp index.html and JavaScript bundle")
 
 from gateway.media_fetch import _active_remote_env, fetch_remote_media
 from gateway.platforms.base import _validated_delivery_path
@@ -33,4 +33,4 @@ from gateway.platforms.base import _validated_delivery_path
 assert "session_key" in inspect.signature(_active_remote_env).parameters
 assert "session_key" in inspect.signature(fetch_remote_media).parameters
 assert "session_key=session_key" in inspect.getsource(_validated_delivery_path)
-print("PASS: remote MEDIA patch の引数と呼び出し")
+print("PASS: remote MEDIA patch arguments and calls")
