@@ -19,6 +19,199 @@ spec.loader.exec_module(hf)
 
 
 class DownloadTest(unittest.TestCase):
+    def setUp(self):
+        # Existing lifecycle fixtures must never query the Hub, even if the
+        # host happens to have huggingface_hub installed.
+        self.original_inventory = hf.list_targets
+        self.inventory = patch.object(hf, 'list_targets', return_value={})
+        self.inventory.start()
+        self.addCleanup(self.inventory.stop)
+
+    def test_inventory_uses_official_api_and_snapshot_filters(self):
+        class RepoFile:
+            def __init__(self, name, size):
+                self.path, self.size = name, size
+        entries = [RepoFile('sub/config.json', 42), SimpleNamespace(path='sub'), RepoFile('model.bin', 99)]
+        from unittest.mock import Mock
+        api = Mock()
+        api.list_repo_tree.return_value = iter(entries)
+        filter_objects = Mock(return_value=entries[:1])
+        modules = {'huggingface_hub': SimpleNamespace(HfApi=lambda: api, RepoFile=RepoFile),
+                   'huggingface_hub.utils': SimpleNamespace(filter_repo_objects=filter_objects)}
+        params = hf.validate(dict(repo_id='a/b', repo_type='dataset', revision='refs/pr/1',
+                                  include='*.json', exclude='*.tmp'))
+        with patch.dict('sys.modules', modules):
+            result = self.original_inventory(params)
+        self.assertEqual(result, {'sub/config.json': 42})
+        api.list_repo_tree.assert_called_once_with('a/b', recursive=True, repo_type='dataset', revision='refs/pr/1')
+        args, kwargs = filter_objects.call_args
+        self.assertEqual(list(args[0]), [entries[0], entries[2]])
+        self.assertEqual(kwargs['allow_patterns'], ['*.json'])
+        self.assertEqual(kwargs['ignore_patterns'], ['*.tmp'])
+        self.assertEqual(kwargs['key'](entries[0]), 'sub/config.json')
+
+    def test_progress_sizes_current_and_unrelated_files(self):
+        params = hf.validate({'repo_id': 'a/b'})
+        # Verified against huggingface_hub 2.4.0's _short_hash, independently
+        # of our key function, including the per-download uuid suffix.
+        self.assertEqual(hf.incomplete_key('model.safetensors'), 'xGOKKLRSlIhH692hSVvI1-gpoa8=')
+        key = 'sub/xGOKKLRSlIhH692hSVvI1-gpoa8='
+        files = {'config.json': 2_000_000, 'unrelated.bin': 9_000_000_000,
+                 '.cache/huggingface/download/' + key + '.etag.ab12cd34.incomplete': 100_000_000,
+                 '.cache/huggingface/download/unknown.etag.incomplete': 123,
+                 '.cache/huggingface/download/config.json.metadata': 55}
+        amount, done, current = hf.progress_amount(files, {'config.json': 2_000_000,
+                                  'sub/model.safetensors': 1_000_000_000}, params, {})
+        self.assertEqual((amount, done, current), (102_000_123, 1, 'sub/model.safetensors'))
+        self.assertEqual(hf.progress_amount({'.cache/other': 42}, {'.cache/other': 42}, params, {}),
+                         (42, 1, None))
+        files['sub/model.safetensors'] = files.pop('.cache/huggingface/download/' + key + '.etag.ab12cd34.incomplete')
+        self.assertEqual(hf.progress_amount(files, {'sub/model.safetensors': 1_000_000_000}, params, {}),
+                         (100_000_123, 1, None))
+
+    def test_progress_unknown_incomplete_format_counts_without_current(self):
+        params = hf.validate({'repo_id': 'a/b'})
+        targets = {'config.json': 200_000_000, 'model.bin': 800_000_000}
+        initial = {'config.json': 200_000_000, 'unrelated.bin': 9_000_000_000}
+        name = '.cache/huggingface/download/sub/new-upstream-format.incomplete'
+        partial = {**initial, name: 400_000_000}
+        over_total = {**initial, name: 1_200_000_000}
+        self.assertEqual(hf.progress_amount(partial, targets, params, initial),
+                         (600_000_000, 1, None))
+        output = io.StringIO()
+        with patch.object(hf, 'list_targets', return_value=targets), \
+             patch.object(hf, 'scan_progress', side_effect=[initial, partial, over_total]), \
+             patch.object(hf.time, 'monotonic', side_effect=[0, 10, 20]), redirect_stdout(output):
+            progress = hf.Progress(Path('/unused'), params)
+            progress.emit()
+            progress.emit()
+        lines = output.getvalue().splitlines()
+        self.assertIn('0.6 / 1.0 GB (60.0%)  files 1/2  now 40 MB/s  avg 40 MB/s  ETA 1m', lines[0])
+        self.assertIn('(100.0%)  files 1/2  now 80 MB/s  avg 60 MB/s  ETA 0m', lines[1])
+        self.assertNotIn('current', output.getvalue())
+
+    def test_progress_scan_never_follows_symlinks(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / 'repo/sub').mkdir(parents=True)
+            (root / 'outside').mkdir()
+            (root / 'outside/secret').write_bytes(b'ignored')
+            (root / 'repo/sub/file').write_bytes(b'ok')
+            (root / 'repo/link').symlink_to(root / 'outside', target_is_directory=True)
+            (root / 'repo/file-link').symlink_to(root / 'outside/secret')
+            os.mkfifo(root / 'repo/fifo')
+            self.assertEqual(hf.scan_progress(root / 'repo'), {'sub/file': 2})
+            with self.assertRaises(OSError):
+                hf.scan_progress(root / 'repo/link')
+            self.assertEqual(hf.scan_progress(root / 'missing'), {})
+
+    def test_progress_baseline_rates_eta_and_final(self):
+        params = hf.validate({'repo_id': 'a/b'})
+        targets = {'old.bin': 400_000_000, 'sub/new.bin': 600_000_000}
+        initial = {'old.bin': 400_000_000, 'other.bin': 5_000_000_000}
+        partial = {**initial, '.cache/huggingface/download/' + hf.incomplete_key('sub/new.bin') + '.hash.ab12cd34.incomplete': 200_000_000}
+        final = {**initial, 'sub/new.bin': 600_000_000}
+        output = io.StringIO()
+        with patch.object(hf, 'list_targets', return_value=targets), \
+             patch.object(hf, 'scan_progress', side_effect=[initial, initial, partial, partial, final]), \
+             patch.object(hf.time, 'monotonic', side_effect=[0, 0, 10, 20, 30]), redirect_stdout(output):
+            progress = hf.Progress(Path('/unused'), params)
+            progress.emit()
+            progress.emit()
+            progress.emit()
+            progress.finish(True)
+        lines = output.getvalue().splitlines()
+        self.assertIn('0.4 / 1.0 GB (40.0%)  files 1/2  now 0 MB/s  avg 0 MB/s  ETA --', lines[0])
+        self.assertIn('0.6 / 1.0 GB (60.0%)  files 1/2  now 20 MB/s  avg 20 MB/s  ETA 1m  current sub/new.bin', lines[1])
+        self.assertIn('now 0 MB/s  avg 10 MB/s  ETA --', lines[2])
+        self.assertIn('(100.0%)  files 2/2', lines[3])
+        self.assertIn('avg 20 MB/s', lines[3])  # 600MB / 30s; excludes existing 400MB.
+
+    def test_progress_inventory_failure_still_reports_bytes(self):
+        params = hf.validate(dict(repo_id='a/b', include='data/,*.json', exclude='*.tmp'))
+        initial = {'unrelated.json': 9_000_000_000}
+        final = {**initial, 'config.json': 100_000_000, 'data/a.bin': 200_000_000,
+                 'other.bin': 9_000_000_000, 'data/ignored.tmp': 9_000_000_000,
+                 '.cache/huggingface/download/hash.etag.incomplete': 100_000_000}
+        output, errors = io.StringIO(), io.StringIO()
+        with patch.object(hf, 'list_targets', side_effect=RuntimeError('never print remote exception')), \
+             patch.object(hf, 'scan_progress', side_effect=[initial, final]), \
+             patch.object(hf.time, 'monotonic', side_effect=[0, 10]), \
+             redirect_stdout(output), redirect_stderr(errors):
+            progress = hf.Progress(Path('/unused'), params)
+            progress.emit()
+            progress.warning('second warning')
+        self.assertIn('Progress: 0.4 GB  now 40 MB/s  avg 40 MB/s  ETA --', output.getvalue())
+        self.assertNotIn('%', output.getvalue())
+        self.assertEqual(errors.getvalue().count('Progress warning:'), 1)
+        self.assertNotIn('never print', errors.getvalue())
+
+    def test_progress_errors_warn_once_and_do_not_escape(self):
+        params = hf.validate({'repo_id': 'a/b'})
+        errors = io.StringIO()
+        with patch.object(hf, 'scan_progress', side_effect=[{}, OSError('broken')]), redirect_stderr(errors):
+            progress = hf.Progress(Path('/unused'), params)
+            progress.start()
+            progress.finish(False)
+        self.assertEqual(errors.getvalue().count('Progress warning:'), 1)
+        self.assertFalse(progress.enabled)
+        for interval in ('0', '-1', 'nan', 'inf', 'invalid'):
+            with self.subTest(interval=interval), patch.dict(os.environ, {'HFDL_PROGRESS_INTERVAL': interval}), \
+                 redirect_stderr(io.StringIO()):
+                self.assertFalse(hf.Progress(Path('/unused'), params).enabled)
+
+    def test_progress_background_stops_before_final_sampling(self):
+        with patch.object(hf, 'scan_progress', return_value={}), \
+             patch.dict(os.environ, {'HFDL_PROGRESS_INTERVAL': '0.001'}), redirect_stdout(io.StringIO()):
+            progress = hf.Progress(Path('/unused'), hf.validate({'repo_id': 'a/b'}))
+            progress.start()
+            progress.finish(True)
+        self.assertFalse(progress.thread.is_alive())
+        self.assertTrue(progress.stopped.is_set())
+
+    def test_progress_failure_preserves_exit_status_signals_and_cleanup(self):
+        for outcome in (0, 7, 'stop'):
+            for failure in ('inventory', 'baseline', 'sample'):
+                with self.subTest(outcome=outcome, failure=failure), tempfile.TemporaryDirectory() as temp:
+                    ai = Path(temp)
+                    _, target = hf.destination(hf.validate({'repo_id': 'a/b'}), ai)
+                    token = ai / 'token'
+                    token.touch()
+                    def launch(*args, **kwargs):
+                        self.assertNotIn('HF_TOKEN', kwargs['env'])
+                        self.assertNotIn('HUGGING_FACE_HUB_TOKEN', kwargs['env'])
+                        self.assertEqual(os.environ['HF_HUB_DISABLE_IMPLICIT_TOKEN'], '1')
+                        self.assertNotIn('HF_TOKEN_PATH', os.environ)
+                        cache = target / '.cache/huggingface/download'
+                        cache.mkdir(parents=True)
+                        (cache / 'partial.incomplete').write_text('partial')
+                        return SimpleNamespace(wait=wait, terminate=lambda: None,
+                                               poll=lambda: None if outcome == 'stop' else outcome)
+                    def wait(timeout=None):
+                        if outcome == 'stop' and timeout is None:
+                            raise InterruptedError(15)
+                        return -15 if outcome == 'stop' else outcome
+                    scans = OSError('scan failed') if failure == 'baseline' else ([{}, OSError('scan failed')] if failure == 'sample' else {})
+                    errors = io.StringIO()
+                    with patch.dict(os.environ, {'DAG_PARAMS_JSON': '{"repo_id":"a/b"}',
+                         'HFDL_AI_ROOT': temp, 'HFDL_LOCK_PATH': str(ai / 'lock'), 'HF_TOKEN_PATH': str(token),
+                         'HF_TOKEN': 'fixture-only', 'HUGGING_FACE_HUB_TOKEN': 'fixture-only'}), \
+                         patch.object(hf, 'preflight'), patch.object(hf.subprocess, 'Popen', side_effect=launch), \
+                         patch.object(hf, 'scan_progress', **({'side_effect': scans} if failure != 'inventory' else {'return_value': {}})), \
+                         patch.object(hf, 'list_targets', **({'side_effect': RuntimeError('inventory')} if failure == 'inventory' else {'return_value': {}})), \
+                         redirect_stdout(io.StringIO()), redirect_stderr(errors):
+                        self.assertEqual(hf.main(), 143 if outcome == 'stop' else outcome)
+                    self.assertEqual(errors.getvalue().count('Progress warning:'), 1)
+                    self.assertFalse(list(target.rglob('*.incomplete')))
+                    if outcome != 0:
+                        self.assertFalse(target.exists())
+
+    def test_progress_eta_hours(self):
+        self.assertEqual(hf.format_eta(11340), '3h09m')
+        self.assertEqual(hf.format_eta(0), '0m')
+        self.assertEqual(hf.format_eta(None), '--')
+
+
     def test_cleanup_only_incomplete_files(self):
         with tempfile.TemporaryDirectory() as temp:
             target = Path(temp) / 'repo'
@@ -399,6 +592,7 @@ class DownloadTest(unittest.TestCase):
             'exclude': ['--token=x', '../*'],
             'max_workers': [0, 5, True, 1.5, '1;id', '01'],
             'HFDL_HF_BIN': ['/bin/sh'],
+            'HFDL_PROGRESS_INTERVAL': ['5'],
         }.items():
             for value in values:
                 with self.subTest(name=name, value=value), self.assertRaises(hf.InvalidInput):

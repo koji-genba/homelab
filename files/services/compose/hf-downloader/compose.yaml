@@ -1,7 +1,7 @@
 services:
   hf-downloader:
-    # Pinned by digest; the published tag at pin time was 2.22.4-hf2.3.0. Tags are review-only.
-    image: ghcr.io/koji-genba/dagu-hf@sha256:4fc6b2de6c4a338a9657449597867d865a5759a874ab70afbb7eaa0adea69b6f
+    # Pinned by digest; the published tag at pin time was 2.22.4-hf2.4.0. Tags are review-only.
+    image: ghcr.io/koji-genba/dagu-hf@sha256:2aa5edcd850375144de4d936e761e55afb63ba86e79d5411d9f489fd96059342
     user: "10002:10002"
     environment:
       DAGU_HOME: /var/lib/dagu
