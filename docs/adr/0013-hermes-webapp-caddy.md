@@ -1,7 +1,7 @@
 # ADR-0013: Hermes Webapp を Apps VM の Caddy で公開する
 
 - 日付: 2026-11-02
-- 状態: 採用（反映状況はこの記録の対象外）
+- 状態: 承認済み。2026-11-02に本番反映（PR #179・#181・#182・#180）、Webappログイン・会話、到達性・認証境界、Gatus監視、Discordでのrecall・ブラウザtool・MEDIA配送・既登録コマンド表示を確認
 - 関連: [0008](0008-hermes-agent-hindsight-vms.md)、[0009](0009-elastiflow-caddy-fqdn.md)
 
 ## 背景
@@ -45,3 +45,13 @@ terminal 経路の403、CLI からの DGX 会話、export から rebuild item �
 試験用ネットワーク・内部 CA・メモリ6GiBでの結果であり、本番 apply、Discord、Runner SSH・Chromium、
 正常な Hindsight、実 LAN の DNAT・firewall は未検証。実ブラウザ・ファイル操作等の未検証範囲は運用手順に記す。
 本番の反映状況を repo から推定しない。
+
+## 本番反映の追記（2026-11-02 JST）
+
+PR #179・#181・#182・#180 を本番反映し、状態欄の各項目を確認した。
+Apps VM から9120へのタイムアウトは、DNAT の返りも `ip saddr` で判定していたためで、
+PR #182 の `ct original ip saddr` への修正後に `/api/status` の `overall: ok` と Trusted VLAN からの直接接続拒否を確認した。
+Caddy 越しのログインが成功し `__Host-` cookie が使えたことから、`.101` の trusted proxy 設定で
+HTTPS の転送ヘッダーが信頼され、Hermes から見た接続元は Apps の LAN IP のままと判断できる。
+ファイル upload/download、UI の会話継続・undo・compaction、更新前バックアップからの旧版復元、
+正常な Hindsight での120秒 timeout は未検証。詳細は[本番反映・確認結果](../operations/hermes-agent.md#本番反映確認結果2026-11-02-jst)を参照。

@@ -42,7 +42,10 @@ Caddy が `/api/host-terminal*` を403で拒否する。Agent 側で9120を Apps
 未ログイン時にも `gateway_running` と `auth_required` を返す。Gatus は HTTP 200 と両方の true を確認する。
 Homepage の表示は HTTP の死活だけで、DNS・Caddy・TLS・ログイン・チャットの成功までは判定しない。
 Apps の nftables テンプレートは Docker の転送・NAT を置き換えず、Docker の標準 bridge masquerade を
-無効化する設定もないため、Agent には Apps の LAN IP から届く想定である（実際の送信元と到達性は未検証）。
+無効化する設定もない。2026-11-02 JST、Apps VM から `/api/status` が `overall: ok` を返し、
+Gatus の監視成功と Trusted VLAN の作業端末から9120へ届かないことを確認済み。
+Caddy 越しのログインが成功し `__Host-` cookie が使えたことから、`.101` の trusted proxy 設定で
+HTTPS の転送ヘッダーが信頼され、Hermes から見た接続元は Apps の LAN IP のままと判断できる。
 Agent 側の公開ポート・Apps のみを許可する firewall・認証・trusted proxy の設定は
 [Hermes Agent 運用](hermes-agent.md)と [ADR-0013](../adr/0013-hermes-webapp-caddy.md) を参照する。
 
@@ -58,6 +61,11 @@ Agent 側には公開 URL と実際の TCP peer に対する trusted proxy 設�
 `secrets_runtime_changed` を通じて Apps 全 project の force-recreate を伴う
 （[CODEBASE_MAP の gotcha 2・3・6](../CODEBASE_MAP.md#6-gotchas)）。
 Agent の準備より先に merge すると Gatus が異常となり、Caddy は 502 を返す。
+
+2026-11-02 JST、PR #180 のマージ後に reconcile を手動起動し、上記3 project の再作成を確認した。
+AdGuard rewrite の `make ansible-apply` は changed=4で、Apps の全 project が再作成された。
+tailnet 端末では名前が Apps の tailnet IP に解決され、`/login` 200、`/` 302、`/api/host-terminal` 403、
+未ログインの `/api/sessions` 401を確認した。利用者はブラウザで Webapp にログインし会話できた。
 
 ## 設定の置き場所と更新
 

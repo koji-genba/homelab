@@ -466,15 +466,14 @@ Agent VM側の値はrole `agent_stack`が`/etc/homelab/secrets/*.env`へroot 060
 
 ## 上流 main / Webapp への更新
 
-この節は上流 `c7da41dd522dc19cc08bbfcfa69d4b078224b45d` に合わせた更新手順であり、本番の反映状況は示さない。
-PR 1 の自前イメージ `main-c7da41dd` は公開され、Compose の Hermes と cdp-tunnel はその digest に差し替え済み。
-別 PR の Apps 側実装と認証キーを揃えてから反映する。
+上流 `c7da41dd522dc19cc08bbfcfa69d4b078224b45d` への更新と Webapp 公開は、2026-11-02 JST に本番反映済み
+（PR #179・#181・#182・#180）。確認済みの範囲と残る未検証事項は、下記「本番反映・確認結果」に記す。
 採用理由と公開境界は [ADR-0013](../adr/0013-hermes-webapp-caddy.md) を参照。
 
 - URL は `https://hermes.kojigenba-srv.com`。Apps VM Caddy が TLS を終端し、Agent の
   `192.168.10.104:9120` へ HTTP / WebSocket を中継する。Agent は tailnet 外を維持する。
 - Caddy は `admin_networks` で接続元を制限し、Hermes 同梱の basic provider がフォームログインを提供する。
-  Caddy の Basic Auth は重ねない。Apps の Caddy・AdGuard・Homepage・Gatus の実装は別 PR で行う。
+  Caddy の Basic Auth は重ねない。Apps の Caddy・AdGuard・Homepage・Gatus は PR #180 で反映済み。
 - `dashboard.basic_auth.session_ttl_seconds` は 43200（12時間）。これは access token の更新間隔であり、
   12時間で必ず再ログインする設定ではない。上流 basic provider の refresh token は30日。
 - `state.db` の schema は旧版の30から32へ進む。旧イメージへの差し戻しだけをロールバックにしない。
@@ -497,18 +496,18 @@ PR 1 の自前イメージ `main-c7da41dd` は公開され、Compose の Hermes 
 `web_host_terminal.request_allowed()` は認証あり、または loopback なら許可し、
 `web_host_terminal_sessions.py` が gateway の子 PTY を生成する。
 これは Agent tool の `terminal.backend: ssh` と別で、Hermes コンテナ内で shell が動く。
-ブラウザからの手動 terminal は、別 PR の Apps 側 Caddy で遮断する方針とする。
+ブラウザからの手動 terminal は、Apps 側 Caddy で遮断する。
 9120 は nftables で Apps VM からの到達に限定するため、ブラウザからの経路は Caddy の1か所で遮断できる。
 Apps VM 自身から backend へ直接接続する経路は残るが、Hermes の認証が必要になる。
 
-別 PR の Caddy では **`/api/host-terminal` とその配下（`/api/host-terminal/*`）**を、
+Apps 側 Caddy では **`/api/host-terminal` とその配下（`/api/host-terminal/*`）**を、
 WebSocket upgrade を含めて403で拒否する。クエリ付きも同じ path として遮断する。
 `/api/ws`（会話・セッション）、`/api/webapp/socket-ticket`（会話や音声でも共用）、
 `/api/files/*` や `/api/chat/file-upload` は遮断しない。チケット発行 API 全体を塞ぐ必要はない。
 将来、Caddy を経由しない利用も止める場合の patch 箇所は
 `hermes_cli/web_host_terminal.py` の `request_allowed()`（常に false を返す）、または
 `hermes_cli/web_routers/webapp.py` の `host_terminal_ws()`（accept 前に4403で閉じる）。
-Caddy の遮断は Apps 側 PR で実装する。上流 patch は将来の選択肢として残し、今回は適用しない。
+Caddy の遮断は PR #180 で反映済み。上流 patch は将来の選択肢として残し、今回は適用しない。
 UI の terminal pane 自体は残るが、Caddy 経由では接続できなくなる。
 
 ### 9120 の到達元と trusted_proxies
@@ -521,13 +520,12 @@ Runner `.105`、他の LAN 機器、Trusted VLAN、tailnet からの直接接続
 cdp-tunnel は Hermes と netns を共有するが、CDP の host 公開は追加しない。
 
 Agent が再利用する Apps の Docker role の `daemon.json.j2` はログ設定だけで、
-`userland-proxy` は明示しない。通常のリモート LAN→公開 bridge ポートは DNAT され、
-Agent 側で SNAT する理由がないため Hermes が見る peer は `.101` のままと判断し、
+`userland-proxy` は明示しない。通常のリモート LAN→公開 bridge ポートは DNAT される。
 `dashboard.trusted_proxies` は **`192.168.10.101/32` のみ**にする。bridge gateway や広い CIDR は信頼しない。
-実機の Docker 起動オプションや HTTP peer は未検証。反映時に運用者が daemon の設定・起動引数を確認し、
-Apps から9120へ要求しながら Agent の bridge で `tcpdump -n -i <bridge> tcp port 9120` を観測する。
-通常のアクセスログで peer も確認し、Caddy 経由で HTTPS 判定・Secure cookie・Origin 判定と WebSocket 接続を確認する。
-認証 header・cookie・本文は取得・表示しない。bridge gateway に変わっていた場合は設定を広げる前に経路を調査する。
+2026-11-02 JST、Caddy 越しのログインが成功し `__Host-` cookie が使えたことから、
+`.101` の trusted proxy 設定で HTTPS の転送ヘッダーが信頼され、Hermes から見た接続元は Apps の LAN IP のままと判断できる。
+これはログイン成功を根拠とした判断であり、HTTP peer の直接観測ではない。
+Apps VM からの `/api/status` 成功と、作業端末（Trusted VLAN）から9120へ届かないことも同日確認済み。
 
 ### Webapp 認証キーの登録（運用者の端末で実施）
 
@@ -613,7 +611,6 @@ make secrets-decrypt-check-agent
 
 この手順は生成値を画面や shell 履歴へ出さない。共有端末ではプロセス引数の参照権限にも注意する。
 署名 secret の再生成は既存セッションを無効化するため、通常の apply ごとには行わない。
-この作業ではキー生成・bundle 更新・復号確認は未実施。
 
 ### 反映と確認（明示承認を得て別途実施）
 
@@ -631,6 +628,7 @@ make secrets-decrypt-check-agent
 
 ### ローカル結合試験の結果（2026-11-02）
 
+以下は本番反映前のローカル試験記録である。本番での確認結果は次節に記す。
 新イメージ、この PR の config テンプレート、Apps 側 PR の Caddy を組み合わせた隔離コンテナ試験で、次を確認した。
 試験用の proxy IP・ダミー認証情報と内部 CA を使い、Hermes/Caddy はそれぞれメモリ6GiBで実行した。
 
@@ -649,11 +647,33 @@ make secrets-decrypt-check-agent
   非 active・非 compacted 行は除外し、compacted 行は保持することも確認した。実 Hindsight への再投入は行っていない。
   Hindsight の即時接続拒否でも会話は継続したが、正常な recall/retain や120秒の無応答 timeout は未検証。
 
-本番 apply・2回目 apply の changed=0、Discord、Runner SSH・Chromium/CDP、正常な Hindsight、
-実 LAN の送信元 IP・DNAT・firewall、許可 subnet 外からの拒否、公開 DNS・公的 TLS、バックアップ復元は未検証。
-実ブラウザの画面操作、ファイル upload/download、UI の会話継続・undo・compaction、
-本番の1.5GiBメモリ制限での負荷も未検証。ローカル試験を本番全体の受入完了とは扱わない。
-この作業で本番のバックアップ・apply は未実施であり、本番環境の実施状況は repo だけからは判断しない。
+### 本番反映・確認結果（2026-11-02 JST）
+
+以下は運用者・利用者が本番で確認した結果（PR #179・#181・#182・#180）。
+
+- **更新前バックアップ: 確認済み。** 07:04、旧版のまま `homelab-agent-backup` で更新前のバックアップセットを取得し、成功した。
+- **新イメージ起動・冪等性: 確認済み。** `make ansible-apply-agent` の1回目は agent changed=9、
+  2回目は agent・runner とも changed=0。Hermes は `c7da41dd` の新イメージで起動し、healthcheck は成功。
+  メモリ使用量は約288MiB / 1.5GiBだった。
+- **9120 の到達性と修正: 確認済み。** 反映直後は Apps VM から9120がタイムアウトした。
+  forward の Webapp ルールが `ip saddr` で判定し、DNAT の返りのパケットまで落としていたため、
+  PR #182 で `ct original ip saddr` に修正した。apply は changed=2、2回目は changed=0で、Hermes は再作成されなかった。
+  修正後は Apps VM から `/api/status` が `overall: ok` を返し、作業端末（Trusted VLAN）から9120へは届かなかった。
+- **Apps 側反映: 確認済み。** PR #180 のマージ後、reconcile を手動起動し、`edge`・`homepage`・`monitoring` が再作成された。
+  AdGuard rewrite の `make ansible-apply` は changed=4で、Apps の全 project が再作成された。
+- **tailnet からの公開経路・認証境界: 確認済み。** 名前は Apps の tailnet IP に解決され、`/login` は200、`/` は302、
+  `/api/host-terminal` は403、未ログインの `/api/sessions` は401だった。Gatus の Hermes Webapp 監視も成功した。
+- **ブラウザでの利用: 確認済み。** 利用者が Webapp にログインし、会話できた。
+  Caddy 越しのログインが成功し `__Host-` cookie が使えたことから、`dashboard.trusted_proxies` の `.101` で
+  HTTPS の転送ヘッダーが信頼されている（Hermes から見た接続元が Apps の LAN IP のまま）と判断できる。
+- **Discord での利用: 確認済み。** 利用者が記憶の recall、`browser_exec` による Runner Chromium の操作
+  （サイトのボット確認画面に当たるところまで）、Runner からの画像配送（MEDIA）、既登録スラッシュコマンドの表示を確認した。
+  新版の最初の起動（07:07）では、スラッシュコマンド同期が rate limit によりタイムアウトした。
+  同期は次の再接続で再試行する。既登録コマンドの表示を、同期成功とは扱わない。
+
+**未検証:** Webapp でのファイル upload/download、UI での会話の継続・undo・compaction、
+更新前バックアップからの復元による旧版への切り戻し、正常な Hindsight での120秒の timeout。
+上記の確認済み範囲を超える受入完了とは扱わない。
 
 既知の警告として `TERMINAL_CWD does not exist: /srv/agent-work` がある。
 Hermes の `agent/runtime_cwd.py` が Runner 側のパスをコンテナ内の `Path.is_dir()` で検査するために出るもので、
@@ -719,7 +739,7 @@ Runner の疎通失敗を直接示すものではない。運用者の確認で�
 運用helper（backup / restore / export / rebuild-memory / healthcheck）は2026-10-17のローカル結合試験
 （WS7b-ops / WS7b-ops2 / WS7d、架空データ）で修正前の通し確認を行った。
 WS8の安全コピー・通知・再開・bank方針の修正後は、ローカルfixtureで回帰検証した。確認済みの範囲と本番でしか確認できない項目は
-[バックアップ文書の検証範囲](hermes-agent-backup.md#9-検証範囲2026-10-17)を正とする。rebuild-memoryの
+[バックアップ文書の検証範囲](hermes-agent-backup.md#9-検証範囲2026-10-18更新)を正とする。rebuild-memoryの
 再投入の形（1セッション=1document=1リクエスト、`User:`/`Assistant:`ラベルのJSON配列、`update_mode=replace`、
 async完了待ち、per-turn timestamp）と使い方（進捗ディレクトリ、resume、`--fresh`、staged input）も
 同文書の記憶の再構築節を正とする。
