@@ -149,7 +149,7 @@ Caddyの許可ルールを見直す。ローカルで認証・権限・3件queue
 helper/DAG/config変更もreconcileでcontainer再作成になる。image用directoryだけの変更では再作成しない。
 公開後にComposeのdigestを変更して初めて新しいimageへ切り替わり、取得を中断する。
 
-## 受け入れ確認（2026-10-28実施・一部未検証）
+## 受け入れ確認（2026-10-28〜11-01実施）
 
 以下は確認手順。今回の本番での確認範囲は後述の結果を参照する。
 
@@ -170,9 +170,13 @@ helper/DAG/config変更もreconcileでcontainer再作成になる。image用dire
   `README.md`を保存。未認証警告0件でtoken使用を確認し、Daguのログ・データにtokenらしき文字列は0件だった。
 - HomepageのDaguリンクとアイコン表示を運用者が確認した。Gatusのhf-downloader監視は直近5回とも成功していた。
 - 複数ジョブを積むと実行中1件・2件目以降がqueuedになることを、2026-10-31までに運用者が本番で確認した。
-
-本番では、Stopと再開、存在しないrepoの失敗とDAG全体Retry、大きなモデルの取得完了、
-gatedの手動承認型repoは未検証。
+- 約1.5TBのmodelの取得完了を、2026-11-01までに運用者が本番で確認した。
+- 2026-11-01: `Qwen/Qwen2.5-7B-Instruct`を途中でStopし、`Download stopped`と途中fileの清掃を確認。
+  積み直すと、Stop前に完了していたshardのmtimeは変わらず、次のshardから取得した。
+- 2026-11-01: 存在しないrepoは`not found`で失敗してstderrに理由が出て、DAG全体Retryでqueueへ戻り再び失敗した。
+  `../../etc`は`Download refused`でhfを起動せずに拒否した。
+- 2026-11-01: 手動承認型gatedの`google/gemma-3-1b-it`は、利用条件への同意前は`Access denied ... requires approval`で失敗し、
+  同意後に積み直すと`model.safetensors`を含めて取得できた（10002:10002、0666 / 0777、`.incomplete`残り0件、ログにtokenらしき文字列0件）。
 
 ## ローカル検証（2026-10-26〜27）
 
