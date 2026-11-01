@@ -24,8 +24,8 @@ NFS ai: /srv/homelab/nfs/ai -> /data/ai (ro、marker確認)
 Host portは公開しない。実行UID/GIDは`10002:10002`、capabilityなし、rootfsはread-only。
 volumeはimageから`10002:10002 0700`を引き継ぐ。DAG・設定・helperはcheckoutからread-only bindする。
 共通DAG設定もcheckoutの`base.yaml`を`/etc/dagu/base.yaml`へread-only bindする。
-次期採用版はDagu `2.22.4`、huggingface_hub `2.4.0`（hf-xet `1.8.0`）、image tagは`2.22.4-hf2.4.0`。
-Composeの本番digestは旧公開版のまま。新imageをCIで公開・確認してから、別PRで固定する。
+Daguは`2.22.4`、huggingface_hubは`2.4.0`（hf-xet `1.8.0`）。image tagは`2.22.4-hf2.4.0`。
+2026-11-01にCIで公開し、認証なしでのmanifest取得とdigest指定pullを確認してから、Composeのdigestを固定した。
 Dagu coordinator、terminal、git sync、Cloud report / remote accessは無効。
 `permissions.write_dags: false`でUIからDAGを変更できない。healthは`/api/v1/health`。
 `public_url: https://hf-downloader.kojigenba-srv.com`で初回setupのHostとCaddy越しのHTTPS Originを許可する。
@@ -268,7 +268,7 @@ Progress: 0.4 / 1.0 GB (41.4%)  files 9/10  now 54 MB/s  avg 40 MB/s  ETA 1m  cu
 Progress: 1.0 / 1.0 GB (100.0%)  files 10/10  now 63 MB/s  avg 49 MB/s  ETA 0m
 ```
 
-本番NFSでの進捗表示、非空tokenでの新API認証、新imageのCI公開・digest固定は今回未検証。
+本番NFSでの進捗表示と、非空tokenでのファイル一覧取得は今回未検証。新imageのCI公開と匿名pullは2026-11-01に確認した。
 過去の本番受け入れ記録・初回公開tagは履歴として旧版表記を保持する。
 
 ## 制約・トラブルシュート
