@@ -87,6 +87,16 @@ endpoints:
       - "[STATUS] == 200"
     alerts:
       - type: discord
+  - name: Hermes Webapp
+    group: applications
+    # 未ログインでも公開される状態 API。Caddy・DNS・TLS とログインの成功は対象外。
+    url: http://192.168.10.104:9120/api/status
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].gateway_running == true"
+      - "[BODY].auth_required == true"
+    alerts:
+      - type: discord
   - name: Homepage
     group: applications
     # Probe the backend directly, as with other apps behind Caddy authentication.

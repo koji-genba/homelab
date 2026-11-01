@@ -27,6 +27,38 @@ secrets roleのsecret生成処理、`runtime.yaml.example`、暗号化bundleへ�
 Homepage内蔵認証の`HOMEPAGE_AUTH_ENABLED`は設定しない。
 `HOMEPAGE_ALLOWED_HOSTS`は公開FQDNだけを許可し、GatusとCompose healthcheckは同じHost headerでprobeする。
 
+## Hermes Webapp のカード
+
+「AI・MCP」の Hermes は `https://hermes.kojigenba-srv.com` を開く。AdGuard は既存サービスと同じ
+Apps の Web 用 IP を返し、Apps VM（`192.168.10.101`）の Caddy が TLS を終端して
+Agent VM の `192.168.10.104:9120` へ HTTP で中継する。Agent VM は tailnet 外を維持する。
+Caddy は `admin_networks` と同じ接続元制限を行い、ログインは Hermes 同梱の basic provider が担当する。
+Webapp 内 terminal は Runner を通さず Hermes コンテナ内で shell を開き、上流に停止設定がないため、
+Caddy が `/api/host-terminal*` を403で拒否する。Agent 側で9120を Apps VM からだけ許可することが前提となる。
+判断は [ADR-0013](../adr/0013-hermes-webapp-caddy.md) を参照する。
+
+`siteMonitor` と Gatus は `http://192.168.10.104:9120/api/status` を直接見る。上流の
+`dashboard_auth/public_paths.py` はこの経路を認証対象外とし、`web_routers/status.py` は
+未ログイン時にも `gateway_running` と `auth_required` を返す。Gatus は HTTP 200 と両方の true を確認する。
+Homepage の表示は HTTP の死活だけで、DNS・Caddy・TLS・ログイン・チャットの成功までは判定しない。
+Apps の nftables テンプレートは Docker の転送・NAT を置き換えず、Docker の標準 bridge masquerade を
+無効化する設定もないため、Agent には Apps の LAN IP から届く想定である（実際の送信元と到達性は未検証）。
+Agent 側の公開ポート・Apps のみを許可する firewall・認証・trusted proxy の設定は
+[Hermes Agent 運用](hermes-agent.md)と [ADR-0013](../adr/0013-hermes-webapp-caddy.md) を参照する。
+
+Caddy の `reverse_proxy` は WebSocket の upgrade と SSE（`text/event-stream`）の即時 flush に
+既定で対応し、Host を保持して `X-Forwarded-For` / `X-Forwarded-Proto` / `X-Forwarded-Host` を付けるため、
+追加の `flush_interval` や header 上書きは不要である
+（[Caddy 公式仕様](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#streaming)）。
+Agent 側には公開 URL と実際の TCP peer に対する trusted proxy 設定が必要になる。
+
+反映順は Agent 側の Webapp・認証・firewall の準備、Apps 側の merge と reconcile による checkout 更新、
+同じ変更を持つ controller からの `make ansible-apply` による DNS rewrite 反映とする。
+この merge は `edge`・`homepage`・`monitoring` を force-recreate する。AdGuard の生成結果変更は
+`secrets_runtime_changed` を通じて Apps 全 project の force-recreate を伴う
+（[CODEBASE_MAP の gotcha 2・3・6](../CODEBASE_MAP.md#6-gotchas)）。
+Agent の準備より先に merge すると Gatus が異常となり、Caddy は 502 を返す。
+
 ## 設定の置き場所と更新
 
 `files/services/compose/homepage/config/`の`settings.yaml`、`services.yaml`、`bookmarks.yaml`、

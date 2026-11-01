@@ -87,6 +87,7 @@ service_names = {
     "searxng.kojigenba-srv.com",
     "mcp-searxng.kojigenba-srv.com",
     "sparkdash.kojigenba-srv.com",
+    "hermes.kojigenba-srv.com",
     "elastiflow.kojigenba-srv.com",
     "dns.kojigenba-srv.com",
     "hf-downloader.kojigenba-srv.com",

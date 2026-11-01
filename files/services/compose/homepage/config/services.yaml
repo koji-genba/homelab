@@ -29,6 +29,11 @@
         description: DGX稼働状況
         siteMonitor: http://sparkdash:5555/
 - AI・MCP:
+    - Hermes:
+        icon: mdi-robot
+        href: https://hermes.kojigenba-srv.com
+        description: AIエージェントのWebapp
+        siteMonitor: http://192.168.10.104:9120/api/status
     - Dagu:
         icon: sh-dagu.svg
         href: https://hf-downloader.kojigenba-srv.com

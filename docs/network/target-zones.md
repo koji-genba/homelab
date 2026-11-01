@@ -86,6 +86,16 @@ Tailscale interfaceからの同portも許可する。Internetからのport forwa
   DNSはApps VMのtailnet IPを返し、Caddyが `admin_networks` で接続元を制限して
   `192.168.10.103:5601` へ中継する（[ADR-0009](../adr/0009-elastiflow-caddy-fqdn.md)）。
 
+Hermes Webapp も `https://hermes.kojigenba-srv.com` を Apps の Web 用 IP へ rewrite し、
+Apps VM（`192.168.10.101`）の Caddy で TLS を終端して Agent VM の `192.168.10.104:9120` へ
+HTTP で中継する。`admin_networks` と同じ接続元制限と Hermes basic provider を併用し、Caddy Basic Auth は追加しない。
+Agent は tailnet 外のまま、9120 の公開・Apps からだけ許可する firewall は
+[Hermes Agent 運用](../operations/hermes-agent.md)に従って管理する。
+この到達元制限を前提に、Caddy はコンテナ内 shell を開く Webapp terminal の `/api/host-terminal*` を403で拒否する。
+Homepage / Gatus も同じ backend の `/api/status` を直接監視する。
+判断は [ADR-0013](../adr/0013-hermes-webapp-caddy.md)、反映順は
+[Homepage 運用](../operations/homepage.md#hermes-webapp-のカード)を参照する。
+
 ## 有線ポートと無線AP
 
 - access portはuntaggedの1 VLANだけを収容し、tagged frameは受けない。trunk portは必要なVLANだけを
