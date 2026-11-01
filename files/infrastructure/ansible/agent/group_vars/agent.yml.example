@@ -26,3 +26,18 @@ agent_runner_ssh_key_dir: /etc/homelab/agent/ssh
 # private identities must never live on this VM or in git. Empty => backups
 # fail closed instead of writing plaintext.
 agent_backup_age_recipients: []
+
+# Gateway Webapp: Apps Caddy terminates TLS; Agent stays off-tailnet.
+agent_stack_sessions_auto_prune: false
+agent_stack_onboarding_run: false
+agent_stack_allow_lazy_installs: false
+agent_stack_webapp_enabled: true
+agent_stack_webapp_host: 0.0.0.0
+agent_stack_webapp_bind_ip: "{{ agent_management_ip }}"
+agent_stack_webapp_port: 9120
+agent_stack_webapp_public_url: https://hermes.kojigenba-srv.com
+agent_stack_dashboard_trusted_proxies:
+  - 192.168.10.101/32
+agent_stack_dashboard_session_ttl_seconds: 43200
+firewall_webapp_port: "{{ agent_stack_webapp_port }}"
+firewall_webapp_allowed_source: 192.168.10.101/32

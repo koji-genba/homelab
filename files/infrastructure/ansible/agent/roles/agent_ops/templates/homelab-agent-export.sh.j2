@@ -128,9 +128,11 @@ main() {
 
     log 'exporting Hermes sessions as JSONL'
     compose exec -T --user {{ agent_ops_uid }}:{{ agent_ops_gid }} hermes mkdir -p "/opt/data/exports/$ts"
+    # 新 CLI はセッションの保存行数が sessions.max_export_messages を超えると
+    # 非ゼロ終了する。上限を迂回せず、途中の export を完成品に昇格させない。
     compose exec -T --user {{ agent_ops_uid }}:{{ agent_ops_gid }} hermes hermes sessions export \
         "/opt/data/exports/$ts/sessions.jsonl" --format jsonl \
-        || fail 'hermes sessions export failed'
+        || fail 'hermes sessions export failed (check sessions.max_export_messages); export set remains incomplete'
     cp "$HERMES_DATA_DIR/exports/$ts/sessions.jsonl" "$dest/sessions.jsonl"
     compose exec -T --user {{ agent_ops_uid }}:{{ agent_ops_gid }} hermes rm -rf "/opt/data/exports/$ts" >/dev/null 2>&1 || true
 

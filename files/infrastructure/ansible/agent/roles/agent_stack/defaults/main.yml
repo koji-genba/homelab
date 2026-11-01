@@ -235,3 +235,17 @@ agent_stack_compose_argv_prefix:
   - "{{ agent_stack_secrets_dir }}/memory-db.env"
   - --file
   - "{{ agent_stack_project_dir }}/compose.yaml"
+
+# --- Gateway Webapp ---------------------------------------------------------
+agent_stack_sessions_auto_prune: false
+agent_stack_onboarding_run: false
+agent_stack_allow_lazy_installs: false
+agent_stack_webapp_enabled: true
+agent_stack_webapp_host: 0.0.0.0
+agent_stack_webapp_bind_ip: "{{ agent_management_ip | default('192.168.10.104') }}"
+agent_stack_webapp_port: 9120
+agent_stack_webapp_public_url: https://hermes.kojigenba-srv.com
+# Remote LAN -> published bridge port uses DNAT and retains the Apps source.
+agent_stack_dashboard_trusted_proxies:
+  - "{{ agent_stack_apps_lan_ip }}/32"
+agent_stack_dashboard_session_ttl_seconds: 43200

@@ -209,6 +209,39 @@ restore_production {json.dumps(str(root))}
         assert not marker.exists()
         assert 'safety Hermes snapshot failed' in out.stderr
 
+    # 上流の max_export_messages 超過と同じ非ゼロ終了を注入する。
+    # 部分ファイルがあっても公開せず、後続の bank export に進まず通知する。
+    export_root = root / 'guard-exports'
+    export_events = root / 'guard-events'
+    partial_sessions = root / 'hermes-data/exports/fixture-limit/sessions.jsonl'
+    partial_sessions.parent.mkdir(parents=True)
+    partial_sessions.write_text('{"id":"partial","messages":[]}\n')
+    out = run('export', f'''
+EXPORTS_DIR={json.dumps(str(export_root))}
+HERMES_DATA_DIR={json.dumps(str(root / 'hermes-data'))}
+id() {{ printf 0; }}
+date() {{ printf fixture-limit; }}
+notify_operator() {{ printf 'notified\\n'; }}
+compose() {{
+    printf '%s\\n' "$*" >> {json.dumps(str(export_events))}
+    case "$*" in
+        *'hermes sessions export '*)
+            printf 'Error: synthetic session exceeds sessions.max_export_messages=20000\\n'
+            return 1 ;;
+        *hindsight*) return 88 ;;
+    esac
+}}
+main
+''', success=False)
+    assert 'sessions.max_export_messages' in out.stderr, out.stderr
+    assert 'export set remains incomplete' in out.stderr, out.stderr
+    assert 'notified' in out.stdout, out.stdout
+    assert not (export_root / 'fixture-limit').exists()
+    assert not (export_root / '.incomplete-fixture-limit/sessions.jsonl').exists()
+    assert 'hindsight-admin export-bank' not in export_events.read_text()
+    assert 'hindsight cat' not in export_events.read_text()
+    assert 'rm -rf /opt/data/exports/fixture-limit' in export_events.read_text()
+
     # Portable export preserves the API's real event-date fields. A failed raw
     # document fetch must fail the export rather than publish a null-text success.
     import contextlib

@@ -6,10 +6,10 @@
 # Ansible role agent_stack (files/infrastructure/ansible/agent/roles/agent_stack)
 # after manual approval; it is not wired to the 15-minute Apps reconcile timer.
 #
-# Everything runs on one private bridge network with no host port published:
-# nothing on the LAN or tailnet can reach these services directly. Hermes reaches
-# outward (Discord, the GLM endpoint on 192.168.10.51, the Apps VM FQDNs mapped
-# below) and the memory stack is only reachable from this project.
+# Everything runs on one bridge; only Hermes Webapp is published on the Agent
+# LAN IP, with an Apps-only nftables guard. The memory services stay private.
+# Hermes reaches outward (Discord, the GLM endpoint on 192.168.10.51, and the
+# Apps VM FQDNs mapped below). The memory stack is reachable only from this project.
 #
 # Restart policy: every long-running service uses `restart: unless-stopped`.
 # This differs from the Apps VM, which leaves `restart` unset and relies on its
@@ -330,9 +330,14 @@ services:
     depends_on:
       hindsight:
         condition: service_healthy
+    # Publish only on the Agent LAN address (also used by cdp-tunnel's netns).
+    ports:
+      - "${AGENT_WEBAPP_BIND_IP:-192.168.10.104}:${AGENT_WEBAPP_PORT:-9120}:${AGENT_WEBAPP_PORT:-9120}"
     env_file:
       # Discord token, allowed user/channel IDs, the operator webhook and the
       # optional dead-man ping URL — sourced from the Agent SOPS bundle.
+      # HERMES_DASHBOARD_BASIC_AUTH_USERNAME, _PASSWORD_HASH and _SECRET
+      # are passed by the same raw env_file (scrypt dollar signs stay literal).
       - path: "${SECRETS_DIR:?set SECRETS_DIR}/hermes.env"
         format: raw
     environment:
@@ -455,6 +460,6 @@ services:
 
 networks:
   # Project-scoped bridge. Not `internal: true` because Hermes and Hindsight need
-  # outbound internet; nothing is published to the host.
+  # outbound internet; only Hermes Webapp is published to the host.
   internal:
     driver: bridge

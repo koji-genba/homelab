@@ -5,9 +5,9 @@
 # except for the Discord channel IDs (which are not credentials but are kept out
 # of the public repo and sourced from the SOPS bundle at render time).
 #
-# Key names track Hermes Agent v2026.9.24 (config version 46).
+# Key names track Hermes Agent c7da41dd (config version 52).
 
-_config_version: 46
+_config_version: 52
 
 model:
   # Single self-hosted endpoint (DGX tensorfold serve, OpenAI-compatible). There
@@ -58,7 +58,7 @@ agent:
   auto_recovery_cycles: 1
 
 terminal:
-  # All command execution runs on the Runner VM over SSH, not in this container.
+  # Agent tool execution uses Runner SSH. Webapp manual PTY is separate.
   backend: ssh
   cwd: {{ agent_stack_runner_workspace }}
   ssh_host: {{ agent_stack_runner_host }}
@@ -117,8 +117,6 @@ stt:
   enabled: false
 
 browser:
-  # Built-in browser tools only; the Browser Use driver stays off.
-  backend: "off"
   # The Runner's loopback Chromium, reached through the cdp-tunnel sidecar which
   # shares this container's network namespace (started with the stack).
   cdp_url: http://127.0.0.1:{{ agent_stack_cdp_port }}
@@ -190,6 +188,7 @@ auxiliary:
 # apply then reverts. Pre-mark the gateway hints as seen, and keep the
 # first-message profile-build offer off: it may web_search the user.
 onboarding:
+  run: {{ agent_stack_onboarding_run | bool | lower }}
   profile_build: "off"
   seen:
     profile_build_offered: true
@@ -246,6 +245,24 @@ curator:
   prune_builtins: false
 
 security:
+  allow_lazy_installs: {{ agent_stack_allow_lazy_installs | bool | lower }}
   redact_secrets: true
   # Internal FQDNs are reached through extra_hosts, not by relaxing this.
   allow_private_urls: false
+
+# Prevent the low-disk advisor from offering to persist a prune choice.
+sessions:
+  auto_prune: {{ agent_stack_sessions_auto_prune | bool | lower }}
+
+# Served by the existing gateway process; no second dashboard process.
+webapp:
+  enabled: {{ agent_stack_webapp_enabled | bool | lower }}
+  host: {{ agent_stack_webapp_host | to_json }}
+  port: {{ agent_stack_webapp_port }}
+  public_url: {{ agent_stack_webapp_public_url | to_json }}
+
+dashboard:
+  trusted_proxies: {{ agent_stack_dashboard_trusted_proxies | to_json }}
+  basic_auth:
+    # Credentials arrive through the raw hermes.env file, not this YAML.
+    session_ttl_seconds: {{ agent_stack_dashboard_session_ttl_seconds }}

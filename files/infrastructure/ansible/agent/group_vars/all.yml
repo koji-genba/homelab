@@ -70,10 +70,13 @@ firewall_egress_rejected_networks:
   - 169.254.0.0/16
 
 # Sources allowed to reach a Docker-published (DNAT) port. Mirrors the Apps VM
-# guard: the Agent has no published ports today, so this is defence in depth if
-# a `ports:` entry is ever added by mistake. The Runner disables it (no Docker).
+# guard. Agent Webapp has a stricter port-specific rule; Runner has no Docker.
 firewall_dnat_guard: true
 firewall_trusted_networks:
   - 192.168.10.0/24
   - 192.168.20.0/24
   - 100.64.0.0/10
+
+# Optional port-specific guard, enabled only for the Agent group.
+firewall_webapp_port: 0
+firewall_webapp_allowed_source: 192.168.10.101/32
