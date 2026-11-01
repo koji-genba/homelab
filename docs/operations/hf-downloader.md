@@ -202,6 +202,8 @@ Docker Desktop / WSL2の偽ai bindを使用し、mount種別だけ試験用overr
 
 ## 制約・トラブルシュート
 
+- 失敗・停止時は新規保存先だけを清掃し、HF cache外にファイル等が無ければ管理ファイルも削除する。本体があれば空ディレクトリだけを削除し、既存保存先・既存namespaceは保持する。cache内のsymlink・特殊ファイルは清掃全体を見送り、清掃失敗は警告のみ。
+
 - container再作成・image更新・secret更新では実行中downloadが止まる。停止は最大30秒のhf終了待ち、
   DAG cleanup 45秒。`signal_handling.enable_propagation: true`でservice停止時にも実行中DAGへSIGTERMを転送する。
   Compose stop graceはDAG cleanup 45秒と上流service終了待ち30秒を収める90秒。

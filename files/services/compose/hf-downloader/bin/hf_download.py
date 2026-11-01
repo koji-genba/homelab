@@ -1,4 +1,5 @@
 """Dagu の JSON パラメータを検証し、共有 AI 保存先へ直列で取得する。"""
+import errno
 import fcntl
 from contextlib import ExitStack
 import json
@@ -194,6 +195,102 @@ def cleanup_incomplete(target):
             print(f'Incomplete cleanup: removed {removed} files ({total_bytes} bytes)', flush=True)
 
 
+def cleanup_empty_destination(target, target_existed, namespace_existed):
+    if target_existed:
+        return
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    removed_files = removed_dirs = 0
+
+    def warning(error):
+        print(f'Empty destination cleanup warning: {error}', file=sys.stderr, flush=True)
+
+    def remove(parent, name):
+        nonlocal removed_dirs
+        try:
+            os.rmdir(name, dir_fd=parent)
+            removed_dirs += 1
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            if error.errno not in (errno.ENOTEMPTY, errno.EEXIST):
+                warning(error)
+
+    def inspect_tree(directory, parts=()):
+        has_payload = False
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                relative = parts + (entry.name,)
+                mode = entry.stat(follow_symlinks=False).st_mode
+                if stat.S_ISDIR(mode):
+                    child = os.open(entry.name, flags, dir_fd=directory)
+                    try:
+                        has_payload = inspect_tree(child, relative) or has_payload
+                    finally:
+                        os.close(child)
+                elif relative[:2] == ('.cache', 'huggingface'):
+                    if not stat.S_ISREG(mode):
+                        raise InvalidInput('symlink or special file in HF cache; keeping destination')
+                elif relative == ('.cache',) and stat.S_ISLNK(mode):
+                    raise InvalidInput('symlink at .cache; keeping destination')
+                else:
+                    has_payload = True
+        return has_payload
+
+    def prune(directory, purge_cache, parts=()):
+        nonlocal removed_files
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                relative = parts + (entry.name,)
+                mode = entry.stat(follow_symlinks=False).st_mode
+                if stat.S_ISDIR(mode):
+                    child = os.open(entry.name, flags, dir_fd=directory)
+                    try:
+                        prune(child, purge_cache, relative)
+                    finally:
+                        os.close(child)
+                    remove(directory, entry.name)
+                elif purge_cache and relative[:2] == ('.cache', 'huggingface'):
+                    if not stat.S_ISREG(mode):
+                        raise InvalidInput('symlink or special file in HF cache; stopping cleanup')
+                    os.unlink(entry.name, dir_fd=directory)
+                    removed_files += 1
+
+    try:
+        # Open every ancestor without following symlinks, including namespace
+        # and target if either was replaced while hf was running.
+        with ExitStack() as stack:
+            directory = os.open('/', flags)
+            stack.callback(os.close, directory)
+            for part in target.absolute().parent.parent.parts[1:]:
+                directory = os.open(part, flags, dir_fd=directory)
+                stack.callback(os.close, directory)
+            namespace = os.open(target.parent.name, flags, dir_fd=directory)
+            stack.callback(os.close, namespace)
+            try:
+                destination_fd = os.open(target.name, flags, dir_fd=namespace)
+            except FileNotFoundError:
+                pass
+            else:
+                try:
+                    # Inspect the whole tree before deleting anything. Cache
+                    # files are expendable only when no payload exists outside it.
+                    has_payload = inspect_tree(destination_fd)
+                    prune(destination_fd, purge_cache=not has_payload)
+                finally:
+                    os.close(destination_fd)
+                remove(namespace, target.name)
+            if not namespace_existed:
+                remove(directory, target.parent.name)
+    except FileNotFoundError:
+        pass
+    except (InvalidInput, OSError, RecursionError) as error:
+        warning(error)
+    finally:
+        if removed_files or removed_dirs:
+            print(f'Destination cleanup: removed {removed_files} files and {removed_dirs} directories '
+                  f'created by this run: {target}', flush=True)
+
+
 def main():
     # Raising on termination interrupts lock waits too. Dagu signals the process
     # group; also forward explicitly and reap hf before closing the lock descriptor.
@@ -238,9 +335,13 @@ def main():
                        HF_HUB_DISABLE_UPDATE_CHECK='1')
             check_target(target)
             print(f'Destination: {target}\nExecuting: {shlex.join(command)}', flush=True)
+            target_existed = target.exists()
+            namespace_existed = target.parent.exists()
+            exit_code = None
             try:
                 child = subprocess.Popen(command, shell=False, env=env, umask=0, pass_fds=(lock.fileno(),))
-                return child.wait()
+                exit_code = child.wait()
+                return exit_code
             finally:
                 # A repeated stop signal must not interrupt reaping or cleanup.
                 finishing = True
@@ -248,16 +349,20 @@ def main():
                     if child is not None and child.poll() is None:
                         child.terminate()
                         try:
-                            child.wait(timeout=30)
+                            exit_code = child.wait(timeout=30)
                         except subprocess.TimeoutExpired:
                             child.kill()
-                            child.wait()
+                            exit_code = child.wait()
+                    elif child is not None and exit_code is None:
+                        exit_code = child.wait()
                 finally:
                     try:
                         check_target(target)
                     except InvalidInput as error:
                         print(f'Destination scan warning: {error}', file=sys.stderr, flush=True)
                     cleanup_incomplete(target)
+                    if exit_code is not None and exit_code != 0:
+                        cleanup_empty_destination(target, target_existed, namespace_existed)
     except InterruptedError as error:
         print('Download stopped', flush=True)
         return 128 + error.args[0]
