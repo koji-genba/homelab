@@ -17,9 +17,19 @@ class InvalidInput(ValueError):
     pass
 
 
-def text(value, name, limit):
+def invalid(name, reason, value):
+    received = repr(value)
+    if len(received) > 200:
+        received = received[:197] + '...'
+    return InvalidInput(f'{name}: {reason}; got {received}')
+
+
+def text(value, name, limit, strip=False):
+    received = value
+    if strip and isinstance(value, str):
+        value = value.strip()
     if not isinstance(value, str) or len(value) > limit or any(ord(c) < 32 or ord(c) == 127 for c in value):
-        raise InvalidInput(f'{name}: invalid string')
+        raise invalid(name, 'invalid string', received)
     return value
 
 
@@ -29,34 +39,34 @@ def patterns(value, name):
         return []
     result = [p.strip() for p in value.split(',')]
     if len(result) > 32:
-        raise InvalidInput(f'{name}: at most 32 patterns')
+        raise invalid(name, 'at most 32 patterns', value)
     for part in result:
         if not part or len(part) > 256 or part.startswith(('-', '/')) or '..' in part.split('/'):
-            raise InvalidInput(f'{name}: invalid pattern')
+            raise invalid(name, 'invalid pattern', value)
     return result
 
 
 def validate(params):
     if not isinstance(params, dict) or set(params) - {'repo_id', 'repo_type', 'revision', 'include', 'exclude', 'max_workers'}:
         raise InvalidInput('unknown parameters')
-    repo = text(params.get('repo_id', ''), 'repo_id', 193)
+    repo = text(params.get('repo_id', ''), 'repo_id', 193, strip=True)
     parts = repo.split('/')
     if len(parts) != 2 or any(not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.-]{0,94}[A-Za-z0-9_]|[A-Za-z0-9_]', p)
                               or '--' in p or '..' in p or p.endswith('.git') for p in parts):
-        raise InvalidInput('repo_id: expected namespace/name (1..96 characters per component)')
+        raise invalid('repo_id', 'expected namespace/name (1..96 characters per component)', params.get('repo_id'))
     kind = params.get('repo_type', 'model')
     if kind not in ('model', 'dataset'):
-        raise InvalidInput('repo_type: expected model or dataset')
-    revision = text(params.get('revision', 'main'), 'revision', 128) or 'main'
+        raise invalid('repo_type', 'expected model or dataset', params.get('repo_type'))
+    revision = text(params.get('revision', 'main'), 'revision', 128, strip=True) or 'main'
     if not re.fullmatch(r'[A-Za-z0-9_./-]+', revision) or revision.startswith(('-', '/')) or revision.endswith('/') or '..' in revision or '//' in revision:
-        raise InvalidInput('revision: invalid revision')
+        raise invalid('revision', 'invalid revision', params.get('revision'))
     if '--' in revision:
-        raise InvalidInput('revision: branches containing -- must use a commit SHA instead')
+        raise invalid('revision', 'branches containing -- must use a commit SHA instead', params.get('revision'))
     workers = params.get('max_workers', 1)
     if isinstance(workers, str) and re.fullmatch('[1-4]', workers):
         workers = int(workers)
     if type(workers) is not int or not 1 <= workers <= 4:
-        raise InvalidInput('max_workers: expected integer 1..4')
+        raise invalid('max_workers', 'expected integer 1..4', params.get('max_workers'))
     return dict(repo_id=repo, repo_type=kind, revision=revision, max_workers=workers,
                 include=patterns(params.get('include', ''), 'include'),
                 exclude=patterns(params.get('exclude', ''), 'exclude'))
@@ -224,7 +234,8 @@ def main():
             if token.stat().st_size == 0:
                 env.pop('HF_TOKEN_PATH', None)
                 env['HF_HUB_DISABLE_IMPLICIT_TOKEN'] = '1'
-            env.update(HF_HUB_DISABLE_TELEMETRY='1', HF_HUB_DISABLE_PROGRESS_BARS='1')
+            env.update(HF_HUB_DISABLE_TELEMETRY='1', HF_HUB_DISABLE_PROGRESS_BARS='1',
+                       HF_HUB_DISABLE_UPDATE_CHECK='1')
             check_target(target)
             print(f'Destination: {target}\nExecuting: {shlex.join(command)}', flush=True)
             try:

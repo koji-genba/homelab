@@ -112,6 +112,7 @@ class DownloadTest(unittest.TestCase):
                     return 143 if outcome == 'stop' else outcome
 
                 def launch(*args, **kwargs):
+                    self.assertEqual(kwargs['env']['HF_HUB_DISABLE_UPDATE_CHECK'], '1')
                     self.assertFalse((cache / 'old.incomplete').exists())
                     (cache / 'new.incomplete').write_text('new')
                     return SimpleNamespace(wait=wait, poll=lambda: None if outcome == 'stop' else outcome,
@@ -130,7 +131,8 @@ class DownloadTest(unittest.TestCase):
                     original_cleanup(path)
 
                 with patch.dict(os.environ, {'DAG_PARAMS_JSON': '{"repo_id":"org/repo"}',
-                     'HFDL_AI_ROOT': temp, 'HFDL_LOCK_PATH': str(lock_path), 'HF_TOKEN_PATH': str(token)}), \
+                     'HFDL_AI_ROOT': temp, 'HFDL_LOCK_PATH': str(lock_path), 'HF_TOKEN_PATH': str(token),
+                     'HF_HUB_DISABLE_UPDATE_CHECK': '0'}), \
                      patch.object(hf, 'preflight'), patch.object(hf, 'cleanup_incomplete', side_effect=cleanup), \
                      patch.object(hf.subprocess, 'Popen', side_effect=launch):
                     self.assertEqual(hf.main(), 143 if outcome == 'stop' else outcome)
@@ -201,14 +203,47 @@ class DownloadTest(unittest.TestCase):
         for value in ('org/name', 'a/b', 'org/a.b_c-d', 'x' * 96 + '/' + 'y' * 96):
             self.assertEqual(hf.validate({'repo_id': value})['repo_id'], value)
         for value in ('name', '../x', 'a/../x', '-a/b', 'a/b-', '.a/b', 'a/.b', 'a/b.git',
-                      'a/b..c', 'a--b/c', 'a/b;c', 'a/$(id)', 'a/b\n', 'x' * 97 + '/b'):
+                      'a/b..c', 'a--b/c', 'a/b;c', 'a/$(id)', 'a/b\nc', 'x' * 97 + '/b'):
             with self.subTest(value=value), self.assertRaises(hf.InvalidInput):
                 hf.validate({'repo_id': value})
+
+    def test_surrounding_whitespace_is_ignored(self):
+        for whitespace in (' ', '\t', '\n', '\r\n', '\u3000', ' \t\n\u3000'):
+            with self.subTest(whitespace=whitespace):
+                params = hf.validate({'repo_id': whitespace + 'org/repo' + whitespace,
+                                      'revision': whitespace + 'refs/pr/42' + whitespace})
+                self.assertEqual(params['repo_id'], 'org/repo')
+                self.assertEqual(params['revision'], 'refs/pr/42')
+                self.assertEqual(hf.validate({'repo_id': 'org/repo', 'revision': whitespace})['revision'], 'main')
+
+    def test_internal_whitespace_and_controls_are_rejected(self):
+        for whitespace in (' ', '\t', '\n', '\u3000', '\x00', '\x7f'):
+            for name, value in (('repo_id', 'a' + whitespace + 'b/c'),
+                                ('revision', 'a' + whitespace + 'b')):
+                with self.subTest(name=name, whitespace=whitespace), self.assertRaises(hf.InvalidInput):
+                    hf.validate({'repo_id': 'org/repo', name: value})
+
+    def test_rejections_include_original_bounded_repr(self):
+        for name, values in {
+            'repo_id': [' a b/c ', None, 'x' * 194, 'a/b\x00'],
+            'revision': [' bad rev ', None, 'refs--pr--42', 'x' * 129],
+            'include': [' a,,b ', None, 'x' * 4097, ','.join(['x'] * 33)],
+            'exclude': [' ../* ', 'a\n', 'x' * 257],
+            'max_workers': ['1;id', True, None],
+            'repo_type': ['space', None],
+        }.items():
+            for value in values:
+                with self.subTest(name=name, value=value), self.assertRaises(hf.InvalidInput) as caught:
+                    hf.validate({'repo_id': 'org/repo', name: value})
+                received = repr(value)
+                expected = received if len(received) <= 200 else received[:197] + '...'
+                self.assertTrue(str(caught.exception).startswith(name + ':'))
+                self.assertTrue(str(caught.exception).endswith('got ' + expected))
 
     def test_options_and_unknown_parameters(self):
         for name, values in {
             'repo_type': ['space', '--help'],
-            'revision': ['--help', '../a', 'a//b', '/a', 'a/', 'a;b', 'a\n', 'x' * 129],
+            'revision': ['--help', '../a', 'a//b', '/a', 'a/', 'a;b', 'a\nb', 'x' * 129],
             'include': ['--help', '/etc/passwd', 'x/../y', 'a,,b', 'a\x00', 'x' * 257, ','.join(['x'] * 33)],
             'exclude': ['--token=x', '../*'],
             'max_workers': [0, 5, True, 1.5, '1;id', '01'],
