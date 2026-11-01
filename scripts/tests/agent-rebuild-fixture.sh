@@ -137,6 +137,53 @@ assert content[0]["timestamp"] == "2026-03-05T21:00:00+09:00"
 assert content[1]["timestamp"] == item["timestamp"]
 assert all(m["role"] in ("user", "assistant") for m in content)
 
+# 新形式: compaction 履歴と active な編集後の発話だけを採用する。
+# 無効な user が turn を分断したり、無効な assistant が回答を上書き
+# したりしないことも、組み立てた item 全文で確かめる。
+def flagged(role, content, timestamp, active, compacted):
+    return dict(message(role, content, timestamp), active=active, compacted=compacted)
+
+modern = {
+    "id": "sess-modern",
+    "started_at": base,
+    "messages": [
+        flagged("user", "過去の架空の予定", base, 0, 1),
+        flagged("assistant", "過去の予定を確認", base + 1, False, True),
+        flagged("user", "取り消された予定", base + 2, 0, 0),
+        flagged("assistant", "取り消された回答", base + 3, False, False),
+        flagged("user", "編集前の架空の好み", base + 4, 0, 0),
+        flagged("user", "編集後は緑が好き", base + 5, 1, 0),
+        flagged("assistant", "緑ですね", base + 6, True, False),
+        flagged("user", "rewind された発話", base + 7, False, False),
+        flagged("assistant", "rewind された回答", base + 8, 0, 0),
+        flagged("user", "応答のない架空の発話", base + 9, 1, 0),
+        flagged("assistant", "取り消された未完了 turn の回答", base + 10, 0, 0),
+    ],
+}
+modern_turns, dropped, missing = worker_mod.build_turns(modern)
+assert dropped == 1 and missing == 0, (dropped, missing)
+modern_item = worker_mod.build_item(modern, modern_turns)
+assert modern_item["document_id"] == "sess-modern"
+assert modern_item["update_mode"] == "replace"
+assert modern_item["metadata"]["message_count"] == "4"
+assert modern_item["metadata"]["turn_index"] == "2"
+assert json.loads(modern_item["content"]) == [
+    {"role": "user", "content": "User: 過去の架空の予定", "timestamp": "2026-03-05T21:00:00+09:00"},
+    {"role": "assistant", "content": "Assistant: 過去の予定を確認", "timestamp": "2026-03-05T21:00:00+09:00"},
+    {"role": "user", "content": "User: 編集後は緑が好き", "timestamp": "2026-03-05T21:00:05+09:00"},
+    {"role": "assistant", "content": "Assistant: 緑ですね", "timestamp": "2026-03-05T21:00:05+09:00"},
+]
+modern_export = work / "modern.jsonl"
+modern_export.write_text(json.dumps(modern, ensure_ascii=False) + "\n")
+run = subprocess.run([
+    sys.executable, str(worker), "--input", str(modern_export),
+    "--bank", "fixture", "--state-dir", str(work / "modern-state"), "--dry-run",
+], capture_output=True, text=True, env=env)
+assert run.returncode == 0, run.stderr
+assert "sessions=1 retained=1 turns=2 messages=4" in run.stderr, run.stderr
+assert "dropped_user_turns=1" in run.stderr, run.stderr
+assert not (work / "modern-state/progress.json").exists()
+
 # UTC host execution still produces the configured Hermes date around midnight.
 assert worker_mod._iso_timestamp("2026-03-04T15:30:00Z") == "2026-03-05T00:30:00+09:00"
 assert worker_mod._iso_timestamp("2026-03-05T00:30:00") == "2026-03-05T00:30:00+09:00"
@@ -177,6 +224,17 @@ with patch.object(sys, "argv", args), patch.object(worker_mod, "retain") as post
     assert poll.call_args.args[2] == "operation-1"
 state = json.loads(statefile.read_text())
 assert state["last_line"] == 1 and "pending" not in state
+# 選別変更前の checkpoint を黙って再利用しない。
+state["version"] = 2
+statefile.write_text(json.dumps(state))
+with patch.object(sys, "argv", args), patch.object(worker_mod, "retain") as post:
+    try:
+        worker_mod.main()
+    except SystemExit as exc:
+        assert "use --fresh" in str(exc), exc
+    else:
+        raise AssertionError("old checkpoint accepted")
+    assert not post.called
 # A corrupt export line must never yield a false-success partial export.
 bad = work / "bad.jsonl"
 bad.write_text("{broken\n")

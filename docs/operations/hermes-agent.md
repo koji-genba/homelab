@@ -289,7 +289,8 @@ Proxmoxのuser/role/token/ACLはTerraform管理外で、apply前に人が用意�
    Dockerfile更新時の再転記は下記「image更新」の手順で行う。
 5. **SOPS bundleの作成** `[実機未検証]`
    `files/infrastructure/secrets/agent/runtime.yaml.example`のkey一覧に従い、Discord bot tokenと
-   user/channel ID、運用通知webhook、任意のdead-man ping URLを用意する。PostgreSQL passwordとSSH鍵は
+   user/channel ID、運用通知webhook、任意のdead-man ping URLを用意する。Webapp用の3キーは
+   下記「Webapp 認証キーの登録」のexampleと手順に従う。PostgreSQL passwordとSSH鍵は
    VM上で生成するためbundleへ入れない。初回は`make secrets-encrypt-agent`で暗号化する
    （既存bundleがある場合は上書きを拒否するため、編集はtoolboxの`sops set`を使い、編集後に`chmod 0600`する）。
 
@@ -462,6 +463,201 @@ digest転記を**別の変更**で行う。転記後は`make ansible-apply-agent
 編集はtoolboxの`sops set`で行い、編集後に`chmod 0600`して`make secrets-decrypt-check-agent`で復号を確認する。
 Agent VM側の値はrole `agent_stack`が`/etc/homelab/secrets/*.env`へroot 0600で配置する。値は`no_log`で扱い、
 ログやcommitに残さない。
+
+## 上流 main / Webapp への更新
+
+この節は上流 `c7da41dd522dc19cc08bbfcfa69d4b078224b45d` に合わせた更新手順であり、本番の反映状況は示さない。
+PR 1 の自前イメージ `main-c7da41dd` は公開され、Compose の Hermes と cdp-tunnel はその digest に差し替え済み。
+別 PR の Apps 側実装と認証キーを揃えてから反映する。
+採用理由と公開境界は [ADR-0013](../adr/0013-hermes-webapp-caddy.md) を参照。
+
+- URL は `https://hermes.kojigenba-srv.com`。Apps VM Caddy が TLS を終端し、Agent の
+  `192.168.10.104:9120` へ HTTP / WebSocket を中継する。Agent は tailnet 外を維持する。
+- Caddy は `admin_networks` で接続元を制限し、Hermes 同梱の basic provider がフォームログインを提供する。
+  Caddy の Basic Auth は重ねない。Apps の Caddy・AdGuard・Homepage・Gatus の実装は別 PR で行う。
+- `dashboard.basic_auth.session_ttl_seconds` は 43200（12時間）。これは access token の更新間隔であり、
+  12時間で必ず再ログインする設定ではない。上流 basic provider の refresh token は30日。
+- `state.db` の schema は旧版の30から32へ進む。旧イメージへの差し戻しだけをロールバックにしない。
+  更新前の Hermes データ・DB・設定・SSH identity を含む一式と、対応する旧イメージ・設定の組で復元する。
+  [バックアップ・復元手順](hermes-agent-backup.md)に従う。
+- ブラウザは従来の tool 群から `browser_exec` 中心へ変わる。廃止された `browser.backend` を削除し、
+  Runner Chromium への `cdp_url` と同一 netns の cdp-tunnel を維持する。既存の操作手順・Skill は動作確認する。
+- config は schema 52。sessions の自動 prune、Desktop onboarding、lazy install を明示的に停止する。
+  上流 `hermes_cli/config_migrations.py` の v47（旧 compression 閾値）、v48（旧 sandbox image）、
+  v49（旧 Vercel runtime）、v50（tirith）、v51（旧 cron timeout）はテンプレートに対象キーがない。
+  v52（`config_migrations_browser.py`）の `browser.backend` / `extension_control` も持ち込まない。
+  `scripts/docker_config_migrate.py` は stamp が現行52以上なら migration 前に return し、
+  この起動時 migration による config 書き換えは発生しない（ソース確認）。UI の設定保存や Always Allow、
+  複数 profile 時の multiplex 自動確定等による別の書き換えまでは防がない。管理項目は Ansible で変更する。
+
+### terminal の扱い
+
+選定ソースには Webapp の手動 terminal を設定だけで停止する項目がない。
+`hermes_cli/web_server_surface.py` の Webapp policy は `host_terminal=True`、
+`web_host_terminal.request_allowed()` は認証あり、または loopback なら許可し、
+`web_host_terminal_sessions.py` が gateway の子 PTY を生成する。
+これは Agent tool の `terminal.backend: ssh` と別で、Hermes コンテナ内で shell が動く。
+ブラウザからの手動 terminal は、別 PR の Apps 側 Caddy で遮断する方針とする。
+9120 は nftables で Apps VM からの到達に限定するため、ブラウザからの経路は Caddy の1か所で遮断できる。
+Apps VM 自身から backend へ直接接続する経路は残るが、Hermes の認証が必要になる。
+
+別 PR の Caddy では **`/api/host-terminal` とその配下（`/api/host-terminal/*`）**を、
+WebSocket upgrade を含めて403で拒否する。クエリ付きも同じ path として遮断する。
+`/api/ws`（会話・セッション）、`/api/webapp/socket-ticket`（会話や音声でも共用）、
+`/api/files/*` や `/api/chat/file-upload` は遮断しない。チケット発行 API 全体を塞ぐ必要はない。
+将来、Caddy を経由しない利用も止める場合の patch 箇所は
+`hermes_cli/web_host_terminal.py` の `request_allowed()`（常に false を返す）、または
+`hermes_cli/web_routers/webapp.py` の `host_terminal_ws()`（accept 前に4403で閉じる）。
+Caddy の遮断は Apps 側 PR で実装する。上流 patch は将来の選択肢として残し、今回は適用しない。
+UI の terminal pane 自体は残るが、Caddy 経由では接続できなくなる。
+
+### 9120 の到達元と trusted_proxies
+
+Agent の nftables は input と Docker DNAT の forward の両方で `.101/32` 以外の9120を drop する。
+input では loopback を先に許可するため、ホスト内の loopback 通信は遮断しない。
+forward は `ct original proto-dst` で公開ポートを照合し、広い trusted 範囲や established 許可より前に判定する。
+Runner `.105`、他の LAN 機器、Trusted VLAN、tailnet からの直接接続は許可しない。
+cdp-tunnel は Hermes と netns を共有するが、CDP の host 公開は追加しない。
+
+Agent が再利用する Apps の Docker role の `daemon.json.j2` はログ設定だけで、
+`userland-proxy` は明示しない。通常のリモート LAN→公開 bridge ポートは DNAT され、
+Agent 側で SNAT する理由がないため Hermes が見る peer は `.101` のままと判断し、
+`dashboard.trusted_proxies` は **`192.168.10.101/32` のみ**にする。bridge gateway や広い CIDR は信頼しない。
+実機の Docker 起動オプションや HTTP peer は未検証。反映時に運用者が daemon の設定・起動引数を確認し、
+Apps から9120へ要求しながら Agent の bridge で `tcpdump -n -i <bridge> tcp port 9120` を観測する。
+通常のアクセスログで peer も確認し、Caddy 経由で HTTPS 判定・Secure cookie・Origin 判定と WebSocket 接続を確認する。
+認証 header・cookie・本文は取得・表示しない。bridge gateway に変わっていた場合は設定を広げる前に経路を調査する。
+
+### Webapp 認証キーの登録（運用者の端末で実施）
+
+既存 bundle の Discord / monitoring に、次の文字列キーを追加する。
+bundle の example は `files/infrastructure/secrets/agent/runtime.yaml.example` を参照する。
+
+| bundle キー | Hermes env |
+| --- | --- |
+| `dashboard_basic_auth.username` | `HERMES_DASHBOARD_BASIC_AUTH_USERNAME` |
+| `dashboard_basic_auth.password_hash` | `HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH` |
+| `dashboard_basic_auth.secret` | `HERMES_DASHBOARD_BASIC_AUTH_SECRET` |
+
+既存の必須キー検査と同じく、欠落・空・文字列以外・改行入りは apply を停止する。
+password_hash の scrypt 形式と secret の形式も検査する。Webapp を黙って無効化して進めない。
+復号・検査・root 0600 の `hermes.env` 描画は `no_log`、Compose は `format: raw` で `$` をそのまま渡す。
+
+上流の公開関数 `plugins.dashboard_auth.basic.hash_password()` の形式は
+`scrypt$n$r$p$<salt_base64>$<derived_key_base64>`。
+選定版は n=16384、r=8、p=1、salt=16 bytes、derived key=32 bytes。
+独立した hash 生成 CLI は見つからない。`hermes dashboard` の対話設定は getpass で入力し config を保存するため、
+Ansible 管理 config には使わず、以下では同じ stdlib scrypt 処理で JSON 文字列を作って SOPS へ直接渡す。
+
+次は **Bash の対話端末**で repo ルートから実行する手順。Docker と既存の age identity を用意し、
+`AGE_IDENTITY_FILE` は既存の運用手順に従って設定する。値の表示・平文ファイルへの保存はしない。
+SOPS の pin は `set --value-stdin` を持たないため、コンテナ内の Python が stdin を読み `sops set` を呼ぶ。
+パスワードは stdin、ハッシュ・secret の JSON はコンテナ内の sops プロセスの引数にのみ渡る。
+`HOME` / `USER` / `LOGNAME` は toolbox の任意 UID 実行のため必須。
+
+```bash
+(
+  set -euo pipefail
+  set +x
+  : "${AGE_IDENTITY_FILE:?既存の age identity のパスを設定する}"
+  TOOLBOX_IMAGE=$(awk '
+    /^TOOLBOX_IMAGE_REPO \?=/ {repo=$3}
+    /^TOOLBOX_IMAGE_DIGEST \?=/ {digest=$3}
+    END {print repo "@" digest}' Makefile)
+
+  agent_json() {
+    docker run --rm --memory 6g --network none -i \
+      --user "$(id -u):$(id -g)" \
+      -e HOME=/tmp/homelab-toolbox -e USER=homelab-toolbox -e LOGNAME=homelab-toolbox \
+      "$TOOLBOX_IMAGE" python3 -c "$1"
+  }
+  agent_sops_set() {
+    docker run --rm --memory 6g --network none -i \
+      --user "$(id -u):$(id -g)" -v "$PWD:/workspace" -w /workspace \
+      -v "$AGE_IDENTITY_FILE:/run/secrets/age-identity:ro" \
+      -e SOPS_AGE_KEY_FILE=/run/secrets/age-identity \
+      -e HOME=/tmp/homelab-toolbox -e USER=homelab-toolbox -e LOGNAME=homelab-toolbox \
+      "$TOOLBOX_IMAGE" python3 -c '
+import subprocess, sys
+raise SystemExit(subprocess.call(["sops", "set", sys.argv[1], sys.argv[2], sys.stdin.read()]))
+' files/infrastructure/secrets/agent/runtime.sops.yaml "$1"
+  }
+
+  IFS= read -r -p 'Webapp username: ' webapp_username
+  test -n "$webapp_username"
+  printf '%s' "$webapp_username" |
+    agent_json 'import json,sys; print(json.dumps(sys.stdin.read()))' |
+    agent_sops_set '["dashboard_basic_auth"]["username"]'
+  IFS= read -rs -p 'Webapp password: ' webapp_password
+  printf '\n' >&2
+  IFS= read -rs -p 'Confirm password: ' webapp_confirm
+  printf '\n' >&2
+  if [[ -z "$webapp_password" || "$webapp_password" != "$webapp_confirm" ]]; then
+    printf '%s\n' 'パスワードが空、または確認入力が一致しません。' >&2
+    exit 1
+  fi
+  printf '%s' "$webapp_password" | agent_json '
+import base64, hashlib, json, secrets, sys
+salt = secrets.token_bytes(16)
+dk = hashlib.scrypt(sys.stdin.read().encode("utf-8"), salt=salt, n=16384, r=8, p=1, dklen=32, maxmem=0)
+print(json.dumps("scrypt$16384$8$1$" + base64.b64encode(salt).decode() + "$" + base64.b64encode(dk).decode()))
+' | agent_sops_set '["dashboard_basic_auth"]["password_hash"]'
+  unset webapp_password webapp_confirm webapp_username
+  agent_json 'import json,secrets; print(json.dumps(secrets.token_hex(32)))' </dev/null |
+    agent_sops_set '["dashboard_basic_auth"]["secret"]'
+  chmod 0600 files/infrastructure/secrets/agent/runtime.sops.yaml
+)
+make secrets-decrypt-check-agent
+```
+
+この手順は生成値を画面や shell 履歴へ出さない。共有端末ではプロセス引数の参照権限にも注意する。
+署名 secret の再生成は既存セッションを無効化するため、通常の apply ごとには行わない。
+この作業ではキー生成・bundle 更新・復号確認は未実施。
+
+### 反映と確認（明示承認を得て別途実施）
+
+1. Compose の Hermes と cdp-tunnel が公開済みの新しい自前イメージへ固定されていることを確認し、上記キー登録とローカル検査を終える。
+   Apps 側 PR の Caddy/DNS 等を揃える。旧イメージ・旧設定の復元先も記録する。
+2. 更新前に[バックアップ手順](hermes-agent-backup.md)の整合した一式を取得し、復元に必要な artifact が揃っていることを確認する。
+3. `make ansible-apply-agent` で反映する。Hermes と netns を共有する cdp-tunnel の再作成を確認する。
+4. Apps から9120への接続成功、Runner・他 LAN 端末からの拒否を確認する。上記の peer 確認と、
+   Webapp の未ログイン時拒否、ログイン・ログアウト、会話・セッション再開、ファイル upload/download、
+   WebSocket、既存 Discord thread、Runner SSH・CDP、Hindsight の recall/retain を確認する。
+   Caddy 経由の `/api/host-terminal` とその配下が、クエリ付き・WebSocket upgrade を含め403になることを確認する。
+   terminal の遮断後も会話・セッション・ファイルなど他の機能が動くことを確認する。
+5. 起動時 migration が config を書き換えていないことを確認後、2回目の `make ansible-apply-agent` で **changed=0** を確認する。
+   Webapp の設定画面で Ansible 管理項目を変更しない。失敗時は更新前バックアップから復元する。
+
+### ローカル結合試験の結果（2026-11-02）
+
+新イメージ、この PR の config テンプレート、Apps 側 PR の Caddy を組み合わせた隔離コンテナ試験で、次を確認した。
+試験用の proxy IP・ダミー認証情報と内部 CA を使い、Hermes/Caddy はそれぞれメモリ6GiBで実行した。
+
+- config.yaml は描画直後、Webapp 応答後、ログイン/API 後、会話後、再起動1回目後・2回目後の6段階すべてで内容が一致した。
+  起動時 migration による書き換えは観測されなかった。Ansible の changed=0 を確認した結果ではない。
+- gateway 起動、basic ログイン成功・誤パスワード拒否、未ログインの sessions API の401、ログイン後の API・SPA 配信を確認した。
+  発行された4種の cookie は `__Host-` prefix と `Secure; HttpOnly; Path=/; SameSite=lax` を持ち、
+  試験用 proxy の /32 から HTTPS forwarded 情報が信頼された。再起動2回後も既存 cookie で sessions API は200だった。
+- Caddy 経由の会話 WebSocket は101で接続でき、`gateway.ready` と `gateway.ping` の応答を確認した。
+  `/api/host-terminal` の通常 GET・正規チケット付き WebSocket は403で、クエリ・大小文字・重複 slash・
+  percent encoding 等の候補も403だった。配下 `/api/host-terminal/sub` の GET も403（同 path の WebSocket は未検証）。
+- DGX との会話は CLI で1往復し、指定した短い応答を得た。Webapp の WebSocket 上での実会話送信は未検証。
+  DGX 中継が SSE をバッファするため、逐次ストリーミング遅延も未検証。
+- 実際の sessions export を rebuild の `iter_sessions → build_turns → build_item` へ通し、
+  1 session / 1 turn / 2 messages の replace 用 item を構築できた。
+  非 active・非 compacted 行は除外し、compacted 行は保持することも確認した。実 Hindsight への再投入は行っていない。
+  Hindsight の即時接続拒否でも会話は継続したが、正常な recall/retain や120秒の無応答 timeout は未検証。
+
+本番 apply・2回目 apply の changed=0、Discord、Runner SSH・Chromium/CDP、正常な Hindsight、
+実 LAN の送信元 IP・DNAT・firewall、許可 subnet 外からの拒否、公開 DNS・公的 TLS、バックアップ復元は未検証。
+実ブラウザの画面操作、ファイル upload/download、UI の会話継続・undo・compaction、
+本番の1.5GiBメモリ制限での負荷も未検証。ローカル試験を本番全体の受入完了とは扱わない。
+この作業で本番のバックアップ・apply は未実施であり、本番環境の実施状況は repo だけからは判断しない。
+
+既知の警告として `TERMINAL_CWD does not exist: /srv/agent-work` がある。
+Hermes の `agent/runtime_cwd.py` が Runner 側のパスをコンテナ内の `Path.is_dir()` で検査するために出るもので、
+Runner の疎通失敗を直接示すものではない。運用者の確認では旧版本番にも出ており、Webapp 接続中は約2秒ごとに出る。
+ローカル結合試験では認証・会話を阻害しなかった。
 
 ## 記憶の運用
 

@@ -18,3 +18,4 @@ ADR は採用時点の判断を固定するもので、前提が変わった場�
 | [0010](0010-tank-gen3-cold-pool.md) | 採用。適用は切り替え時 | ai・archiveをtank-gen3 mirrorへ配置し、四半期scrubとarchiveの書き込み可・自動snapshotを運用する（2026-10-31変更） |
 | [0011](0011-ups-nut-shutdown.md) | 承認済み。2026-10-31に本番停止・killpowerを確認。復帰方針とNFS順序は0012で更新 | pve1 NUT primary・DGX早期停止・VM逆順停止（startupはAnsible管理）・killpowerとDiscord通知 |
 | [0012](0012-ups-stayoff-nfs-order.md) | 承認済み。2026-10-31反映、11-01の商用電源ありFSD試験でstayoff・手動復旧・NFS順序を確認 | UPSをondelay=-1で手動復旧し、pve-guestsをNFSより先に停止する |
+| [0013](0013-hermes-webapp-caddy.md) | 採用 | Hermes Webapp を Apps Caddy 経由で公開し、Agent の9120到達元を Apps のみに限定する。0009の追加例外、Agentはtailnet外を維持 |

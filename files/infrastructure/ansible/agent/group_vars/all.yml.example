@@ -47,3 +47,7 @@ firewall_trusted_networks:
   - 192.168.10.0/24
   - 192.168.20.0/24
   - 100.64.0.0/10
+
+# Optional port-specific guard, enabled only for the Agent group.
+firewall_webapp_port: 0
+firewall_webapp_allowed_source: 192.168.10.101/32

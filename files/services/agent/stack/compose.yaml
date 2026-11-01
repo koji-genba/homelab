@@ -6,10 +6,10 @@
 # Ansible role agent_stack (files/infrastructure/ansible/agent/roles/agent_stack)
 # after manual approval; it is not wired to the 15-minute Apps reconcile timer.
 #
-# Everything runs on one private bridge network with no host port published:
-# nothing on the LAN or tailnet can reach these services directly. Hermes reaches
-# outward (Discord, the GLM endpoint on 192.168.10.51, the Apps VM FQDNs mapped
-# below) and the memory stack is only reachable from this project.
+# Everything runs on one bridge; only Hermes Webapp is published on the Agent
+# LAN IP, with an Apps-only nftables guard. The memory services stay private.
+# Hermes reaches outward (Discord, the GLM endpoint on 192.168.10.51, and the
+# Apps VM FQDNs mapped below). The memory stack is reachable only from this project.
 #
 # Restart policy: every long-running service uses `restart: unless-stopped`.
 # This differs from the Apps VM, which leaves `restart` unset and relies on its
@@ -315,10 +315,9 @@ services:
 
   hermes:
     # Built by .github/workflows/hermes-agent-image.yml (nousresearch/hermes-agent
-    # v2026.9.24 base + the Hindsight Hermes integration pinned at d952b6e).
-    # Pinned to the digest published by the first workflow run (tag 0.21.5,
-    # 2026-10-18).
-    image: ghcr.io/koji-genba/homelab-hermes-agent@sha256:75cb227cd55aba85e17a02d884022b405d8f8fe4dfb6702fb2de4a6c85a8e0ee
+    # main c7da41dd base + the Hindsight Hermes integration pinned at d952b6e).
+    # Pinned to the published main-c7da41dd image digest (PR #179, 2026-11-02).
+    image: ghcr.io/koji-genba/homelab-hermes-agent@sha256:d3215638cc3be6dae647cc308229797b9ed79757575f41400bfaea51b1f37c00
     # The pinned upstream image has no CMD: without this it starts an
     # interactive CLI, hits EOF under Compose and restarts continuously.
     # Keep the s6 entrypoint and explicitly select its gateway service.
@@ -330,9 +329,14 @@ services:
     depends_on:
       hindsight:
         condition: service_healthy
+    # Publish only on the Agent LAN address (also used by cdp-tunnel's netns).
+    ports:
+      - "${AGENT_WEBAPP_BIND_IP:-192.168.10.104}:${AGENT_WEBAPP_PORT:-9120}:${AGENT_WEBAPP_PORT:-9120}"
     env_file:
       # Discord token, allowed user/channel IDs, the operator webhook and the
       # optional dead-man ping URL — sourced from the Agent SOPS bundle.
+      # HERMES_DASHBOARD_BASIC_AUTH_USERNAME, _PASSWORD_HASH and _SECRET
+      # are passed by the same raw env_file (scrypt dollar signs stay literal).
       - path: "${SECRETS_DIR:?set SECRETS_DIR}/hermes.env"
         format: raw
     environment:
@@ -401,7 +405,7 @@ services:
     # Reuses the self-built Hermes image: it already ships the OpenSSH client and
     # is digest-pinned, so no separate (and unpinnable-by-digest-content) apk
     # install is needed.
-    image: ghcr.io/koji-genba/homelab-hermes-agent@sha256:75cb227cd55aba85e17a02d884022b405d8f8fe4dfb6702fb2de4a6c85a8e0ee
+    image: ghcr.io/koji-genba/homelab-hermes-agent@sha256:d3215638cc3be6dae647cc308229797b9ed79757575f41400bfaea51b1f37c00
     restart: unless-stopped
     # Tiny: one ssh process holding a port forward.
     mem_limit: 128m
@@ -455,6 +459,6 @@ services:
 
 networks:
   # Project-scoped bridge. Not `internal: true` because Hermes and Hindsight need
-  # outbound internet; nothing is published to the host.
+  # outbound internet; only Hermes Webapp is published to the host.
   internal:
     driver: bridge

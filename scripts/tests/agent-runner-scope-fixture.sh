@@ -214,6 +214,58 @@ for timeout in (defaults["agent_stack_compose_wait_timeout"], 37):
                              "--wait-timeout", str(timeout), "hermes", "cdp-tunnel"], argv
 compose = yaml.safe_load((repo / "files/services/agent/stack/compose.yaml").read_text())
 assert compose["services"]["cdp-tunnel"]["network_mode"] == "service:hermes"
+
+# Render schema 52 with real group variables and role defaults (no bundle).
+import json
+env.filters["bool"] = bool
+env.filters["to_json"] = json.dumps
+host_vars = yaml.safe_load((ansible_root / "group_vars/agent.yml").read_text())
+context = dict(defaults, **host_vars, role_path=str(roles / "agent_stack"),
+               playbook_dir=str(ansible_root))
+# Resolve the role's templated defaults, exactly as the config render needs.
+for _ in range(4):
+    for key, value in list(context.items()):
+        if isinstance(value, str) and "{{" in value:
+            context[key] = env.from_string(value).render(**context)
+config = yaml.safe_load(env.from_string((roles / "agent_stack/templates/config.yaml.j2").read_text()).render(**context))
+assert config["_config_version"] == 52
+assert "backend" not in config["browser"]
+assert config["browser"]["cdp_url"] == "http://127.0.0.1:9222"
+assert config["sessions"]["auto_prune"] is False
+assert config["onboarding"]["run"] is False
+assert config["security"]["allow_lazy_installs"] is False
+assert config["webapp"] == dict(enabled=True, host="0.0.0.0", port=9120,
+                              public_url="https://hermes.kojigenba-srv.com")
+assert config["dashboard"]["trusted_proxies"] == ["192.168.10.101/32"]
+assert config["dashboard"]["basic_auth"]["session_ttl_seconds"] == 43200
+assert compose["services"]["hermes"]["ports"] == [
+    "${AGENT_WEBAPP_BIND_IP:-192.168.10.104}:${AGENT_WEBAPP_PORT:-9120}:${AGENT_WEBAPP_PORT:-9120}"]
+assert compose["services"]["hermes"]["env_file"][0]["format"] == "raw"
+# Use literal synthetic strings, not generated credentials. Verify rejection of
+# missing/non-string/multiline fields and unchanged scrypt dollars in env output.
+secret_tasks = tasks("agent_stack", "secrets.yml")
+strings = next(t for t in secret_tasks if t["name"] == "Validate the required Webapp authentication strings")
+auth_checks = [env.compile_expression(c) for c in strings["ansible.builtin.assert"]["that"]]
+for value, expected in (("fixture", True), ("", False), (None, False), (42, False),
+                        ("line\nbreak", False), ("line\rbreak", False)):
+    assert all(check(item={"value": value}) for check in auth_checks) == expected
+fixture_auth = dict(username="fixture", password_hash="scrypt$16384$8$1$AAAA$AAAA", secret="x" * 64)
+formats = next(t for t in secret_tasks if t["name"] == "Validate the Webapp password hash and signing secret formats")
+format_checks = [env.compile_expression(c) for c in formats["ansible.builtin.assert"]["that"]]
+for auth, expected in ((fixture_auth, True), (dict(fixture_auth, password_hash="not-a-hash"), False),
+                       (dict(fixture_auth, secret="short"), False)):
+    assert all(check(agent_stack_secrets={"dashboard_basic_auth": auth})
+               for check in format_checks) == expected
+
+secrets = dict(discord=dict(bot_token="fixture", allowed_users="0", home_channel="0"),
+               dashboard_basic_auth=fixture_auth)
+writer = next(t for t in secret_tasks if t["name"] == "Write the Hermes runtime environment")
+rendered = env.from_string(writer["ansible.builtin.copy"]["content"]).render(agent_stack_secrets=secrets)
+for key, field in (("USERNAME", "username"), ("PASSWORD_HASH", "password_hash"), ("SECRET", "secret")):
+    assert f"HERMES_DASHBOARD_BASIC_AUTH_{key}={fixture_auth[field]}\n" in rendered
+assert writer["no_log"] is True
+assert strings["no_log"] is True
+print("Agent Webapp: schema, proxy, raw auth env and invalid bundle values passed")
 # These services have no host-rendered bind-mounted config requiring a force
 # refresh. Embedding alone mounts an immutable, revision-pinned model cache.
 for service in ("hindsight", "reranker"):

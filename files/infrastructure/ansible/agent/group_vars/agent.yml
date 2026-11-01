@@ -22,15 +22,13 @@ agent_backup_mounts:
     marker_value: agent-backups
     options: hard,_netdev,nfsvers=4.1,noatime,nconnect=8
 
-# The Agent VM has no published services; SSH is limited to the shared
-# management sources in group_vars/all.yml (server VLAN, Trusted VLAN and the
-# tailnet CGNAT range via the gateway subnet route), with no input ports beyond
-# SSH. Do not override firewall_ssh_allowed_networks here.
+# SSH keeps the shared management sources; Webapp is Apps-only below.
+# Do not override firewall_ssh_allowed_networks here.
 firewall_input_allowed_tcp_ports: []
 firewall_egress_restrict: false
-# Defence in depth against an accidental Docker `ports:` entry: drop DNAT
-# traffic from outside firewall_trusted_networks (equivalent to the Apps VM
-# guard). Docker's own tables are never flushed.
+# Defence in depth against accidentally added Docker `ports:` entries: drop
+# DNAT traffic from outside firewall_trusted_networks without flushing Docker's
+# own tables. Webapp additionally has the stricter Apps-only port rule below.
 firewall_dnat_guard: true
 
 # --- WS2 contract -----------------------------------------------------------
@@ -48,3 +46,18 @@ agent_runner_ssh_key_dir: /etc/homelab/agent/ssh
 # in git. An empty recipient list fails closed rather than writing plaintext.
 agent_backup_age_recipients:
   - "age1a8v97ung7t9g39vdxsdxgzta4fq4hz7hv7yezzlx6ac7xfgqgsws420x6u"
+
+# Gateway Webapp: Apps Caddy terminates TLS; Agent stays off-tailnet.
+agent_stack_sessions_auto_prune: false
+agent_stack_onboarding_run: false
+agent_stack_allow_lazy_installs: false
+agent_stack_webapp_enabled: true
+agent_stack_webapp_host: 0.0.0.0
+agent_stack_webapp_bind_ip: "{{ agent_management_ip }}"
+agent_stack_webapp_port: 9120
+agent_stack_webapp_public_url: https://hermes.kojigenba-srv.com
+agent_stack_dashboard_trusted_proxies:
+  - 192.168.10.101/32
+agent_stack_dashboard_session_ttl_seconds: 43200
+firewall_webapp_port: "{{ agent_stack_webapp_port }}"
+firewall_webapp_allowed_source: 192.168.10.101/32

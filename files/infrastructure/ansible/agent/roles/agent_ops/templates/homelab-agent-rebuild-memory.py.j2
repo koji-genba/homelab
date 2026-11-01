@@ -7,9 +7,12 @@
 # It reads a Hermes session export (JSONL, one session object per line with an
 # "id" and a "messages" list) and rebuilds Hindsight memory in the same shape the
 # Hermes Hindsight plugin writes automatically via sync_turn: one document per
-# session, one retain request per session, whose content is the flat JSON array
-# of turn messages the plugin builds in _build_turn_messages
+# session, whose content is the flat JSON array of turn messages the plugin
+# builds in _build_turn_messages
 # ([{"role", "content": "User: ...", "timestamp"}, ...]).
+# 固定 provider の自動 retain は対応 API (>=0.5.0) では未送信 turn を
+# append する。旧 API / 能力確認不可では process ごとの document ID を使い、
+# update_mode を指定しない。rebuild は全会話を一度に replace する設計。
 #
 # Idempotency: every item carries document_id = session id and an explicit
 # update_mode = "replace". A session is always sent whole, in one request, so the
@@ -41,7 +44,8 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 EVENT_TIMEZONE = ZoneInfo("Asia/Tokyo")
-STATE_VERSION = 2
+# 履歴選別の変更前の checkpoint では処理済み行も再構築が必要。
+STATE_VERSION = 3
 
 # Shape constants, kept in lockstep with the Hermes Hindsight plugin
 # (plugins/memory/hindsight/__init__.py) so a rebuilt document is shaped like an
@@ -166,6 +170,11 @@ def build_turns(session):
 
     for message in session.get("messages") or []:
         if not isinstance(message, dict):
+            continue
+        # 上流 session_export.drop_undone_rows と同じ選別。undo / edit /
+        # rewind の行は turn の区切りにも使わず、compaction の履歴は残す。
+        # フラグの無い旧 export は従来どおり全行を対象にする。
+        if not (message.get("active", True) or message.get("compacted", False)):
             continue
         role = str(message.get("role") or "").lower()
         text = _text_of(message)
