@@ -50,7 +50,8 @@ for host, vars_ in (("agent", agent_vars), ("runner", runner_vars)):
         assert "9120" not in rendered
         continue
     forward = rendered.split("chain forward {", 1)[1].split("chain output", 1)[0]
-    narrow = "ct status dnat meta l4proto tcp ct original proto-dst 9120 ip saddr != 192.168.10.101/32 drop"
+    # Reply packets retain the original tuple; their packet source is the container.
+    narrow = "ct status dnat meta l4proto tcp ct original proto-dst 9120 ct original ip saddr != 192.168.10.101/32 drop"
     assert forward.index(narrow) < forward.index("ct state established,related accept")
     assert forward.index(narrow) < forward.index("ct status dnat ip saddr !=")
     input_ = rendered.split("chain input {", 1)[1].split("chain forward", 1)[0]

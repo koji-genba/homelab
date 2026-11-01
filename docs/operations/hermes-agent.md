@@ -516,6 +516,7 @@ UI の terminal pane 自体は残るが、Caddy 経由では接続できなく�
 Agent の nftables は input と Docker DNAT の forward の両方で `.101/32` 以外の9120を drop する。
 input では loopback を先に許可するため、ホスト内の loopback 通信は遮断しない。
 forward は `ct original proto-dst` で公開ポートを照合し、広い trusted 範囲や established 許可より前に判定する。
+返りのパケットにも当たるため、送信元はコンテナの IP ではなく接続開始時の `ct original ip saddr` で判定する。
 Runner `.105`、他の LAN 機器、Trusted VLAN、tailnet からの直接接続は許可しない。
 cdp-tunnel は Hermes と netns を共有するが、CDP の host 公開は追加しない。
 

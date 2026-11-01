@@ -32,8 +32,9 @@ table inet homelab_filter {
     type filter hook forward priority -100; policy accept;
 {% if firewall_webapp_port | int > 0 %}
     # Match the published ORIGINAL port, before broad trusted/established rules.
+    # This also matches reply packets: use the ORIGINAL source, not the container IP.
     # DNAT happens at prerouting -100, before this forward hook.
-    ct status dnat meta l4proto tcp ct original proto-dst {{ firewall_webapp_port }} ip saddr != {{ firewall_webapp_allowed_source }} drop
+    ct status dnat meta l4proto tcp ct original proto-dst {{ firewall_webapp_port }} ct original ip saddr != {{ firewall_webapp_allowed_source }} drop
 {% endif %}
     ct state established,related accept
     ct status dnat ip saddr != { {{ trusted_networks }} } drop
