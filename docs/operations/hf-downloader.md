@@ -52,6 +52,8 @@ v2.22.4はIPと単一ラベル名を既定許可するため、内部health用�
 | `exclude` | 空 | カンマ区切りの除外glob |
 | `max_workers` | `1` | 1〜4。1ジョブ内の並列取得数。HDD向けには1を維持 |
 
+`repo_id` と `revision` は前後の空白を無視する。
+
 globは前後の空白を除去する。各256文字、32件、入力全体4096文字まで。
 先頭`-`/`/`、`..` segment、制御文字、空の要素は禁止。保存ルートや実行ファイルはUIで指定できない。
 
@@ -147,7 +149,7 @@ Caddyの許可ルールを見直す。ローカルで認証・権限・3件queue
 helper/DAG/config変更もreconcileでcontainer再作成になる。image用directoryだけの変更では再作成しない。
 公開後にComposeのdigestを変更して初めて新しいimageへ切り替わり、取得を中断する。
 
-## 受け入れ確認（2026-10-28実施・一部未検証）
+## 受け入れ確認（2026-10-28〜11-01実施）
 
 以下は確認手順。今回の本番での確認範囲は後述の結果を参照する。
 
@@ -168,9 +170,13 @@ helper/DAG/config変更もreconcileでcontainer再作成になる。image用dire
   `README.md`を保存。未認証警告0件でtoken使用を確認し、Daguのログ・データにtokenらしき文字列は0件だった。
 - HomepageのDaguリンクとアイコン表示を運用者が確認した。Gatusのhf-downloader監視は直近5回とも成功していた。
 - 複数ジョブを積むと実行中1件・2件目以降がqueuedになることを、2026-10-31までに運用者が本番で確認した。
-
-本番では、Stopと再開、存在しないrepoの失敗とDAG全体Retry、大きなモデルの取得完了、
-gatedの手動承認型repoは未検証。
+- 約1.5TBのmodelの取得完了を、2026-11-01までに運用者が本番で確認した。
+- 2026-11-01: `Qwen/Qwen2.5-7B-Instruct`を途中でStopし、`Download stopped`と途中fileの清掃を確認。
+  積み直すと、Stop前に完了していたshardのmtimeは変わらず、次のshardから取得した。
+- 2026-11-01: 存在しないrepoは`not found`で失敗してstderrに理由が出て、DAG全体Retryでqueueへ戻り再び失敗した。
+  `../../etc`は`Download refused`でhfを起動せずに拒否した。
+- 2026-11-01: 手動承認型gatedの`google/gemma-3-1b-it`は、利用条件への同意前は`Access denied ... requires approval`で失敗し、
+  同意後に積み直すと`model.safetensors`を含めて取得できた（10002:10002、0666 / 0777、`.incomplete`残り0件、ログにtokenらしき文字列0件）。
 
 ## ローカル検証（2026-10-26〜27）
 
@@ -199,6 +205,8 @@ Docker Desktop / WSL2の偽ai bindを使用し、mount種別だけ試験用overr
 清掃追加試験の受信量は504,488,197 bytesで1.5GB以内。いずれも取得物は試験後に削除済み。
 
 ## 制約・トラブルシュート
+
+- 失敗・停止時は新規保存先だけを清掃し、HF cache外にファイル等が無ければ管理ファイルも削除する。本体があれば空ディレクトリだけを削除し、既存保存先・既存namespaceは保持する。cache内のsymlink・特殊ファイルは清掃全体を見送り、清掃失敗は警告のみ。
 
 - container再作成・image更新・secret更新では実行中downloadが止まる。停止は最大30秒のhf終了待ち、
   DAG cleanup 45秒。`signal_handling.enable_propagation: true`でservice停止時にも実行中DAGへSIGTERMを転送する。

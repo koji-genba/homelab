@@ -112,6 +112,7 @@ class DownloadTest(unittest.TestCase):
                     return 143 if outcome == 'stop' else outcome
 
                 def launch(*args, **kwargs):
+                    self.assertEqual(kwargs['env']['HF_HUB_DISABLE_UPDATE_CHECK'], '1')
                     self.assertFalse((cache / 'old.incomplete').exists())
                     (cache / 'new.incomplete').write_text('new')
                     return SimpleNamespace(wait=wait, poll=lambda: None if outcome == 'stop' else outcome,
@@ -130,13 +131,165 @@ class DownloadTest(unittest.TestCase):
                     original_cleanup(path)
 
                 with patch.dict(os.environ, {'DAG_PARAMS_JSON': '{"repo_id":"org/repo"}',
-                     'HFDL_AI_ROOT': temp, 'HFDL_LOCK_PATH': str(lock_path), 'HF_TOKEN_PATH': str(token)}), \
+                     'HFDL_AI_ROOT': temp, 'HFDL_LOCK_PATH': str(lock_path), 'HF_TOKEN_PATH': str(token),
+                     'HF_HUB_DISABLE_UPDATE_CHECK': '0'}), \
                      patch.object(hf, 'preflight'), patch.object(hf, 'cleanup_incomplete', side_effect=cleanup), \
                      patch.object(hf.subprocess, 'Popen', side_effect=launch):
                     self.assertEqual(hf.main(), 143 if outcome == 'stop' else outcome)
                 self.assertEqual(calls, [target, target])
                 self.assertFalse(list(cache.glob('*.incomplete')))
                 self.assertEqual((cache / 'keep.metadata').read_text(), 'keep')
+
+    def test_empty_destination_cleanup_after_hf(self):
+        cases = ('failed', 'stopped', 'file', 'cache-files', 'existing-target', 'existing-namespace', 'success', 'denied')
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temp:
+                ai = Path(temp)
+                _, target = hf.destination(hf.validate({'repo_id': 'org/repo'}), ai)
+                namespace = target.parent
+                if case == 'existing-target':
+                    target.mkdir(parents=True)
+                elif case == 'existing-namespace':
+                    namespace.mkdir(parents=True)
+                token = ai / 'token'
+                token.touch()
+                lock = ai / 'lock'
+                reaped = False
+                code = 0 if case == 'success' else 7
+
+                def wait(timeout=None):
+                    nonlocal reaped
+                    if case == 'stopped' and timeout is None:
+                        raise InterruptedError(15)
+                    reaped = True
+                    return -15 if case == 'stopped' else code
+
+                def launch(*args, **kwargs):
+                    cache = target / '.cache/huggingface/download'
+                    cache.mkdir(parents=True)
+                    (cache / 'partial.incomplete').write_text('partial')
+                    if case == 'file':
+                        (target / 'config.json').write_text('keep')
+                    for name in ('CACHEDIR.TAG', '.gitignore', 'download/config.json.lock'):
+                        (cache.parent / name).write_text('keep')
+                    return SimpleNamespace(wait=wait, poll=lambda: None if case == 'stopped' else code,
+                                           terminate=lambda: None)
+
+                real_cleanup = hf.cleanup_empty_destination
+
+                def cleanup(*args):
+                    self.assertTrue(reaped)
+                    self.assertFalse(list(target.rglob('*.incomplete')))
+                    with lock.open('a') as other:
+                        with self.assertRaises(BlockingIOError):
+                            fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    real_cleanup(*args)
+
+                output, errors = io.StringIO(), io.StringIO()
+                with patch.dict(os.environ, {'DAG_PARAMS_JSON': '{"repo_id":"org/repo"}',
+                     'HFDL_AI_ROOT': temp, 'HFDL_LOCK_PATH': str(lock), 'HF_TOKEN_PATH': str(token)}), \
+                     patch.object(hf, 'preflight'), patch.object(hf.subprocess, 'Popen', side_effect=launch), \
+                     patch.object(hf, 'cleanup_empty_destination', side_effect=cleanup) as cleaner, \
+                     redirect_stdout(output), redirect_stderr(errors):
+                    if case == 'denied':
+                        with patch.object(hf.os, 'rmdir', side_effect=PermissionError('fixture denied')):
+                            result = hf.main()
+                    else:
+                        result = hf.main()
+                self.assertEqual(result, 143 if case == 'stopped' else code)
+                if case == 'success':
+                    cleaner.assert_not_called()
+                else:
+                    cleaner.assert_called_once()
+                preserved = case in ('file', 'existing-target', 'success', 'denied')
+                self.assertEqual(target.exists(), preserved)
+                self.assertEqual(namespace.exists(), preserved or case == 'existing-namespace')
+                if case == 'file':
+                    self.assertEqual((target / 'config.json').read_text(), 'keep')
+                if preserved and case != 'denied':
+                    cache = target / '.cache/huggingface'
+                    for name in ('CACHEDIR.TAG', '.gitignore', 'download/config.json.lock'):
+                        self.assertEqual((cache / name).read_text(), 'keep')
+                if case == 'existing-target':
+                    self.assertTrue((target / '.cache/huggingface/download').is_dir())
+                if not preserved:
+                    self.assertIn('Destination cleanup: removed 3 files and ', output.getvalue())
+                    self.assertEqual(output.getvalue().count('Destination cleanup:'), 1)
+                    self.assertTrue(namespace.parent.is_dir())
+                if case == 'denied':
+                    self.assertIn('Empty destination cleanup warning: fixture denied', errors.getvalue())
+
+    def test_empty_destination_cleanup_does_not_follow_symlinks(self):
+        for component in ('subdir', 'repo', 'org', 'huggingface'):
+            with self.subTest(component=component), tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                target = base / 'models/huggingface/org/repo'
+                outside = base / 'outside'
+                empty = outside / 'keep-empty'
+                empty.mkdir(parents=True)
+                link = target / 'subdir' if component == 'subdir' else next(
+                    p for p in [target, *target.parents] if p.name == component)
+                link.parent.mkdir(parents=True)
+                link.symlink_to(outside, target_is_directory=True)
+                with redirect_stderr(io.StringIO()):
+                    hf.cleanup_empty_destination(target, False, False)
+                self.assertTrue(empty.is_dir())
+                self.assertTrue(link.is_symlink())
+
+    def test_cache_cleanup_preserves_payload_outside_exact_cache_path(self):
+        for name in ('config.json', 'nested/model.bin', '.cache/other', '.cache/huggingface-extra/file'):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temp:
+                target = Path(temp) / 'huggingface/org/repo'
+                cache_file = target / '.cache/huggingface/download/config.json.lock'
+                cache_file.parent.mkdir(parents=True)
+                cache_file.touch()
+                payload = target / name
+                payload.parent.mkdir(parents=True, exist_ok=True)
+                payload.write_text('keep')
+                (target / 'empty').mkdir()
+                hf.cleanup_empty_destination(target, False, False)
+                self.assertEqual(payload.read_text(), 'keep')
+                self.assertTrue(cache_file.is_file())
+                self.assertFalse((target / 'empty').exists())
+
+    def test_cache_symlinks_and_special_files_prevent_all_cleanup(self):
+        for name in ('.cache', '.cache/huggingface', '.cache/huggingface/download/link',
+                     '.cache/huggingface/download/fifo'):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                target = base / 'huggingface/org/repo'
+                (target / 'empty').mkdir(parents=True)
+                outside = base / 'outside'
+                (outside / 'empty').mkdir(parents=True)
+                entry = target / name
+                entry.parent.mkdir(parents=True, exist_ok=True)
+                if name.endswith('/fifo'):
+                    os.mkfifo(entry)
+                else:
+                    entry.symlink_to(outside, target_is_directory=True)
+                if len(Path(name).parts) > 2:
+                    (target / '.cache/huggingface/CACHEDIR.TAG').write_text('keep')
+                before = set(target.rglob('*'))
+                errors, output = io.StringIO(), io.StringIO()
+                with redirect_stderr(errors), redirect_stdout(output):
+                    hf.cleanup_empty_destination(target, False, False)
+                self.assertEqual(set(target.rglob('*')), before)
+                self.assertTrue((outside / 'empty').is_dir())
+                self.assertIn('Empty destination cleanup warning:', errors.getvalue())
+                self.assertEqual(output.getvalue(), '')
+
+    def test_cache_unlink_failure_only_warns(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / 'huggingface/org/repo'
+            cache_file = target / '.cache/huggingface/CACHEDIR.TAG'
+            cache_file.parent.mkdir(parents=True)
+            cache_file.write_text('keep')
+            errors = io.StringIO()
+            with patch.object(hf.os, 'unlink', side_effect=PermissionError('fixture denied')), \
+                 redirect_stderr(errors):
+                hf.cleanup_empty_destination(target, False, False)
+            self.assertEqual(cache_file.read_text(), 'keep')
+            self.assertIn('Empty destination cleanup warning: fixture denied', errors.getvalue())
 
     def test_target_scan_rejects_links_and_special_files_before_hf(self):
         for kind in ('sub/link', '.cache/huggingface/link', 'fifo'):
@@ -201,14 +354,47 @@ class DownloadTest(unittest.TestCase):
         for value in ('org/name', 'a/b', 'org/a.b_c-d', 'x' * 96 + '/' + 'y' * 96):
             self.assertEqual(hf.validate({'repo_id': value})['repo_id'], value)
         for value in ('name', '../x', 'a/../x', '-a/b', 'a/b-', '.a/b', 'a/.b', 'a/b.git',
-                      'a/b..c', 'a--b/c', 'a/b;c', 'a/$(id)', 'a/b\n', 'x' * 97 + '/b'):
+                      'a/b..c', 'a--b/c', 'a/b;c', 'a/$(id)', 'a/b\nc', 'x' * 97 + '/b'):
             with self.subTest(value=value), self.assertRaises(hf.InvalidInput):
                 hf.validate({'repo_id': value})
+
+    def test_surrounding_whitespace_is_ignored(self):
+        for whitespace in (' ', '\t', '\n', '\r\n', '\u3000', ' \t\n\u3000'):
+            with self.subTest(whitespace=whitespace):
+                params = hf.validate({'repo_id': whitespace + 'org/repo' + whitespace,
+                                      'revision': whitespace + 'refs/pr/42' + whitespace})
+                self.assertEqual(params['repo_id'], 'org/repo')
+                self.assertEqual(params['revision'], 'refs/pr/42')
+                self.assertEqual(hf.validate({'repo_id': 'org/repo', 'revision': whitespace})['revision'], 'main')
+
+    def test_internal_whitespace_and_controls_are_rejected(self):
+        for whitespace in (' ', '\t', '\n', '\u3000', '\x00', '\x7f'):
+            for name, value in (('repo_id', 'a' + whitespace + 'b/c'),
+                                ('revision', 'a' + whitespace + 'b')):
+                with self.subTest(name=name, whitespace=whitespace), self.assertRaises(hf.InvalidInput):
+                    hf.validate({'repo_id': 'org/repo', name: value})
+
+    def test_rejections_include_original_bounded_repr(self):
+        for name, values in {
+            'repo_id': [' a b/c ', None, 'x' * 194, 'a/b\x00'],
+            'revision': [' bad rev ', None, 'refs--pr--42', 'x' * 129],
+            'include': [' a,,b ', None, 'x' * 4097, ','.join(['x'] * 33)],
+            'exclude': [' ../* ', 'a\n', 'x' * 257],
+            'max_workers': ['1;id', True, None],
+            'repo_type': ['space', None],
+        }.items():
+            for value in values:
+                with self.subTest(name=name, value=value), self.assertRaises(hf.InvalidInput) as caught:
+                    hf.validate({'repo_id': 'org/repo', name: value})
+                received = repr(value)
+                expected = received if len(received) <= 200 else received[:197] + '...'
+                self.assertTrue(str(caught.exception).startswith(name + ':'))
+                self.assertTrue(str(caught.exception).endswith('got ' + expected))
 
     def test_options_and_unknown_parameters(self):
         for name, values in {
             'repo_type': ['space', '--help'],
-            'revision': ['--help', '../a', 'a//b', '/a', 'a/', 'a;b', 'a\n', 'x' * 129],
+            'revision': ['--help', '../a', 'a//b', '/a', 'a/', 'a;b', 'a\nb', 'x' * 129],
             'include': ['--help', '/etc/passwd', 'x/../y', 'a,,b', 'a\x00', 'x' * 257, ','.join(['x'] * 33)],
             'exclude': ['--token=x', '../*'],
             'max_workers': [0, 5, True, 1.5, '1;id', '01'],
