@@ -3,7 +3,7 @@ ARG DAGU_IMAGE=ghcr.io/dagucloud/dagu:2.22.4@sha256:1232ed10472497012b3c51987618
 FROM ${DAGU_IMAGE}
 LABEL org.opencontainers.image.source="https://github.com/koji-genba/homelab" \
     org.opencontainers.image.title="Dagu Hugging Face downloader" \
-    org.opencontainers.image.version="2.22.4-hf2.3.0"
+    org.opencontainers.image.version="2.22.4-hf2.4.0"
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends python3-venv \
     && rm -rf /var/lib/apt/lists/* \

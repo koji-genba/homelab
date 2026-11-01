@@ -42,10 +42,10 @@ jobs:
           set -eu
           printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
           docker buildx build --platform linux/amd64 --push \
-            --tag ghcr.io/koji-genba/dagu-hf:2.22.4-hf2.3.0 \
+            --tag ghcr.io/koji-genba/dagu-hf:2.22.4-hf2.4.0 \
             --file files/services/images/dagu-hf/Dockerfile \
             files/services/images/dagu-hf
-          digest="$(docker buildx imagetools inspect ghcr.io/koji-genba/dagu-hf:2.22.4-hf2.3.0 | awk '/^Digest:/ {print $2; exit}')"
+          digest="$(docker buildx imagetools inspect ghcr.io/koji-genba/dagu-hf:2.22.4-hf2.4.0 | awk '/^Digest:/ {print $2; exit}')"
           printf '%s\n' "$digest" | grep -Eq '^sha256:[0-9a-fA-F]{64}$'
           {
             echo '## Dagu HF image'

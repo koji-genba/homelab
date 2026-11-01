@@ -1,7 +1,7 @@
 # Dagu HF image
 
-Dagu `2.22.4`（Ubuntu 24.04）と `huggingface_hub==2.3.0` の amd64 image。
-公開 tag は `ghcr.io/koji-genba/dagu-hf:2.22.4-hf2.3.0`。
+Dagu `2.22.4`（Ubuntu 24.04）と `huggingface_hub==2.4.0` の amd64 image。
+公開 tag は `ghcr.io/koji-genba/dagu-hf:2.22.4-hf2.4.0`。
 DAG・設定・ヘルパーは image に入れず、Compose から read-only bind する。
 上流の sudo entrypoint は使わず、sudoers の追加設定と sudo の setuid bit を除去する。
 
