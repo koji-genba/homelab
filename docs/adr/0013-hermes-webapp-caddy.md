@@ -31,11 +31,17 @@ ADR-0009 は外部 VM への中継を ElastiFlow に限定していた。採用�
 ## 影響と反映境界
 
 Agent 側は Ansible 手動反映を維持する。Apps 側 Caddy・AdGuard・Homepage・Gatus は別 PR で実装する。
-Compose の新しい自前イメージ digest は公開後に差し替える。両側の変更と認証キーを揃えて反映する。
+PR 1 の自前イメージ `main-c7da41dd` は公開され、Compose の Hermes と cdp-tunnel はその digest に差し替え済み。
+両側の変更と認証キーを揃えて反映する。
 9120 の到達元は Apps VM に限定するため、ブラウザからの terminal 経路は Caddy の1か所で遮断する。
 Apps VM 自身から backend へ直接接続する経路は残るが、Hermes の認証が必要になる。
 Agent tool の Runner SSH 隔離とは別の制御であり、Caddy による遮断は上流機能そのものを無効化しない。
 反映後は Caddy 経由の terminal path が403となり、会話・セッション・ファイルなど他の機能が動くことを確認する。
 state DB schema 更新により、ロールバックは更新前バックアップと旧イメージ・設定の組から復元する。
 具体的なキー登録・確認・2回目 apply の changed=0 は[運用手順](../operations/hermes-agent.md#上流-main--webapp-への更新)に従う。
-新イメージの起動・認証・ネットワーク実動作は未検証。本番の反映状況を repo から推定しない。
+2026-11-02 のローカル結合試験では、新イメージと本 PR の config、Apps 側 PR の Caddy により、
+config の6段階での内容不変、ログインと `__Host-` cookie、会話 WebSocket の接続・ping、
+terminal 経路の403、CLI からの DGX 会話、export から rebuild item の構築を確認した。
+試験用ネットワーク・内部 CA・メモリ6GiBでの結果であり、本番 apply、Discord、Runner SSH・Chromium、
+正常な Hindsight、実 LAN の DNAT・firewall は未検証。実ブラウザ・ファイル操作等の未検証範囲は運用手順に記す。
+本番の反映状況を repo から推定しない。

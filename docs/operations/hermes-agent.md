@@ -467,8 +467,8 @@ Agent VM側の値はrole `agent_stack`が`/etc/homelab/secrets/*.env`へroot 060
 ## 上流 main / Webapp への更新
 
 この節は上流 `c7da41dd522dc19cc08bbfcfa69d4b078224b45d` に合わせた更新手順であり、本番の反映状況は示さない。
-Compose の Hermes digest は公開待ちのため、この設定変更だけでは更新を完結できない。
-新しい自前イメージの公開・digest 差し替えと、別 PR の Apps 側実装を揃えてから反映する。
+PR 1 の自前イメージ `main-c7da41dd` は公開され、Compose の Hermes と cdp-tunnel はその digest に差し替え済み。
+別 PR の Apps 側実装と認証キーを揃えてから反映する。
 採用理由と公開境界は [ADR-0013](../adr/0013-hermes-webapp-caddy.md) を参照。
 
 - URL は `https://hermes.kojigenba-srv.com`。Apps VM Caddy が TLS を終端し、Agent の
@@ -616,7 +616,7 @@ make secrets-decrypt-check-agent
 
 ### 反映と確認（明示承認を得て別途実施）
 
-1. 公開済みの新しい自前イメージへ Compose の digest を差し替え、上記キー登録とローカル検査を終える。
+1. Compose の Hermes と cdp-tunnel が公開済みの新しい自前イメージへ固定されていることを確認し、上記キー登録とローカル検査を終える。
    Apps 側 PR の Caddy/DNS 等を揃える。旧イメージ・旧設定の復元先も記録する。
 2. 更新前に[バックアップ手順](hermes-agent-backup.md)の整合した一式を取得し、復元に必要な artifact が揃っていることを確認する。
 3. `make ansible-apply-agent` で反映する。Hermes と netns を共有する cdp-tunnel の再作成を確認する。
@@ -628,9 +628,36 @@ make secrets-decrypt-check-agent
 5. 起動時 migration が config を書き換えていないことを確認後、2回目の `make ansible-apply-agent` で **changed=0** を確認する。
    Webapp の設定画面で Ansible 管理項目を変更しない。失敗時は更新前バックアップから復元する。
 
-ローカルの compose/config/firewall fixture と Ansible syntax/lint は実行対象。
-新イメージでの gateway 起動、認証、WebSocket、HTTP peer、バックアップ復元、2回目 apply の changed=0 は未検証。
-この実装作業で本番のバックアップ・apply は未実施であり、本番環境の実施状況は repo だけからは判断しない。
+### ローカル結合試験の結果（2026-11-02）
+
+新イメージ、この PR の config テンプレート、Apps 側 PR の Caddy を組み合わせた隔離コンテナ試験で、次を確認した。
+試験用の proxy IP・ダミー認証情報と内部 CA を使い、Hermes/Caddy はそれぞれメモリ6GiBで実行した。
+
+- config.yaml は描画直後、Webapp 応答後、ログイン/API 後、会話後、再起動1回目後・2回目後の6段階すべてで内容が一致した。
+  起動時 migration による書き換えは観測されなかった。Ansible の changed=0 を確認した結果ではない。
+- gateway 起動、basic ログイン成功・誤パスワード拒否、未ログインの sessions API の401、ログイン後の API・SPA 配信を確認した。
+  発行された4種の cookie は `__Host-` prefix と `Secure; HttpOnly; Path=/; SameSite=lax` を持ち、
+  試験用 proxy の /32 から HTTPS forwarded 情報が信頼された。再起動2回後も既存 cookie で sessions API は200だった。
+- Caddy 経由の会話 WebSocket は101で接続でき、`gateway.ready` と `gateway.ping` の応答を確認した。
+  `/api/host-terminal` の通常 GET・正規チケット付き WebSocket は403で、クエリ・大小文字・重複 slash・
+  percent encoding 等の候補も403だった。配下 `/api/host-terminal/sub` の GET も403（同 path の WebSocket は未検証）。
+- DGX との会話は CLI で1往復し、指定した短い応答を得た。Webapp の WebSocket 上での実会話送信は未検証。
+  DGX 中継が SSE をバッファするため、逐次ストリーミング遅延も未検証。
+- 実際の sessions export を rebuild の `iter_sessions → build_turns → build_item` へ通し、
+  1 session / 1 turn / 2 messages の replace 用 item を構築できた。
+  非 active・非 compacted 行は除外し、compacted 行は保持することも確認した。実 Hindsight への再投入は行っていない。
+  Hindsight の即時接続拒否でも会話は継続したが、正常な recall/retain や120秒の無応答 timeout は未検証。
+
+本番 apply・2回目 apply の changed=0、Discord、Runner SSH・Chromium/CDP、正常な Hindsight、
+実 LAN の送信元 IP・DNAT・firewall、許可 subnet 外からの拒否、公開 DNS・公的 TLS、バックアップ復元は未検証。
+実ブラウザの画面操作、ファイル upload/download、UI の会話継続・undo・compaction、
+本番の1.5GiBメモリ制限での負荷も未検証。ローカル試験を本番全体の受入完了とは扱わない。
+この作業で本番のバックアップ・apply は未実施であり、本番環境の実施状況は repo だけからは判断しない。
+
+既知の警告として `TERMINAL_CWD does not exist: /srv/agent-work` がある。
+Hermes の `agent/runtime_cwd.py` が Runner 側のパスをコンテナ内の `Path.is_dir()` で検査するために出るもので、
+Runner の疎通失敗を直接示すものではない。運用者の確認では旧版本番にも出ており、Webapp 接続中は約2秒ごとに出る。
+ローカル結合試験では認証・会話を阻害しなかった。
 
 ## 記憶の運用
 
