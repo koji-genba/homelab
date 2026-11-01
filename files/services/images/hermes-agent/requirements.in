@@ -1,8 +1,7 @@
 # Hindsight Hermes integration runtime dependencies (mode: local_external).
 #
-# Compiled to requirements.txt with `uv pip compile --generate-hashes` and
-# installed with `uv pip install --require-hashes`. Regenerate with the command
-# in the header of requirements.txt after changing a pin.
+# Generate the hash lock against the pinned Python 3.14 base and verify hashes at build time.
+# After updating a pin, follow the in-container regeneration procedure in README.md.
 #
 # hindsight-embed is intentionally NOT listed: it is only imported by the
 # plugin's local_embedded daemon path (`embedded.py::_start_daemon`, reached

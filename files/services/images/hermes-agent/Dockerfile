@@ -1,23 +1,24 @@
 # Hermes Agent gateway image with the Hindsight memory provider bundled in.
 #
-# The upstream image does not ship third-party memory plugins, and the plugin
-# catalog is fetched at runtime. Vendoring the integration at a pinned commit
-# keeps the Agent VM deploy offline-reproducible (`HERMES_DISABLE_LAZY_INSTALLS`
-# is on upstream, so nothing is installed from the network on boot) and pins the
-# provider code to review.
+# The upstream image does not ship the Hindsight integration, and the plugin
+# catalog is fetched at runtime. Vendoring the integration at a verified commit
+# keeps the provider code pinned for review and installs its dependencies at
+# build time. Runtime lazy installs must be explicitly disabled in deployment
+# config with security.allow_lazy_installs: false; upstream allows them by default.
 #
-# Upstream facts this relies on (hermes-agent v2026.9.24):
-#   * Hermes lives at /opt/hermes; its venv is /opt/hermes/.venv.
+# Upstream facts this relies on (hermes-agent main, revision c7da41dd):
+#   * Hermes lives at /opt/hermes and uses Python 3.14 in a PM-managed sealed
+#     venv at /opt/hermes/.venv. PM also supplies the pinned uv executable.
 #   * Bundled memory providers are discovered under /opt/hermes/plugins/memory/
 #     (outside HERMES_HOME=/opt/data, so they survive the data volume mount).
-#   * The provider's own dependencies are declared in its pyproject.toml. They are
-#     small (hindsight-client and its HTTP/pydantic closure, no torch), so they
-#     are installed at build time instead of lazily at first use.
+#   * The provider's dependencies are installed for local_external mode only;
+#     the heavyweight hindsight-embed runtime is intentionally not included.
 #   * requirements.txt is a hash-pinned lock compiled against base-constraints.txt
-#     (the versions already in the base image venv) so installing the provider never
-#     upgrades a dependency Hermes pins exactly. See requirements.in for details.
+#     from the base venv. The build fails if any existing package version changes.
+#   * docker.build_agent reassembles source bindings and launchers after the
+#     dependency install. See README.md for lock regeneration and validation.
 
-ARG HERMES_IMAGE=docker.io/nousresearch/hermes-agent:v2026.9.24@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7
+ARG HERMES_IMAGE=docker.io/nousresearch/hermes-agent:main@sha256:e39055b7c9c0a7655a84cdce601fe6bdcef2740e1b524744375424b66fed6495
 
 # Hindsight integration revision (vectorize-io/hindsight). This is the release
 # pinned by the Hermes plugin catalog entry used for this stack; bump together
@@ -58,19 +59,15 @@ RUN set -eux; \
         gateway/__pycache__/media_fetch.*.pyc gateway/platforms/__pycache__/base.*.pyc; \
     /opt/hermes/.venv/bin/python -m compileall -q -f gateway/media_fetch.py gateway/platforms/base.py
 
-# Vendor the provider into the bundled memory-plugin directory and install the
-# dependencies pinned by requirements.txt. `local_external` mode is used, so the
-# heavyweight embedded runtime (hindsight-embed) is never imported and its deps
-# stay out of the image. `--require-hashes` makes every install hash-verified.
-# The `cd /tmp` is required: `uv pip install` run from /opt/hermes picks up that
-# project's pyproject.toml and fails --require-hashes on its unpinned deps.
+# Use PM's bundled uv only at build time to add hash-verified dependencies.
+# install-dependencies.py fails if any existing package version changes.
+# Reassemble source bindings and launchers with the upstream assembler afterward.
 COPY --from=integration /src/hindsight-integrations/hermes/ /opt/hermes/plugins/memory/hindsight/
-COPY requirements.txt /tmp/hindsight-requirements.txt
+COPY requirements.txt install-dependencies.py /tmp/hindsight-build/
 
 RUN set -eux; \
     rm -rf /opt/hermes/plugins/memory/hindsight/tests; \
-    cd /tmp; \
-    uv pip install --no-cache --require-hashes --python /opt/hermes/.venv/bin/python \
-        -r /tmp/hindsight-requirements.txt; \
-    rm -f /tmp/hindsight-requirements.txt; \
-    /opt/hermes/.venv/bin/python -m compileall -q /opt/hermes/plugins/memory/hindsight
+    /opt/hermes/.venv/bin/python /tmp/hindsight-build/install-dependencies.py; \
+    /opt/hermes/.venv/bin/python -m docker.build_agent; \
+    /opt/hermes/.venv/bin/python -m compileall -q /opt/hermes/plugins/memory/hindsight; \
+    rm -rf /tmp/hindsight-build
