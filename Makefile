@@ -53,7 +53,7 @@ TAILSCALE_VAR_ARGS := $(if $(MANAGE_TAILNET),-var="manage_tailnet=$(MANAGE_TAILN
 # ローカルでビルドしたimageを試すときは`make TOOLBOX_IMAGE=ghcr.io/koji-genba/homelab-toolbox:1.0.1 ansible-check`のように明示する（実際のTOOLBOX_IMAGE_REPO / TOOLBOX_IMAGE_TAGに合わせる）。
 TOOLBOX_IMAGE_REPO ?= ghcr.io/koji-genba/homelab-toolbox
 TOOLBOX_IMAGE_TAG ?= 1.0.1
-TOOLBOX_IMAGE_DIGEST ?= sha256:be88c85c5f4692ff6667c356bfdaa72acfdc70a632671ee2334069eccd780400
+TOOLBOX_IMAGE_DIGEST ?= sha256:b3eef45b9c610b6f9f56b49e3fc064f6b221855aad78e6be1f14fe1a50a0edd3
 TOOLBOX_IMAGE ?= $(TOOLBOX_IMAGE_REPO)@$(TOOLBOX_IMAGE_DIGEST)
 TOOLBOX_BUILD_IMAGE ?= $(TOOLBOX_IMAGE_REPO):$(TOOLBOX_IMAGE_TAG)
 TOOLBOX_USERNAME ?= homelab-toolbox
