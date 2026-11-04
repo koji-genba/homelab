@@ -18,7 +18,7 @@ pve1上のtank-gen2に対してSSDライトキャッシュ層をmergerfsで構�
 tank-gen3 (Seagate BarraCuda 24TB ×2 mirror)
   ├─ data/ai       → DGX / Apps（SSDキャッシュ・mover対象外）
   └─ data/archive  → Apps Samba（書き込み可、毎日04:30に自動snapshot）
-tank-gen1 → アーカイブの2つ目のコピーの置き場にする案（未決定）
+tank-gen1 → データの無いpool（tank-gen1/dataのみ。使い道は未決定、issue #186）
 vmpool → VM disk
 
 pve1 /mnt/shared (NFS export)
@@ -36,7 +36,7 @@ SMB経路の宣言は`files/infrastructure/ansible/apps/group_vars/apps.yml`の`
 | cache-pool | KIOXIA EXCERIA SATA SSD ×2 (mirror) | mergerfsライトキャッシュ |
 | tank-gen2 | Toshiba N300 ×2 (mirror) | 実体ストレージ |
 | tank-gen3 | Seagate ST24000DM001 24TB ×2 (mirror) | ai・archive。運用は[tank-gen3](tank-gen3.md) |
-| tank-gen1 | Toshiba MD04ACA400 ×2 (mirror) | アーカイブの2つ目のコピーの置き場にする案（未決定） |
+| tank-gen1 | Toshiba MD04ACA400 ×2 (mirror) | データの無いpool（`tank-gen1/data`のみ。使い道は未決定、[issue #186](https://github.com/koji-genba/homelab/issues/186)） |
 | vmpool | WD_BLACK SN770 1TB | VM disk |
 | M8VC | Plextor PX-512M8VC 476GB | tank-gen2 L2ARC |
 | /mnt/shared | mergerfs union mount | クライアントから見えるパス |
