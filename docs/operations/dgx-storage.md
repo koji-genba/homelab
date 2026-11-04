@@ -8,6 +8,31 @@
 DGX Spark 2台から使うモデルと学習データ（tar.gz）の置き場を、`tank-gen3/data/ai`の単一NFS export
 として用意する。read-only exportもclientごとの分割も行わず、Apps VMとDGX 2台が同じ条件でmountする。
 
+## aiとscratchの違い（2026-11-05設計）
+
+既存の以下の手順A〜Cと実施記録はaiを対象とする。
+scratchのpve1・Apps・DGX反映は未実施で、実機動作は未検証。
+
+| 項目 | ai | scratch |
+| --- | --- | --- |
+| 目的 | モデル・学習データ | 消えてもよい雑多な作業用 |
+| dataset | `tank-gen3/data/ai` | `tank-gen1/data/scratch`（quota 3T） |
+| DGX mount | `/mnt/ai` | `/mnt/scratch` |
+| export | `/24`、sync、UID/GID通過 | Apps・両DGXの3つの`/32`、async、全て10002:10004へsquash |
+| snapshot / backup | 再取得可能なデータとして扱う | どちらも無し、復元無し、自動削除無し |
+
+scratchはユーザーが両DGXでfstabへ次の行を追加する。既存ai行は変更しない。
+
+```fstab
+192.168.10.11:/mnt/tank-gen1/data/scratch /mnt/scratch nfs4 hard,_netdev,nfsvers=4.1,noatime,rsize=1048576,wsize=1048576,timeo=600,retrans=2,nconnect=8,x-systemd.automount 0 0
+```
+
+pve1・Apps・Samba反映後に`sudo mkdir -p /mnt/scratch`、`sudo systemctl daemon-reload`、
+`sudo systemctl start mnt-scratch.automount`を実施する。`ls /mnt/scratch`でアクセス後、
+`findmnt -M /mnt/scratch`と`cat /mnt/scratch/.homelab-export`（期待値`scratch`）、一般ユーザーの書き込みを確認する。
+所有者は全て10002となりDGXからchownはできない。gitのsafe.directory警告が出る場合がある。
+相互読み書き試験と撤去を含む全手順は[scratch運用](scratch-storage.md)を参照する。
+
 ## 前提
 
 - 全区間1GbE、実効110MB/s。20GBのモデルで約3分、500GBで約75分かかる

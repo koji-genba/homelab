@@ -34,6 +34,7 @@
 ## ストレージ・性能
 
 - [tank-gen3運用](operations/tank-gen3.md): ai・archive mirrorのプロパティ、監視、scrubとarchiveの書き込み可・自動snapshot運用。
+- [scratch運用](operations/scratch-storage.md): tank-gen1の消えてもよい作業領域。2026-11-05設計、pve1・Apps・DGXへの反映は未実施。
 - [Tiered Storage](operations/tiered-storage.md): mergerfsのSSD書き込み層、moverとZFS snapshotの運用。
 - [SMB転送速度トラブルシューティング](operations/smb-performance-troubleshooting.md): Tailscale経路とcache-poolのTRIMに関する調査記録。
 

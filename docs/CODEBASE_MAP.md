@@ -34,7 +34,7 @@ graph TB
         GHCR[(GHCR public images)]
     end
     subgraph PVE["pve1 192.168.10.11 (Proxmox + ZFS + NFS server)"]
-        NFS[(NFS exports + marker files<br/>tank-gen3 ai+archive / tank-gen2 / cache mergerfs)]
+        NFS[(NFS exports + marker files<br/>tank-gen3 ai+archive / tank-gen2 / cache mergerfs / tank-gen1 scratch planned)]
         subgraph Apps["Apps VM 192.168.10.101 / tailnet 100.86.147.127 (VMID 101)"]
             Timer["homelab-app-reconcile.timer<br/>15 min fast-forward"]
             Guard[mount guard + nftables]
@@ -113,7 +113,7 @@ homelab/
 │   ├── network/target-zones.md    # current network specification
 │   ├── operations/               # application-lifecycle, apps-vm-recovery, apps-vm-tailnet, dgx-storage,
 │   │                             # hermes-agent, hermes-agent-backup, hf-downloader, homepage, nfs-export, open-webui,
-│   │                             # ups-nut (UPS tests/planned shutdown), proxmox-host-recovery, searxng, sparkdash, tiered-storage, smb-performance-troubleshooting
+│   │                             # ups-nut (UPS tests/planned shutdown), scratch-storage, proxmox-host-recovery, searxng, sparkdash, tiered-storage, smb-performance-troubleshooting
 │   └── archive/                  # README + frozen migration records, pre-migration audit/inventory,
 │                                 # ix-acl-stateful-runbook, proxmox-rebuild
 ├── files/
@@ -181,7 +181,7 @@ Module token estimates were measured on 2026-10-16 with the Cartographer scanner
 |---|---|
 | `base` | hostname, apt packages, `deploy` user, SSH hardening (pubkey only, `AllowUsers deploy`), sudoers, `/etc/homelab`, `/opt/homelab`, `/var/lib/homelab`, journald (500M/14d) |
 | `docker` | Docker apt repo (deb822), engine+compose plugin, `daemon.json` (`json-file`; rotation options are defined in [`daemon.json.j2`](../files/infrastructure/ansible/apps/roles/docker/templates/daemon.json.j2); see the [ADR-0004 supplement](adr/0004-dns-and-minimal-observability.md) for the 2026-10-12 decision) |
-| `storage` | NFS writeback sysctl; 9 NFSv4.1 mounts from `192.168.10.11` (all `nconnect=8`; `ro` until cutover, `stashpad-media` always ro); `homelab-mount-guard` script+unit (checks source, `nfs4`, mode, marker file+content) |
+| `storage` | NFS writeback sysctl; 10 declared NFSv4.1 mounts (scratch rollout pending) from `192.168.10.11` (all `nconnect=8`; `ro` until cutover, `stashpad-media` always ro); `homelab-mount-guard` script+unit (checks source, `nfs4`, mode, marker file+content) |
 | `network` | IPv6 off; legacy VLAN-11 service-address helper (disabled, gate-asserted off); systemd-resolved split DNS (only `~kojigenba-srv.com` → local AdGuard) |
 | `tailscale` | apt repo, `ip_nonlocal_bind=1`, asserts node is Running (**registration is manual**), `accept-routes=false accept-dns=false snat-subnet-routes=false`, pins tailnet IP |
 | `firewall` | nftables `inet homelab_filter` (input drop-by-default; 22/53/80/443/445 from tailscale0 + trusted networks; UDP 41641; forward guard drops DNAT'd flows from untrusted sources) |
@@ -231,7 +231,7 @@ Conventions: project name `homelab-<dir>`; all join external network `homelab_fr
 |---|---|---|---|---|
 | `edge` | Caddy (custom `caddy-cloudflare`) | 80, 443 (TCP only) | named volumes | `Caddyfile`; ACME DNS-01 via Cloudflare; `(admin_networks)` snippet restricts by `remote_ip {$CADDY_TRUSTED_NETWORKS}`; alias `dns.kojigenba-srv.com` for Gatus TLS probe; first external-VM upstream: ElastiFlow `192.168.10.103:5601` |
 | `dns` | AdGuard Home | 53 tcp/udp | `adguard-work`, `/etc/homelab/adguard` | UI :3000 only via Caddy; config rendered by Ansible (outside the Git checkout) |
-| `samba` | Samba (own image) | 445 | NFS: shared, shared-hdd, archive, ai; local `samba-state` (`/var/lib/samba`), `samba-logs` (`/var/log/samba`) | `config/smb.conf`, `config/users.json`, password from secrets dir; healthcheck overridden |
+| `samba` | Samba (own image) | 445 | NFS: shared, shared-hdd, archive, ai, scratch (rollout pending); local `samba-state` (`/var/lib/samba`), `samba-logs` (`/var/log/samba`) | `config/smb.conf`, `config/users.json`, password from secrets dir; healthcheck overridden |
 | `stashpad-prod` / `-staging` | stashPad (same image repo) | internal 8080 | NFS data + media (ro) | staging digest auto-bumped hourly from `:edge`; prod promoted by explicit PR |
 | `sillytavern` | SillyTavern | internal 8000 | NFS data | basic auth from `sillytavern.env` |
 | `open-webui` | Open WebUI v0.11.4 | internal 8080 | NFS `…/k8s-volumes/open-webui` | → vLLM at `192.168.10.51:8000/v1`; SQLite WAL **off** (NFS); `WEBUI_SECRET_KEY_FILE` keeps the session-signing key in the NFS data directory so recreation preserves logins |
@@ -337,7 +337,7 @@ State stores worth knowing about include **local named volumes on the Apps VM, n
 
 ### 4.4 Storage
 
-Almost all app state is NFS from pve1 (exceptions: local named volumes such as `sparkdash-config` and `gatus`, see §4.3; sparkDash adds no NFS mount, marker or nftables rule), mounted at `/srv/homelab/nfs/<name>` with per-path marker files (`.homelab-export*`) that the mount guard verifies; failure ⇒ no containers start (fail-closed). `/mnt/shared` is a mergerfs SSD tier (cache-pool) with the nightly mover. `tank-gen3/data/ai` is a plain dataset exported `/24` (the one export not narrowed to `/32`) for the DGX Sparks and Apps hf-downloader. hf-downloader writes `models/huggingface/` and `datasets/huggingface/` as 10002:10002 (files 0666/directories 0777). These artifacts are re-downloadable; ai remains excluded from routine snapshots. `tank-gen3` is a 24TB BarraCuda mirror for ai and archive; archive is writable with automatic snapshots at 04:30 (daily 14, weekly 8, monthly 12). tank-gen1: データの無いpool（`tank-gen1/data`のみ。使い道は未決定、[issue #186](https://github.com/koji-genba/homelab/issues/186)）. See [tank-gen3 operations](operations/tank-gen3.md).
+Almost all app state is NFS from pve1 (exceptions: local named volumes such as `sparkdash-config` and `gatus`, see §4.3; sparkDash adds no NFS mount, marker or nftables rule), mounted at `/srv/homelab/nfs/<name>` with per-path marker files (`.homelab-export*`) that the mount guard verifies; failure ⇒ no containers start (fail-closed). `/mnt/shared` is a mergerfs SSD tier (cache-pool) with the nightly mover. `tank-gen3/data/ai` is a plain dataset exported `/24` (the one export not narrowed to `/32`) for the DGX Sparks and Apps hf-downloader. hf-downloader writes `models/huggingface/` and `datasets/huggingface/` as 10002:10002 (files 0666/directories 0777). These artifacts are re-downloadable; ai remains excluded from routine snapshots. `tank-gen3` is a 24TB BarraCuda mirror for ai and archive; archive is writable with automatic snapshots at 04:30 (daily 14, weekly 8, monthly 12). tank-gen1: [scratch作業用](operations/scratch-storage.md)（2026-11-05設計、実機反映は未実施・動作未検証。`tank-gen1/data/scratch`、quota 3T、snapshot/backup無し）. NFS scratch → Apps `/srv/homelab/nfs/scratch` → Samba `/mnt/scratch` only; DGX `.51`/`.52` → `/mnt/scratch`. All three clients use `/32` exports with `async,all_squash,anonuid=10002,anongid=10004`. A scratch failure blocks every project through the global mount guard; see the scratch runbook for detachment. See [tank-gen3 operations](operations/tank-gen3.md).
 
 The mover handles only regular files older than `SETTLE_MINUTES` by ctime, requires both mounts, uses `flock`, preserves numeric ownership, and skips the snapshot if any transfer/ownership error was counted. Mover snapshots cover only `tank-gen2/data/shared` (monthly on the 1st, else weekly on Monday, else daily); files still on `cache-pool`, plus `ai`, `archive`, `k8s-volumes` and VM-local named volumes, are excluded, and archive separately takes daily snapshots plus monthly on the 1st or weekly on other Mondays on tank-gen3; archive names use YYYYMMDD; same-dataset snapshots are not an independent backup (see [Tiered Storage](operations/tiered-storage.md)).
 
@@ -408,7 +408,7 @@ Manual snapshots (2026-11-04, [#186](https://github.com/koji-genba/homelab/issue
 | Edit DNS allow/block rules | `files/services/compose/dns/filters/{allowlist,blocklist}.txt`, then `make ansible-apply` (reconcile won't apply) |
 | Bump an image | edit the digest in the project's `compose.yaml` (Dependabot weekly; Apps upstream ignored until tag+digest migration, Agent CPU TEI/slim Hindsight use tag+digest); self-built = manual re-pin; prod stashPad = explicit PR; staging = bot |
 | Change firewall | `roles/firewall/templates/homelab.nft.j2` (+ `trusted_networks`), `make ansible-apply` |
-| Add/modify an NFS mount | `nfs_mounts` in `group_vars/apps.yml` (`nconnect=8`, marker), `docs/operations/nfs-export.md`, pve1 export/marker (manual) |
+| Add/modify an NFS mount | `nfs_mounts` + path in `group_vars/apps.yml` and example (`nconnect=8`, marker), `compose.env.j2`, Compose `.env.example`, synthetic env in `scripts/compose-config.sh`, consuming bind/share; `docs/operations/nfs-export.md`, pve1 export/marker (manual). See [scratch rollout](operations/scratch-storage.md) for the accepted global guard dependency and branch-before-merge order. |
 | Tailscale ACL/DNS/routes | `files/infrastructure/terraform/tailscale/` + gitignored `acl-policy.live.json`; `make tailscale-plan`, `make tailscale-apply` (manual); `docs/operations/apps-vm-tailnet.md` |
 | Change the Apps VM definition | `files/infrastructure/terraform/apps-vm/` (+ cloud-init); mind `ignore_changes` and the Proxmox ACL trap |
 | Rotate/add a runtime secret | `runtime.yaml.example` keys, `roles/secrets/tasks/main.yml` (+ required-keys assert), `make secrets-encrypt`, `make secrets-decrypt-check` (`secrets-encrypt` refuses to overwrite an existing bundle; for edits use `sops set` in the toolbox + `chmod 0600`), then `make ansible-apply` |

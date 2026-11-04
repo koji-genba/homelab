@@ -13,6 +13,7 @@ services:
       - "${SHARED_HDD_MOUNT_PATH:?set SHARED_HDD_MOUNT_PATH}:/mnt/shared-hdd"
       - "${ARCHIVE_MOUNT_PATH:?set ARCHIVE_MOUNT_PATH}:/mnt/archive"
       - "${AI_MOUNT_PATH:?set AI_MOUNT_PATH}:/mnt/ai"
+      - "${SCRATCH_MOUNT_PATH:?set SCRATCH_MOUNT_PATH}:/mnt/scratch"
       - samba-logs:/var/log/samba
       - samba-state:/var/lib/samba
     networks:
