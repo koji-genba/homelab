@@ -246,3 +246,17 @@ WS18のrepo image実ビルド後、同一6 CPU / 4g / swapなし / C64 / workers
 ORT p50/p95は20候補1.134/1.524秒、30候補1.657/2.259秒（同時のCandle基準3.513/4.759秒、4.962/6.951秒）。
 120回の全順位一致、3,000スコアの最大差2.21e-6、429/panic/OOMなし。ORT起動peak 2.756 GiB、
 全負荷後2.762 GiBで4gを維持する。本番と会話全体の応答性は別途確認する。
+
+### 2026-11-04補足: 週次振り返りをrecallで構成する
+
+`weekly-review`は`hindsight_reflect`に統合を委ねず、`hindsight_recall`を4〜5回呼び、
+Hermes自身が根拠を照合してまとめる。前日までの7日間を具体的な日付でqueryへ書き、
+返った記憶の日付も確認する。recallのtemporal検索は結果全体の期間フィルタではなく、
+mental modelも返さないが、world/experience/observationの検索は週次レビューに利用できる。
+
+10/19・10/26・11/02の3週すべてでreflectが失敗した。11/04の直接測定では待ち時間を
+400秒に延ばしてもHindsightの300秒のwall timeoutで504となり、内部LLM呼び出し7回すべてが
+各30秒で打ち切られた。この構成ではreflectが完了しないため、timeout調整やGLM高速化は行わない。
+cron + Skillで週次振り返りを行う採用方針は維持する。既存skillはAnsibleの`force: false`で
+保護されるため、更新には個別のファイル反映が必要。手順と未検証範囲は
+[運用手順](../operations/hermes-agent.md#記憶の運用)を参照する。
