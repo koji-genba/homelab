@@ -101,6 +101,7 @@ ERCのread/writeが7.0秒であることをjournalと`smartctl -l scterc`で確�
 電源断後のERC保持を前提にせず、再起動後にも確認する。
 `-W 4,45,50`は温度差4℃、45℃以上の情報ログ、50℃以上の重大ログ・通知を設定する。
 負荷停止や電源断を自動実行する設定ではない。冷却と既存のroot宛通知経路を確認する。
+2026-11-04に、導入時のsmartd設定とzpool cacheの時刻入りbackupを削除した。
 
 スピンダウンは使わず、EPCのstandby_zは無効のまま、PUISも有効にしない。
 NFSのアクセス待ちと回転開始・停止の反復を避ける。idle_bは既定の10分でのヘッド退避を維持する。
@@ -155,6 +156,13 @@ DGX 2台とApps VMからも参照されていないことを確認した。
 `tank-gen3/data/archive`の`@to-gen3-1`・`@to-gen3-2`・`@verified-20261031`は残しており、
 これらの見直しも同issueで扱う。
 
+2026-11-04 23:57の補足: 現行archiveの`@to-gen3-1`・`@to-gen3-2`を削除した。
+送信元の旧datasetは同日22:19に削除済みで、差分転送の起点としての用途は無くなった。
+両snapshotは0Bで、残した`@verified-20261031`と内容が同じであることを確認済み。
+移行後の基準点には`@verified-20261031`だけを残し、保持の見直しは
+[issue #185](https://github.com/koji-genba/homelab/issues/185)で扱う。
+削除後に残すものの現存と全poolのhealthyを確認した。
+
 ## archiveの自動snapshot
 
 archiveは通常も`readonly=off`とし、Sambaから書き込み可能にする。
@@ -165,14 +173,15 @@ archiveは通常も`readonly=off`とし、Sambaから書き込み可能にする
 月次を週次より優先する規則はmoverと同じ。dailyは毎日取得し、moverの日付形式`YYYY-MM-DD`とは異なる。
 同日の同名snapshotが既存なら再作成しない。対象datasetが存在しない・未mountならエラーで停止する。
 
-`tank-gen3/data/archive`の初期の移行記録`@to-gen3-1`、`@to-gen3-2`、`@verified-20261031`は保持する。
-保持の見直しは[issue #186](https://github.com/koji-genba/homelab/issues/186)で扱う。
+2026-11-04に`@to-gen3-1`・`@to-gen3-2`を削除し、初期記録は`@verified-20261031`だけを保持する。
+保持の見直しは[issue #185](https://github.com/koji-genba/homelab/issues/185)で扱う。
 自動削除は対象dataset直下の`daily-`・`weekly-`・`monthly-`に8桁日付を付けた名前だけに限定する。
-これら初期記録やその他の手動snapshot、子datasetは削除対象外。
+`@verified-20261031`やその他の手動snapshot、子datasetは削除対象外。
 新しいsnapshotの取得に失敗した場合は削除しない。同じpool上の世代保持であり、別媒体backupの代わりではない。
 
 repoのscript・logrotateは手動でpve1へ配置する（Apps向けAnsibleの対象外）。
 既存ファイルとroot crontabは編集前に時刻入りbackupを取る。
+2026-11-04に、2026-10-31のarchive snapshot導入時のroot crontabのbackupを削除した。
 以下はrepoを置いたpve1上での配置例。作業端末からはscpで転送してからinstallする。
 
 ```sh

@@ -197,6 +197,11 @@ markerはApps VMの未mount directoryには絶対に作らない。NFS server lo
 確認して作成し、snapshot/backup対象に含める。`archive`は毎日04:30の自動snapshot対象である。
 `k8s-volumes`には自動snapshotがないため、少なくとも移行前snapshotを別途取得してからフェーズ2へ進む。
 
+2026-11-04の補足: 明示の了承を得てPhase 5直前の手動snapshotも削除したため、
+現在の`k8s-volumes`には自動・手動ともsnapshotがない。
+取得方針は[issue #185](https://github.com/koji-genba/homelab/issues/185)、
+名前を変えるかは[issue #190](https://github.com/koji-genba/homelab/issues/190)で扱う。
+
 ## 手動反映の記録手順
 
 1. `findmnt`、ZFS dataset、対象pathのowner/mode/ACL/xattrを記録する。

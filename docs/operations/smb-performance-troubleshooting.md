@@ -215,6 +215,7 @@ mp3とflacが混ざった約200GB（1個3〜50MB）をSMBで`shared`へ書くと
 `rw,sync,...,fsid=100`から`rw,async,no_subtree_check,no_root_squash,fsid=100`へ変更し、`exportfs -ra`で反映した。
 バックアップは`/etc/exports.bak.20261029T005646`。`shared-hdd`（`/mnt/tank-gen2/data/shared`、`fsid=101`）と
 ほかのexportは変更せず`sync`を維持した。現在の契約は[NFS export契約](nfs-export.md)を参照する。
+2026-11-04の補足: 上記のexports backupは削除済み。
 
 `shared`の8MiB・40MiBの逐次コピーは改善した。300KiBは改善せず、async化だけで小さいファイル全般が速くなるわけではない。
 大量のコピーには`robocopy /MT:8`も有効だった。
@@ -322,7 +323,8 @@ Apps VMの停止時間は約3分だった。
   `queues = 4`を追加した。4 vCPUに合わせ、2026-07のmultiqueue=4という記録との食い違いを解消する。
   固定版bpg/proxmox 0.117.0の[公式資料](https://github.com/bpg/terraform-provider-proxmox/blob/v0.117.0/docs/resources/virtual_environment_vm.md)で対応を確認した。
   実機では`qm set`でnet0へTerraformの定義と同じ`queues=4`を設定し、起動後の`eth0`がrx/txとも4キューであることを確認した。
-  2026-10-29に`terraform plan`を実行し、差分が無い（No changes）ことを確認した。
+  2026-10-29 09:01にApps VMの`terraform plan`が`No changes`となり、
+  `queues=4`が実機と一致することを確認済み。
 - **SambaのTCPバッファ**: `smb.conf`の`socket options`行を削除した。
   [公式資料](https://www.samba.org/samba/docs/current/man-html/smb.conf.5.html#SOCKETOPTIONS)が固定バッファによる
   自動調整の無効化を警告しているため、カーネルの自動調整に任せる。Sambaの既定は`TCP_NODELAY`。

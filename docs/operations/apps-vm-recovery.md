@@ -398,7 +398,12 @@ identityの変更をTerraform applyで行わない。
 削除せず保持し、Phase 5直前snapshot `tank-gen2/data/k8s-volumes@pre-phase5-retire-20260923`も保持中で、
 削除は別途明示承認が必要とされていた。2026-10-12にpve1で
 `zfs list -t snapshot | grep pre-phase5`を実行し、このsnapshotの現存を確認した。
-復旧作業でこれらを削除しない。snapshot削除は復旧とは別の承認境界とする。
+
+2026-11-04の補足: 明示の了承を得て、同日23:57にこのsnapshotを削除した。
+撤去時に削除したPVC directory 8件を戻せる最後のsnapshotだったが、現在は復旧に使えない。
+削除後に`k8s-volumes`のsnapshotが0件であることを確認した。自動snapshotもない。
+取得方針は[issue #185](https://github.com/koji-genba/homelab/issues/185)で扱う。
+`state-backup`と利用中のdataset/dataは引き続き保護する。
 
 同記録で保護対象とされた`tank-gen2/data/k8s-volumes`とSillyTavern、stashPad prod/stagingの3 directoryに加え、
 現在はOpen WebUIのdirectoryも保護する。正となるserver pathは

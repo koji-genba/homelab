@@ -40,3 +40,12 @@ send/recvの初回転送中はwriterを維持し、切り替え時だけ停止�
 現行archiveの`@to-gen3-1`・`@to-gen3-2`・`@verified-20261031`は残している。
 tank-gen1は`tank-gen1/data`だけが残るデータの無いpoolで、archiveの2つ目のコピーにする案は見送った。
 使い道は未決定で、archiveの初期snapshotの見直しとともに[issue #186](https://github.com/koji-genba/homelab/issues/186)で扱う。
+
+## 2026-11-04 補足: archiveの初期snapshot整理
+
+同日23:57に、現行archiveの`@to-gen3-1`・`@to-gen3-2`を了承を得て削除した。
+送信元の旧datasetは削除済みで、差分転送の起点としての用途は無くなった。
+移行後の基準点として`@verified-20261031`だけを残す。削除した2つと内容は同じである。
+自動削除の対象外は維持し、残し続けるかは
+[issue #185](https://github.com/koji-genba/homelab/issues/185)で見直す。
+削除後の現存確認と全poolのhealthy確認は完了した。

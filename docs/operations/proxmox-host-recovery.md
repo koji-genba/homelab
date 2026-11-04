@@ -293,6 +293,7 @@ Bug #4835は個別unitを先行させる順序修正であり、空cache問題�
 また、以前はZFSのimportより先にmountされていたmergerfsのfstab行へ
 `x-systemd.requires=zfs-mount.service`を追加した。変更前のfstabは
 `/etc/fstab.bak-20261027-zfs-order`に保存した。
+2026-11-04の補足: このbackupは削除済み。現在の設定はrepoと本書に記録している。
 
 同日22:15 JSTの再起動では、次の順序をjournalで確認した。
 
@@ -343,6 +344,26 @@ archiveのscript・logrotateと04:30のroot cronも[tank-gen3運用](tank-gen3.m
 保持したdataset上のdata / owner / modeとmarker内容を照合してからVMを復旧する。
 DGXの`ai`再mountは[DGX Sparkストレージ運用](dgx-storage.md)を参照する。
 
+## 作業時backupの整理（2026-11-04）
+
+2026-11-04 23:57に、了承を得てpve1の古い設定控え11件を削除した。
+いずれも現在の設定より古く、現在の設定はrepoとdocsに記録している。
+exportsの控えは旧datasetを指していた。
+
+| 対象 | 削除した控え |
+| --- | --- |
+| exports | `/etc/exports.bak-20260707202608`、`/etc/exports.bak.2026-09-19`、`/etc/exports.bak.20261029T005646`、`/etc/exports.bak.20261031T122105`、`/etc/exports.bak.20261031T122124` |
+| fstab | `/etc/fstab.bak-20261027-zfs-order`、`/etc/fstab.bak.20261029T010600` |
+| smartd | `/etc/smartd.conf.bak.20261030T200724` |
+| zpool cache | `/etc/zfs/zpool.cache.bak.20261030T200719` |
+| root crontab | `/root/crontab.bak-archive-snapshot-20261031T130452-1008050` |
+| mover | `/usr/local/bin/mover.sh.bak.issue48-20260926T000227` |
+
+`/etc/pve/authkey.pub.old`はProxmoxが毎日の鍵更新で作るため対象外とした。
+`/etc/lvm/lvm.conf.bak`と、2026-05-24の再構築時の`/etc/network/interfaces.old`も残した。
+削除後に残すものの現存と全poolのhealthyを確認した。
+今後も設定の編集前にはbackupを取る。
+
 ## Proxmoxのdatastoreとtemplate
 
 ### storage.cfgとsnippetの置き場所
@@ -385,6 +406,9 @@ cloud-init snippetは各ルートの`main.tf`が生成する。ここでは置�
 
 Apps VMにはtemplateが不要である。gateway・ElastiFlow・stashPadDevは各`main.tf`の`clone`で
 `template_vm_id`（各`variables.tf`のdefault `9000`）を使う。
+2026-11-04に#186で、Terraformの3 root（`tailscale-gateway`・`elastiflow`・`stashpad-dev`）の
+再作成時のclone元として、9000と`vmpool/base-9000-disk-0@__base__`を残すと決めた。
+現行VMはfull cloneで、templateには依存しない。
 2026-10-25のread-only採取で現物の設定と元imageを特定し、
 [`scripts/create-proxmox-ubuntu-template.sh`](../../scripts/create-proxmox-ubuntu-template.sh)に固定した。
 同日、運用者が9001を作成し、net0を`tag=10`へ変更してElastiFlow rootからVM 103へのcloneを確認した後、

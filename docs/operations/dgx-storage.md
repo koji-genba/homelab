@@ -180,6 +180,9 @@ ai共有は既存どおりsnapshot対象外とする。それ以外の配下構�
 `/mnt/ai`は`192.168.10.11:/mnt/tank-gen2/data/ai`を`nfs4,rw,noatime,vers=4.1,nconnect=8`でmountしていた。
 read速度は今回も未測定である。
 
+2026-11-04の補足: 上表の`/etc/exports.bak.2026-09-19`は削除済み。
+現在のexportは[NFS export契約](nfs-export.md)を正とする。
+
 ## 切り戻し
 
 ここでいう切り戻しはai共有の撤去手順を指す。2026-11-04に旧`tank-gen2/data/ai`と
@@ -216,7 +219,7 @@ writer停止、client側整理とunmount、最後にserver exportの順に進め
    DGX側もfstabの該当行を削除し、アクセスするwriterが無いことを確認した上で稼働中のautomount/mountを
    停止・unmountする。`systemctl daemon-reload`だけでは稼働中mountは外れない。
 5. 全clientが外れた後、pve1の`/etc/exports`から`ai`のentryだけを外し、`exportfs -ra`と
-   `exportfs -v`で確認する。`/etc/exports`全体を過去backupへ戻す場合は、先にその後の変更との差分を確認する。
-   特に2026-09-19のbackupは、[2026-09-23の旧4 exportの/32化](nfs-export.md#フェーズごとのclient範囲)より古い。
-   後日の変更を巻き戻す全体コピーは行わない。
+   `exportfs -v`で確認する。過去backupを参照する場合は、先にその後の変更との差分を確認する。
+   過去のbackupには後日のexport変更が含まれないため、丸ごと戻さず現在の契約と照合する。
+   2026-09-19のbackupは2026-11-04に削除済み。
 6. 共通手順に従い、残るmount/projectを確認して、この作業で作成したpauseの解除とtimer再開を行う。
