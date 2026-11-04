@@ -1,7 +1,8 @@
 # NFS export契約
 
 - 状態: `ai`・`archive`の切り替え完了時に適用する契約。pool運用は[tank-gen3運用](tank-gen3.md)を参照
-- `shared`は2026-10-29に`async`へ変更済み。`shared-hdd`とほかのexportは`sync`を維持。
+- `shared`は2026-10-29に`async`へ変更済み。既存の`shared-hdd`とほかのexportは`sync`を維持。
+- `scratch`は2026-11-05設計の追加契約（`async`・all_squash）。実機反映は未実施、動作は未検証。
 - サーバー: Proxmox/NFS host `192.168.10.11`
 - データ復旧: このリポジトリの対象外
 - 関連設計: [目標ストレージ契約](../architecture/target-state.md#storage-contract)
@@ -27,6 +28,7 @@
 | `/mnt/tank-gen3/data/archive` | `192.168.10.101/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | なし |
 | `/mnt/tank-gen2/data/shared` | `192.168.10.101/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid=101` |
 | `/mnt/shared` | `192.168.10.101/32` | `async,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid=100`（2026-10-29にasync化） |
+| `/mnt/tank-gen1/data/scratch` | `192.168.10.101/32`・`192.168.10.51/32`・`192.168.10.52/32` | `rw,async,no_subtree_check,all_squash,anonuid=10002,anongid=10004` | `fsid`なし（2026-11-05設計、反映未実施） |
 | `/mnt/tank-gen2/data/agent-backups` | `192.168.10.104/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid`なし（2026-10-18作成） |
 
 `ai`と`archive`には明示的な`fsid`を追加しない。marker名・値は移行前と同じで、
@@ -62,6 +64,10 @@ export設定は変わらない。pve1側のdirectoryとmarkerは2026-10-10に作
 
 手順は[Open WebUI運用](open-webui.md)にある。
 
+| 追加利用path | Apps VMでの用途 | アクセス |
+| --- | --- | --- |
+| `/mnt/tank-gen1/data/scratch` | Samba `scratch`だけ（2026-11-05設計、反映未実施） | read/write、消失許容 |
+
 ## AI dataset export（ADR-0006）
 
 DGX Spark 2台とApps VMが共有する、モデルと学習データ（tar.gz）の置き場である。既存4 exportとは
@@ -88,6 +94,15 @@ clientは次の3つで、いずれも同じ条件でmountする。read-only moun
 | DGX Spark 1TB機 `192.168.10.52` | `/mnt/ai` | 同上 |
 
 DGX側の手順は[DGX Sparkストレージ運用](dgx-storage.md)にある。
+
+## scratch export（2026-11-05設計、反映未実施）
+
+消えてもよい作業用。datasetは`tank-gen1/data/scratch`、quotaは`3T`。
+Appsは`/srv/homelab/nfs/scratch`からSambaだけへ渡し、両DGXは`/mnt/scratch`へmountする。
+入口は`root:10004 1775`、全NFSアクセスは`10002:10004`へsquashする。
+markerとREADMEは`root:root 0644`で、stickyにより利用者からの削除を防ぐ。
+スナップショット・バックアップ・自動削除は無い。既存aiのUID通過・sync契約とは異なる。
+property、exportsの完全な1行、作成・確認・切り離し・撤去は[scratch運用](scratch-storage.md)を参照する。
 
 ## Agentバックアップ用export（2026-10-18作成）
 
@@ -134,6 +149,7 @@ agent-vm / runner-vmともchanged=0、export root 0700を維持し、健康確�
 
 基本optionは `rw,sync,no_subtree_check,no_root_squash` とする。ただし`shared`（`/mnt/shared`）は
 2026-10-29から`rw,async,no_subtree_check,no_root_squash,fsid=100`とする。client mount optionへ`sync`は付けない。
+新規scratchは別契約の`rw,async,no_subtree_check,all_squash,anonuid=10002,anongid=10004`とする。
 `no_root_squash`は既存UID/GIDとの初期互換性のためで、移行後の所有者検証を終えたら
 `root_squash`へ狭められるか再評価する。
 
@@ -148,7 +164,8 @@ cutover確認後だけApps VM側mountを`rw`へ変更する。
 ## Apps VMの`nconnect`
 
 `nconnect`はmountごとではなく、server address、protocol、NFS versionが同じNFS client単位で共有される。
-このため、`192.168.10.11`への9つのmount（既存7つ＋ADR-0006の`ai`＋Open WebUI）は全て`nconnect=8`を指定する。DGX側はこのserverへのmountが`ai`の1つだけなので、この制約は生じない。
+このため、repo宣言の`192.168.10.11`への10 mount（既存9つ＋scratch）は全て`nconnect=8`を指定する。
+scratchの追加は2026-11-05設計で実機反映は未実施。DGXもaiとscratchの両方を`nconnect=8`に揃える。
 
 既存mountへのremountでは接続数を変更できない。設定反映には`192.168.10.11`へのmountを全てunmount
 してからmountし直す必要があり、Apps VMではrebootで実施する。reboot後は次のcommandで確認する。
@@ -193,8 +210,16 @@ Open WebUIのdata pathを追加した時点で、次の1件がさらに加わる
 | --- | --- |
 | `/mnt/tank-gen2/data/k8s-volumes/open-webui/.homelab-export` | `open-webui-data` |
 
+scratchを追加する時点で、次の1件も必要になる（2026-11-05設計、作成未実施）。
+
+| server側の実体path | marker内容 |
+| --- | --- |
+| `/mnt/tank-gen1/data/scratch/.homelab-export` | `scratch`（`root:root 0644`、改行付き） |
+
+scratchのmarkerはsnapshot/backupに含めず、喪失時はREADME・dataset・exportとともに作り直す。
+
 markerはApps VMの未mount directoryには絶対に作らない。NFS server local consoleで対象datasetとpathを
-確認して作成し、snapshot/backup対象に含める。`archive`は毎日04:30の自動snapshot対象である。
+確認して作成し、scratch以外は各datasetのsnapshot/backup方針に従う。`archive`は毎日04:30の自動snapshot対象である。
 `k8s-volumes`には自動snapshotがないため、少なくとも移行前snapshotを別途取得してからフェーズ2へ進む。
 
 2026-11-04の補足: 明示の了承を得てPhase 5直前の手動snapshotも削除したため、

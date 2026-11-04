@@ -49,3 +49,11 @@ tank-gen1は`tank-gen1/data`だけが残るデータの無いpoolで、archive�
 自動削除の対象外は維持し、残し続けるかは
 [issue #185](https://github.com/koji-genba/homelab/issues/185)で見直す。
 削除後の現存確認と全poolのhealthy確認は完了した。
+
+## 2026-11-05 補足: tank-gen1をscratch作業用へ
+
+[issue #186](https://github.com/koji-genba/homelab/issues/186)で、tank-gen1を消えてもよい作業用の置き場にすると決めた。
+`tank-gen1/data/scratch`（quota 3T）をDGX 2台へNFS、作業端末へAppsのSamba経由で公開する。
+スナップショット・バックアップ・自動削除は設けない。既存の月次scrubと起動時importは維持する。
+これは設計とrepo宣言の追加であり、実機反映は未実施、mount・共有動作は未検証。
+詳細と反映順序・障害時の切り離しは[scratch運用](../operations/scratch-storage.md)を正とする。

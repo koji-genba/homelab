@@ -15,6 +15,10 @@ Daguの管理者・実行履歴・ログ・キュー・HF_HOME・ロックはApp
 backupせず喪失を許容する。喪失時は再deploy後すぐに`/setup`で管理者を作り、必要な取得を再投入する。
 2026-10-27に本番反映し、2026-10-28の受け入れ結果は同運用手順に記録した。
 
+Sambaは既存共有に加えて[scratch](../../../docs/operations/scratch-storage.md)を公開する宣言を持つ。
+`SCRATCH_MOUNT_PATH`を`/mnt/scratch`へbindし、他containerには渡さない。
+2026-11-05設計、実機反映は未実施・動作未検証。消えてもよい作業用でsnapshot/backupは無い。
+
 HTTP(S)のentry pointはedge projectだけで、DNSとSMBは必要なhost portだけを公開する。
 内部名はApps VMのtailnet IPへ解決される（[ADR-0007](../../../docs/adr/0007-apps-vm-tailnet-dns.md)）。
 host portを公開するprojectは、LAN側の`*_BIND_IP`に加えて`${APPS_TAILNET_IP}`にもbindする。

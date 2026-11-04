@@ -96,6 +96,12 @@
         description: |-
           \\samba.kojigenba-srv.com\ai
           SMB認証・tailnet必須
+    - scratch:
+        id: copy-storage-scratch
+        icon: mdi-folder-network
+        description: |-
+          \\samba.kojigenba-srv.com\scratch
+          消えてもよい作業用・snapshot/backup無し・SMB認証・tailnet必須
 - SSH 先:
     - Apps VM:
         id: copy-ssh-apps
