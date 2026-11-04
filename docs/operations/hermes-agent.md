@@ -405,8 +405,9 @@ Hermesの設定を再読込する場合は、同じ引数で末尾を
 
 ### 設定変更
 
-Hermesの`config.yaml`、`SOUL.md`（初回のみ`force: false`）、Hindsight `config.json`、bank policy、
-週次振り返りcronはrole `agent_stack`がテンプレートから描画する。変更はrepoで`group_vars`や
+Hermesの`config.yaml`、`SOUL.md`（初回のみ`force: false`）、Hindsight `config.json`、bank policyは
+role `agent_stack`がテンプレートから描画する。週次振り返りcronは同名ジョブが無い場合だけ登録する。
+変更はrepoで`group_vars`や
 `roles/agent_stack/templates/`を編集し、`make ansible-apply-agent`で反映する。`config.yaml`は毎回上書きされる
 ため、VM上で直接編集しない。同じ内容・属性ならtemplate taskは`ok`となる。Hermesにも設定を保存する経路があり、
 runtime側で変わった内容は次回applyで戻る。`config.yaml` / `hindsight/config.json`の変更時はhandler
@@ -421,7 +422,8 @@ Compose定義・非secret環境の変更用handler `Restart the Agent stack`（�
 Hindsight本体は設定ファイルをbind mountせず、環境変数の変更は通常の`up`で反映する。embeddingのbind mountは
 revision固定のモデルcacheで、モデル変更はComposeの引数へ反映される。rerankerのモデルはimage同梱である。
 `SOUL.md`以降に蓄積するデータ（`USER.md`/`MEMORY.md`、sessions、ユーザーが追加したskills/cron）は
-Ansibleが上書きしない（週次振り返りcronはAnsibleが冪等に登録する）。
+Ansibleが上書きしない。同梱skillsも`force: false`で初回のみ配置されるため、既存ファイルの変更は
+`make ansible-apply-agent`だけでは反映されない。週次振り返りの更新手順は「記憶の運用」を参照する。
 
 Discordのchannel IDはsecret bundle（`hermes.env`）由来で、`config.yaml`のroutingとnotification channelへ
 描画される。変更時はbundleを更新してからapplyする。
@@ -707,7 +709,29 @@ Runner の疎通失敗を直接示すものではない。運用者の確認で�
   assistantの回答を本人の確認済み情報へ昇格させない。`observations_mission`は統合時の出典・不確実性の保持を促す。
   B1回答の再投入ではmission追加だけは誤名を保存し、custom抽出は0件にできたが、一般的な保証にはならない。
 - 週次振り返りはHermes cron（`agent_stack_weekly_review_schedule`、既定で毎週月曜9時）からSkill
-  `weekly-review`を実行し、結果を通知チャンネルへ配信する。変化が無い週は`[SILENT]`のみを出力する。
+  `weekly-review`を実行し、結果を通知チャンネルへ配信する。前日までの7日間（Asia/Tokyo）について
+  `hindsight_recall`を4観点で各1回、必要なら根拠確認を追加1回行い、Hermes自身が統合する。
+  queryには具体的な開始日・終了日を書くが、厳密な期間フィルタではない。Hindsight 1.1.0の
+  日付解析では範囲の片方だけを検出する場合もあるため、返った記憶の日付を本文で照合する。
+  既定の取得量は1回4096 tokensで、全記憶やmental modelを網羅するものではない。
+  変化が無い週は`[SILENT]`のみを出力する。
+  2026-11-04の判断でreflectから切り替えた。10/19・10/26・11/02の3週ともreflectは
+  各2回が120秒で失敗した。11/04の直接測定でもHindsightのwall timeout 300秒で504となり、
+  内部LLM呼び出し7回すべてが各30秒で打ち切られた。この構成ではreflectが完了しないため、
+  LLMの高速化やtimeout変更は行わずrecallを使う。
+- 既存環境の`weekly-review`更新手順（**未検証**）:
+  repoの`files/services/agent/hermes/skills/weekly-review/SKILL.md`と
+  VMの`/srv/agent/hermes/skills/weekly-review/SKILL.md`のsha256を比較し、稼働側に独自変更が
+  あれば差分をレビューする。保守作業として承認を得て、この1ファイルをrepo版で置き換え、
+  所有者・グループは`agent_stack_uid` / `agent_stack_gid`、modeは0644を維持し、sha256を再確認する。
+  `force: false`は変更しない。`pending/skills/`に対象skillの保留変更があれば、古い指示へ
+  戻さないよう承認前にレビューする。`skills.write_approval: true`ではHermesからのskill変更は
+  保留され、cron自体はbackground reviewを起動しない。
+  cronは実行時にskill本文を読み込むため、skill更新だけならジョブ再登録やコンテナ再作成は不要。
+  skill一覧には30秒のcacheがあるが、本文をジョブへ固定保存する仕組みではない。
+  現在のcron promptと`skills: [weekly-review]`はreflectを指定しておらず、変更は不要。
+  将来promptやskill名を変える場合は、同名ジョブをapplyで更新できないため、Hermes cronの
+  編集機能で既存ジョブを別途更新する（この手順も未検証）。
 - 検索はPGroongaの全文検索とruri-v3のembedding/rerankを併用する。rerankはCPUで1クエリあたり
   入力長により数秒かかる。候補数はLOW 8 / MID 20 / HIGH 30、TEI client batchは32。
   MID 12への削減は採用しない。飲み物とかばんを一緒に尋ねると、かばんがprefilterで落ちることがある。
