@@ -149,12 +149,16 @@ modeやmtimeは元のSSDディレクトリが削除されていると復元元�
 `/usr/local/bin/mover.sh.bak.issue48-20260926T000227`に保存した。
 隔離した一時ディレクトリで`10002:10002`のファイルと親ディレクトリの
 所有者・modeを保持することを確認済み。既存データの修復は別途完了済み。
+2026-11-04の補足: 上記の旧版backupは削除済み。
 
 ## ZFS snapshotポリシー
 
 moverの対象: `tank-gen2/data/shared`のみ（スクリプトの`DATASET`で指定し自動取得）。
 この自動取得には`cache-pool`上の残存ファイル、`ai`、`archive`、`k8s-volumes`、VM内named volumeは含まれない。
 `archive`は別の`archive-snapshot.sh`で毎日04:30に自動取得する（後述）。
+`k8s-volumes`には自動snapshotがなく、2026-11-04に最後の手動snapshotも削除した。
+取得方針の統一は[issue #185](https://github.com/koji-genba/homelab/issues/185)、
+名前を変えるかは[issue #190](https://github.com/koji-genba/homelab/issues/190)で扱う。
 snapshotは同じdataset上の世代保持であり、backupと同義ではない。SSDに残るファイルの復旧方針と、
 pool喪失に備える別媒体へのbackupは別に確認する。保持世代の正は各スクリプトのprune処理である。
 
@@ -169,7 +173,8 @@ archiveは書き込み可能な`tank-gen3/data/archive`を対象に、毎日`dai
 moverは上表どおり1日1種類だが、archiveは日次を毎日取り、日付もハイフンなしにする。
 変更のない日も取得する。同日の既存snapshotは維持し、未mount・dataset不在ならエラーで停止する。
 自動削除は対象dataset直下の3種類の接頭辞と8桁日付に一致する名前のみ。
-`@to-gen3-*`・`@verified-20261031`など初期記録は保持する。
+2026-11-04にarchiveの`@to-gen3-1`・`@to-gen3-2`を削除し、初期記録は`@verified-20261031`だけを保持する。
+これは自動削除の対象外のままとし、保持の見直しは#185で扱う。
 配置・root cron（`30 4 * * * /usr/local/bin/archive-snapshot.sh`）・logrotateの手順は
 [tank-gen3運用](tank-gen3.md#archiveの自動snapshot)を参照する。repoからの自動適用はしない。
 ログは`/var/log/archive-snapshot.log`、logrotateは`files/infrastructure/storage/archive-snapshot.logrotate`を
@@ -180,5 +185,13 @@ moverは上表どおり1日1種類だが、archiveは日次を毎日取り、日
 zfs snapshot tank-gen2/data/shared@pre-migration-YYYYMMDD
 zfs destroy tank-gen2/data/shared@pre-migration-YYYYMMDD
 ```
+
+2026-11-04 23:57に、了承を得て`tank-gen2/data/shared@migrate`（2025-12-13作成、6.77G）を削除した。
+旧tank（現在のtank-gen1）からtank-gen2への移行時に、送信元で取得して同日にreceiveした記録だった。
+保持していたのは移行後に削除したファイル約7GBだけで、内容を書き換えたファイルの旧版は無かった。
+差分の「変更」はメタデータだけであることを確認し、運用者が不要と判断した。
+同時に`tank-gen2/data/k8s-volumes@pre-phase5-retire-20260923`（58.7M）も了承を得て削除した。
+これは撤去時に削除したPVC directory 8件を戻せる最後のsnapshotで、現在は復旧に使えない。
+削除後に残すものの現存と全poolのhealthyを確認した。
 
 ログ: `/var/log/mover.log`（logrotate: `files/infrastructure/storage/mover.logrotate` を `/etc/logrotate.d/mover.logrotate` に配置）
