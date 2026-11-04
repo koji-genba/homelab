@@ -11,7 +11,7 @@ DGX Spark 2台から使うモデルと学習データ（tar.gz）の置き場を
 ## 前提
 
 - 全区間1GbE、実効110MB/s。20GBのモデルで約3分、500GBで約75分かかる
-- `tank-gen2`はHDD 2本mirrorで空き9.0TB。10GbE化はNICに加えswitchが必要なため今回は行わない
+- 導入時の記録では`tank-gen2`はHDD 2本mirrorで空き9.0TBだった。現在のaiは`tank-gen3`に配置する。10GbE化はNICに加えswitchが必要なため今回は行わない
 - IX2215のACL変更は不要。DGXはServer VLAN 10で、Server内は同一trust boundaryとして扱う
   （[ADR-0003](../adr/0003-four-network-zones.md)）
 - Port 3/4はすでにVLAN 10 accessであり、`config.txt`の変更も不要
@@ -182,6 +182,9 @@ read速度は今回も未測定である。
 
 ## 切り戻し
 
+ここでいう切り戻しはai共有の撤去手順を指す。2026-11-04に旧`tank-gen2/data/ai`と
+旧・現行aiの移行用snapshotは削除済みで、旧poolへの切り戻しには使えない。
+削除の確認結果は[tank-gen3運用](tank-gen3.md#旧コピー削除の実施記録2026-11-04)を参照する。
 以下は実装から導いた手順で、実機では未検証。
 client側の宣言を残したままserver exportを先に外すとmount guardが失敗し、他projectの起動にも影響する。
 writer停止、client側整理とunmount、最後にserver exportの順に進める。dataset/dataの削除は別の判断とする。

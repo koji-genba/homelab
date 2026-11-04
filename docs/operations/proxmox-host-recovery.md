@@ -145,26 +145,27 @@ source /etc/network/interfaces.d/*
 
 ### ディスクとpoolの識別
 
-既存diskの配置は2026-10-12の確認に基づく。tank-gen3は切り替え完了時の構成を示す。
+用途は2026-11-04の旧コピー削除後の配置を示す。デバイス名は2026-10-12の確認記録であり、
+追加したtank-gen3はby-idで示す。
 `sd*`の並びは6月版と変わっているため、`/dev/sd*` / `/dev/nvme*`の列挙順を識別子として使わず、
 by-idと再構築前の採取記録で照合する。
 
-| 確認時のデバイス | モデル / 容量 | 用途 |
+| 2026-10-12確認時のデバイス（tank-gen3はby-id） | モデル / 容量 | 現在の用途 |
 | --- | --- | --- |
 | nvme1n1 | KIOXIA-EXCERIA PLUS G3 SSD / 931.5G | OS（LVM + ext4） |
 | nvme0n1 | WD_BLACK SN770 1TB / 931.5G | VM disk / vmpool |
-| sda / sdb | TOSHIBA HDWG62CUZSVA / 各20T | tank-gen2 mirror |
-| sdc / sde | TOSHIBA MD04ACA400 / 各3.6T | tank-gen1 mirror |
+| sda / sdb | TOSHIBA HDWG62CUZSVA / 各20T | tank-gen2 mirror（shared・k8s-volumes） |
+| sdc / sde | TOSHIBA MD04ACA400 / 各3.6T | tank-gen1 mirror（データの無いpool。使い道は[issue #186](https://github.com/koji-genba/homelab/issues/186)） |
 | sdd | PLEXTOR PX-512M8VC / 476.9G | tank-gen2 L2ARC |
-| by-idで識別 | Seagate ST24000DM001-3Y7103 / 各24TB、DN02 | tank-gen3 mirror |
+| by-idで識別 | Seagate ST24000DM001-3Y7103 / 各24TB、DN02 | tank-gen3 mirror（ai・archive） |
 | sdf / sdg | KIOXIA-EXCERIA SATA SSD / 各894.3G | cache-pool mirror |
 
 | pool / 配置 | by-id識別子（`/dev/disk/by-id/`配下） |
 | --- | --- |
 | vmpool（単一disk） | `nvme-WD_BLACK_SN770_1TB_22390J802169-part1` |
 | tank-gen1 mirror（SLOG / L2ARCなし） | `wwn-0x50000398bb903d0d-part1`、`wwn-0x50000398bb883e91-part1` |
-| tank-gen2 mirror | `ata-TOSHIBA_HDWG62CUZSVA_9562A00WFDQJ-part1`、`ata-TOSHIBA_HDWG62CUZSVA_9562A00QFDQJ-part1` |
-| tank-gen3 mirror | `ata-ST24000DM001-3Y7103_ZXA2KJFS`、`ata-ST24000DM001-3Y7103_K1N00Y6B`（disk全体。作成後はpartitionも照合） |
+| tank-gen2 mirror（shared・k8s-volumes） | `ata-TOSHIBA_HDWG62CUZSVA_9562A00WFDQJ-part1`、`ata-TOSHIBA_HDWG62CUZSVA_9562A00QFDQJ-part1` |
+| tank-gen3 mirror（ai・archive） | `ata-ST24000DM001-3Y7103_ZXA2KJFS`、`ata-ST24000DM001-3Y7103_K1N00Y6B`（disk全体。作成後はpartitionも照合） |
 | tank-gen2 L2ARC | `ata-PLEXTOR_PX-512M8VC_P02947400134-part1` |
 | cache-pool mirror（`autotrim=on`） | `ata-KIOXIA-EXCERIA_SATA_SSD_85LB61PUK0Z5-part1`、`ata-KIOXIA-EXCERIA_SATA_SSD_51VB81OWKJ72-part1` |
 
@@ -241,17 +242,18 @@ Linuxでは`/etc/zfs/zpool.cache`が0バイトになる。cache方式との混�
 個別unitを有効にし、`zfs-import.target`の依存一覧に追加されたことを確認する。
 次の計画再起動で自動importとdatasetのmountを[検証](#検証)し、追加作業の確認記録に残す。
 
-復旧時のdatasetとmountpointの契約は次のとおり。旧ai/archiveは検証完了までreadonly・非exportで保持し、削除は別作業とする。
-下表の旧2 datasetもこの退避用であり、現行exportはtank-gen3側だけを使う。
+復旧時のdatasetとmountpointの契約は次のとおり。旧`tank-gen2/data/ai`と`tank-gen1/data/archive`は
+2026-11-04に移行用snapshotとともに削除済みで、復旧対象に含めない。ai・archiveのexportはtank-gen3側だけを使う。
+tank-gen1は`tank-gen1/data`だけが残るデータの無いpoolで、使い道は未決定（[issue #186](https://github.com/koji-genba/homelab/issues/186)）。
+archiveの2つ目のコピーにする案は見送った。
+削除後のtank-gen2は使用12.6T、空き7.41T（62%）。確認内容は[tank-gen3運用](tank-gen3.md#旧コピー削除の実施記録2026-11-04)を参照する。
 
 ```text
 cache-pool                    /mnt/cache-sata
 tank-gen1                     /mnt/tank-gen1
 tank-gen1/data                /mnt/tank-gen1/data
-tank-gen1/data/archive        /mnt/tank-gen1/data/archive
 tank-gen2                     /mnt/tank-gen2
 tank-gen2/data                /mnt/tank-gen2/data
-tank-gen2/data/ai             /mnt/tank-gen2/data/ai
 tank-gen2/data/k8s-volumes    /mnt/tank-gen2/data/k8s-volumes
 tank-gen2/data/shared         /mnt/tank-gen2/data/shared
 tank-gen3                     /mnt/tank-gen3

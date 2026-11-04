@@ -1,7 +1,7 @@
 # tank-gen3運用
 
-この文書はai・archiveの切り替え完了時に適用する運用契約である。構築・移行の実施記録や
-再起動試験の合格を意味しない。[ADR-0010](../adr/0010-tank-gen3-cold-pool.md)、
+この文書はai・archiveをtank-gen3へ切り替えた後の運用契約である。日付付きの実施記録は
+その時点の確認結果を示し、再起動試験の合格を意味しない。[ADR-0010](../adr/0010-tank-gen3-cold-pool.md)、
 [NFS export契約](nfs-export.md)、[ホスト復旧](proxmox-host-recovery.md)を併せて参照する。
 
 ## poolとdataset
@@ -69,6 +69,19 @@ systemctl list-timers --all '*scrub*'
 zpool status tank-gen3
 ```
 
+### 初回scrubの実施記録（2026-11-03〜04）
+
+SMART long testだけとしたならし運転を補うため、移行後の書き込みを確認する初回scrubを実施した。
+
+| 項目 | 結果 |
+| --- | --- |
+| 開始 | 2026-11-03 21:03 |
+| 完了 | 2026-11-04 05:09 |
+| 所要時間 / 対象量 | 8時間6分 / 5.21T |
+| 修復 / エラー | 0B / 0 |
+
+時刻はホストのローカル時刻。以後は上記の四半期scrubで確認する。
+
 ## ドライブ監視
 
 pve1のsmartmontools 7.5に同梱の`smartd.conf(5)`のDEVICESCAN節を確認した。
@@ -97,10 +110,13 @@ NFSのアクセス待ちと回転開始・停止の反復を避ける。idle_b�
 
 ## 移行とNFSの切り替え条件
 
+以下は当時の移行手順として保持する。旧datasetとaiの移行用snapshotは2026-11-04に削除済みであり、
+旧コピーへの切り戻しには使えない。現在の状態は次節の実施記録を参照する。
+
 旧`tank-gen2/data/ai`と`tank-gen1/data/archive`は子datasetがないことを確認してから、
 writer稼働中に初回snapshotをsendし、`recv -u`で新datasetを作る。mountpointとrecordsizeは受信時に指定する。
 archiveは旧recordsizeが128Kでも、受信時の1M指定で既存ブロックは書き直されない。
-移行用のai snapshotは通常運用の保持対象に加えず、切り戻し不要の確認後に明示的に整理する。
+移行時はai snapshotを通常運用の保持対象に加えず、切り戻し不要の確認後に整理する方針とした。
 
 Appsのstorage roleは`state: mounted`でfstabを更新し、その後`findmnt`で参照元・nfs4・ro/rwを検証する。
 既存mountのsourceが変わる場合、fstab更新だけで正しい参照元への付け替えが完了するとは限らない。
@@ -114,12 +130,30 @@ DGXは利用者がwriterを止め、両機の`mnt-ai.automount`とmountを外す
 
 差分sendのGUID一致を確認して旧datasetをreadonly・非exportにし、新datasetをmountしてからexportを再読込する。
 ai markerの`10002:10002`、archive markerの`0:0`と、それぞれ0644・値を保持する。
-旧datasetは検証完了まで残し、削除は別作業とする。
-移行後のtank-gen1は、アーカイブの2つ目のコピーの置き場にする案（未決定）。
+旧datasetは検証完了までreadonly・非exportで残し、削除は別作業とする方針だった。
 
 両exportが揃ったら、切り替え用branchの同じ定義からAnsibleを適用し、mount guard、DGX、
 Samba readと小さいhf-downloader取得を確認する。mainへのマージは切り替えの完了時とする。
 Ansibleはアプリやtimerを起動し得るので、差分send前には適用しない。
+
+## 旧コピー削除の実施記録（2026-11-04）
+
+2026-11-04 22:19に、検証用に残していた移行前の旧コピーとaiの移行用snapshotを削除した。
+削除前に、旧2 datasetがreadonlyで、新側と`@to-gen3-2`のGUIDが一致し、`zfs diff`による
+ファイル変更が各0件であることを確認した。稼働中のexportと`/etc/exports`に旧datasetがなく、
+DGX 2台とApps VMからも参照されていないことを確認した。
+
+| 対象 | 削除内容 |
+| --- | --- |
+| `tank-gen2/data/ai` | 旧dataset（2.28T）と`@to-gen3-1`・`@to-gen3-2` |
+| `tank-gen1/data/archive` | 旧dataset（687G）と`@to-gen3-1`・`@to-gen3-2` |
+| `tank-gen3/data/ai` | `@to-gen3-1`・`@to-gen3-2`のみ。現行datasetは維持 |
+
+削除後のtank-gen2は使用12.6T、空き7.41T、使用率62%。tank-gen1は`tank-gen1/data`だけが残る
+データの無いpoolとなった。archiveの2つ目のコピーにする案は見送り、使い道は未決定で
+[issue #186](https://github.com/koji-genba/homelab/issues/186)で扱う。
+`tank-gen3/data/archive`の`@to-gen3-1`・`@to-gen3-2`・`@verified-20261031`は残しており、
+これらの見直しも同issueで扱う。
 
 ## archiveの自動snapshot
 
@@ -131,7 +165,8 @@ archiveは通常も`readonly=off`とし、Sambaから書き込み可能にする
 月次を週次より優先する規則はmoverと同じ。dailyは毎日取得し、moverの日付形式`YYYY-MM-DD`とは異なる。
 同日の同名snapshotが既存なら再作成しない。対象datasetが存在しない・未mountならエラーで停止する。
 
-初期の移行記録`@to-gen3-1`、`@to-gen3-2`、`@verified-20261031`は保持する。
+`tank-gen3/data/archive`の初期の移行記録`@to-gen3-1`、`@to-gen3-2`、`@verified-20261031`は保持する。
+保持の見直しは[issue #186](https://github.com/koji-genba/homelab/issues/186)で扱う。
 自動削除は対象dataset直下の`daily-`・`weekly-`・`monthly-`に8桁日付を付けた名前だけに限定する。
 これら初期記録やその他の手動snapshot、子datasetは削除対象外。
 新しいsnapshotの取得に失敗した場合は削除しない。同じpool上の世代保持であり、別媒体backupの代わりではない。

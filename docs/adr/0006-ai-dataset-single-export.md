@@ -69,6 +69,7 @@ DGX Sparkを2台（4TB SKUと1TB SKU）導入し、GE2 port 3/4のServer VLAN 10
 
 ## 配置の変更
 
-[ADR-0010](0010-tank-gen3-cold-pool.md)でserver側の配置を`tank-gen3/data/ai`へ変更する。
+[ADR-0010](0010-tank-gen3-cold-pool.md)に基づき、server側の現行配置は`tank-gen3/data/ai`となった。
+2026-11-04に旧`tank-gen2/data/ai`と旧・現行aiの移行用`@to-gen3-1`・`@to-gen3-2`を削除済み。
 上記は採用時の記録として保持し、現行のexport契約・運用は[NFS export契約](../operations/nfs-export.md)と
 [tank-gen3運用](../operations/tank-gen3.md)を参照する。
