@@ -55,5 +55,6 @@ tank-gen1は`tank-gen1/data`だけが残るデータの無いpoolで、archive�
 [issue #186](https://github.com/koji-genba/homelab/issues/186)で、tank-gen1を消えてもよい作業用の置き場にすると決めた。
 `tank-gen1/data/scratch`（quota 3T）をDGX 2台へNFS、作業端末へAppsのSamba経由で公開する。
 スナップショット・バックアップ・自動削除は設けない。既存の月次scrubと起動時importは維持する。
-これは設計とrepo宣言の追加であり、実機反映は未実施、mount・共有動作は未検証。
+同日、pve1・Apps・両DGXへ反映済み。dataset・export、Appsのmount・guard・Samba、
+両DGXのmountと書き込み、WindowsのSMB作成・読み取り・削除を確認した。残る確認事項は下記運用手順に記録する。
 詳細と反映順序・障害時の切り離しは[scratch運用](../operations/scratch-storage.md)を正とする。

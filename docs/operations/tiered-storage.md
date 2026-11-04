@@ -19,7 +19,7 @@ tank-gen3 (Seagate BarraCuda 24TB ×2 mirror)
   ├─ data/ai       → DGX / Apps（SSDキャッシュ・mover対象外）
   └─ data/archive  → Apps Samba（書き込み可、毎日04:30に自動snapshot）
 tank-gen1/data/scratch → DGX / Apps Samba（消失許容、quota 3T、snapshot無し）
-  ※ 2026-11-05設計、実機反映は未実施
+  ※ 2026-11-05反映・確認済み
 vmpool → VM disk
 
 pve1 /mnt/shared (NFS export)
@@ -37,7 +37,7 @@ SMB経路の宣言は`files/infrastructure/ansible/apps/group_vars/apps.yml`の`
 | cache-pool | KIOXIA EXCERIA SATA SSD ×2 (mirror) | mergerfsライトキャッシュ |
 | tank-gen2 | Toshiba N300 ×2 (mirror) | 実体ストレージ |
 | tank-gen3 | Seagate ST24000DM001 24TB ×2 (mirror) | ai・archive。運用は[tank-gen3](tank-gen3.md) |
-| tank-gen1 | Toshiba MD04ACA400 ×2 (mirror) | [scratch作業用](scratch-storage.md)（quota 3T、snapshot/backup無し。2026-11-05設計、反映未実施・動作未検証） |
+| tank-gen1 | Toshiba MD04ACA400 ×2 (mirror) | [scratch作業用](scratch-storage.md)（quota 3T、snapshot/backup無し。2026-11-05反映・確認済み） |
 | vmpool | WD_BLACK SN770 1TB | VM disk |
 | M8VC | Plextor PX-512M8VC 476GB | tank-gen2 L2ARC |
 | /mnt/shared | mergerfs union mount | クライアントから見えるパス |
@@ -109,8 +109,9 @@ client scope、option、fsidは[NFS export契約](nfs-export.md#実測された�
 pve1の異常停止時には完了応答済みの直近数秒程度の書き込みを失う危険を受け入れる。
 既存の`shared-hdd`とほかのexportは`sync`を維持する。sharedの変更理由・計測・残課題は
 [2026-10の調査記録](smb-performance-troubleshooting.md#2026-10-小さめのファイルを大量に書くと速度が出ない)を参照する。
-2026-11-05設計の[scratch](scratch-storage.md)は3 clientの`/32`に
-`async,all_squash,anonuid=10002,anongid=10004`で追加予定（反映未実施）。
+2026-11-05に[scratch](scratch-storage.md)を3 clientの`/32`へ
+`async,all_squash,anonuid=10002,anongid=10004`で追加済み。Apps・両DGXのmount、
+DGXでの所有者統一とWindowsのSMB作成・読み取り・削除を確認した。残る確認事項は同運用手順を参照する。
 FUSEファイルシステムはカーネルがfsidを自動取得できないため`/mnt/shared`に`fsid=100`を明示。
 `/mnt/tank-gen2/data/shared`にも`fsid=101`を明示して、NFS再起動・mergerfs再マウント後のstale file handleを避ける。
 既存4 exportはApps VMの`/32`へ制限し、DGXも使う`ai`だけを`/24`にする契約である。

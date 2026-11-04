@@ -1,9 +1,9 @@
 # tank-gen1 の作業用ストレージ（scratch）
 
-2026-11-05に[issue #186](https://github.com/koji-genba/homelab/issues/186)で設計した。
-repoに宣言と手順を用意した段階で、pve1・Apps・DGXへの反映は**未実施**である。
-以下の確認は実施時の期待値であり、実機でのmount・権限・SMB・再起動の動作は**未検証**。
-反映結果は実施後に日付付きで追記する。
+2026-11-05に[issue #186](https://github.com/koji-genba/homelab/issues/186)の設計を以下の手順で**反映済み**。
+pve1のdataset・export、Appsのmount・guard・Samba、両DGXのmountと書き込み、
+WindowsからのSMB作成・読み取り・削除を確認した。反映後の使用量は116K / quota 3T。
+実施記録は手順1〜6に記載し、残る確認事項は「未検証の項目」にまとめる。
 
 ## 目的と消失許容
 
@@ -54,14 +54,21 @@ cutover有効時はstorage roleが`rw`を付ける。
 `writable = yes`、`browseable = yes`、`create mask = 0664`、`directory mask = 0775`、
 commentは`Disposable workspace - no snapshots or backups`。
 maskは許可bitの上限であり、clientが要求しないgroup書き込みbitを強制付与しない。
-実際の作成modeとSMB/DGX間の読み書きは導入時に確認する。
+2026-11-05にはDGXから作ったファイルがpve1で`10002:10004`・`664`になることと、
+WindowsのSMBで作成・読み取り・削除できることを確認した。
 
 ## 反映手順（PRは1本）
 
-以下は将来の作業手順で、各実機操作には別途明示の承認が必要。
+以下は2026-11-05に実施した手順で、将来作り直す際にも使う。各実機操作には別途明示の承認が必要。
 順序はpve1準備 → reconcile停止 → PRブランチからAnsible → merge → main反映 → DGXとする。
 
 ### 1. pve1の準備
+
+実施記録（2026-11-05 00:18）: スクリプトでdatasetを作成し、上表のproperty・継承mountpoint、
+入口`root:10004 1775`、marker（`scratch`）とREADMEの`root:root 0644`を確認した。
+`/etc/exports`をバックアップして1行だけ追記し、`exportfs -ra`後の`exportfs -v`で
+3 clientの`/32`と`async,no_subtree_check,anonuid=10002,anongid=10004,rw,root_squash,all_squash`を確認した。
+既存6 exportに変更がないことと全poolのhealthyも確認した。
 
 pve1のrootで現状のdataset・mountpoint・exportを確認する。既存datasetがある場合は作成を再実行せず差分を調べる。
 親`tank-gen1/data`が存在し、`/mnt/tank-gen1/data`を継承していることを先に確認する。
@@ -115,6 +122,9 @@ snapshot jobの対象でないことを確認する。この段階ではAppsとD
 
 ### 2. Appsのreconcileを一時停止
 
+実施記録（2026-11-05 00:22〜00:25）: timerを停止し、作業用pauseを作成した。
+Ansibleがtimerをstartし直したが、00:23のreconcileは`project=paused result=skipped`だった。
+
 Appsでtimerを止め、実行中serviceが終了するまで待つ。途中で強制停止しない。
 
 ```sh
@@ -123,6 +133,7 @@ systemctl is-active homelab-app-reconcile.service
 sudo ls -l /var/lib/homelab/reconcile.paused /var/lib/homelab/reconcile.pending
 ```
 
+`deploy`は`/var/lib/homelab`（`root:root 0750`）内を参照できないため、pause・pendingの有無は`sudo`を付けて確認する。
 serviceがinactiveになったこと、既存pause/pendingの有無と理由を確認する。
 pendingがあれば対象と再反映の扱いを[共通手順](application-lifecycle.md#rollbackと再開)で確認し、消さない。
 既存pauseがあれば上書き・解除せず、理由を解決してから続ける。
@@ -130,6 +141,11 @@ pendingがあれば対象と再反映の扱いを[共通手順](application-life
 Ansibleはtimerをstartedへ戻すので、timer停止だけでは競合を防げない。
 
 ### 3. 管理端末のPRブランチからAnsible
+
+実施記録（2026-11-05 00:22〜00:25）: PRブランチから`make ansible-apply`を実施し、
+`ok=108, changed=10, failed=0`。`compose.env`変更で全projectを再作成した。
+Appsでscratchのsource、`nfs4`・`rw,vers=4.1,nconnect=8`、marker、guard本体の直接実行、
+`SCRATCH_MOUNT_PATH`を確認し、全13コンテナのrunning/healthyとAdGuardのDNS応答を確認した。
 
 管理端末で`feat/tank-gen1-scratch`のPR内容と必要なssh-agent・age identityの準備を確認し、
 **mainへのmerge前にPRブランチで**`make ansible-apply`を実施する。
@@ -152,10 +168,19 @@ markerが`scratch`であることを確認する。guard unitがactiveという�
 
 ### 4. PRをmainへmerge
 
+実施記録（2026-11-05、Ansible確認後・00:30の再開前）: PR #191・#192をmainへmergeした。
+
 手順3の実機確認後、同じPRをmainへmergeする。作業用pauseを維持する。
-本ページの「未実施」「未検証」は実際の結果を得た項目だけ後日更新する。
+実施結果を日付付きで記録し、未検証の項目は確認できるまで残す。
 
 ### 5. Appsをmainへ進めてSambaを公開
+
+実施記録（2026-11-05 00:30〜00:31）: 作業用pauseを外し、reconcileを1回実行した。
+`/opt/homelab`をmainへfast-forwardし、`.env.example`変更で全projectを再作成した。
+約1分40秒で全コンテナがhealthy/runningに戻り、AppsのHEADとmainの一致、pendingが空であること、
+Sambaのhealthy、`/srv/homelab/nfs/scratch` → `/mnt/scratch`のrw bind、
+`testparm -s`の`[scratch]`を確認した。匿名の共有一覧は`valid users = @samba-users`どおり拒否された。
+同日、運用者がWindowsの`\\samba.kojigenba-srv.com\scratch`で作成・読み取り・削除を確認した。
 
 Ansibleで追加したmount/env/guardが残っていることを確認し、この作業で作ったpauseだけを外す。
 既存checkoutをmainへ進める処理はreconcileに任せる。
@@ -176,6 +201,11 @@ rootのmarkerとREADMEがSMBから削除できないこと、既存共有・DNS�
 匿名共有一覧のhealthcheck成功だけでは、認証付きの読み書き確認を代替しない。
 
 ### 6. DGXのfstab（ユーザーが2台とも実施）
+
+実施記録（2026-11-05、時刻記録なし）: 運用者が両DGXのfstabへscratchを追加してautomountを開始した。
+`.51`・`.52`ともscratch行が1つ、`mnt-scratch.automount`と`mnt-scratch.mount`がactive、
+`nfs4`・`rw,vers=4.1,nconnect=8`、marker `scratch`を確認し、`/mnt/ai`（tank-gen3）は維持された。
+DGXから作成したファイルがpve1で`10002:10004`・`664`となり、all_squashで所有者が揃うことを確認した。試験ファイルは削除済み。
 
 aiのfstab行は変更せず、次の1行を追加する。反映前にfstabをバックアップし重複がないか確認する。
 
@@ -202,6 +232,12 @@ rm "$probe"
 all_squashによりDGXから見た持ち主は全て10002。DGXから`chown`はできず、gitが所有者の警告
 （safe.directory）を出すことがある。信頼した作業directoryだけ個別に扱う。
 同じファイルの同時編集の整合性を保証する用途にはしない。
+
+## 未検証の項目
+
+- READMEとmarkerをSMB・DGXから削除しようとした際に、stickyで拒否されること。削除試験は未実施。
+- pve1・Apps再起動後のscratch自動mountとguard通過。再起動は未実施。
+- 大きなファイルの転送速度。計測は未実施。
 
 ## mount guardの波及と障害時の切り離し
 

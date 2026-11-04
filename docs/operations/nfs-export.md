@@ -2,7 +2,7 @@
 
 - 状態: `ai`・`archive`の切り替え完了時に適用する契約。pool運用は[tank-gen3運用](tank-gen3.md)を参照
 - `shared`は2026-10-29に`async`へ変更済み。既存の`shared-hdd`とほかのexportは`sync`を維持。
-- `scratch`は2026-11-05設計の追加契約（`async`・all_squash）。実機反映は未実施、動作は未検証。
+- `scratch`は2026-11-05反映・確認済み（`async`・all_squash）。確認結果と残る確認事項は[scratch運用](scratch-storage.md)を参照。
 - サーバー: Proxmox/NFS host `192.168.10.11`
 - データ復旧: このリポジトリの対象外
 - 関連設計: [目標ストレージ契約](../architecture/target-state.md#storage-contract)
@@ -28,7 +28,7 @@
 | `/mnt/tank-gen3/data/archive` | `192.168.10.101/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | なし |
 | `/mnt/tank-gen2/data/shared` | `192.168.10.101/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid=101` |
 | `/mnt/shared` | `192.168.10.101/32` | `async,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid=100`（2026-10-29にasync化） |
-| `/mnt/tank-gen1/data/scratch` | `192.168.10.101/32`・`192.168.10.51/32`・`192.168.10.52/32` | `rw,async,no_subtree_check,all_squash,anonuid=10002,anongid=10004` | `fsid`なし（2026-11-05設計、反映未実施） |
+| `/mnt/tank-gen1/data/scratch` | `192.168.10.101/32`・`192.168.10.51/32`・`192.168.10.52/32` | `rw,async,no_subtree_check,all_squash,anonuid=10002,anongid=10004` | `fsid`なし（2026-11-05反映・確認済み） |
 | `/mnt/tank-gen2/data/agent-backups` | `192.168.10.104/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid`なし（2026-10-18作成） |
 
 `ai`と`archive`には明示的な`fsid`を追加しない。marker名・値は移行前と同じで、
@@ -66,7 +66,7 @@ export設定は変わらない。pve1側のdirectoryとmarkerは2026-10-10に作
 
 | 追加利用path | Apps VMでの用途 | アクセス |
 | --- | --- | --- |
-| `/mnt/tank-gen1/data/scratch` | Samba `scratch`だけ（2026-11-05設計、反映未実施） | read/write、消失許容 |
+| `/mnt/tank-gen1/data/scratch` | Samba `scratch`だけ（2026-11-05反映・確認済み） | read/write、消失許容 |
 
 ## AI dataset export（ADR-0006）
 
@@ -95,7 +95,11 @@ clientは次の3つで、いずれも同じ条件でmountする。read-only moun
 
 DGX側の手順は[DGX Sparkストレージ運用](dgx-storage.md)にある。
 
-## scratch export（2026-11-05設計、反映未実施）
+## scratch export（2026-11-05反映済み）
+
+00:18にdataset・exportを作成し、`exportfs -v`で3 clientの`/32`と契約のoption、
+既存6 exportが不変であることと全poolのhealthyを確認した。Appsのmount・guard・Samba、
+両DGXのmount・書き込み、WindowsのSMB作成・読み取り・削除も同日確認済み。
 
 消えてもよい作業用。datasetは`tank-gen1/data/scratch`、quotaは`3T`。
 Appsは`/srv/homelab/nfs/scratch`からSambaだけへ渡し、両DGXは`/mnt/scratch`へmountする。
@@ -165,7 +169,7 @@ cutover確認後だけApps VM側mountを`rw`へ変更する。
 
 `nconnect`はmountごとではなく、server address、protocol、NFS versionが同じNFS client単位で共有される。
 このため、repo宣言の`192.168.10.11`への10 mount（既存9つ＋scratch）は全て`nconnect=8`を指定する。
-scratchの追加は2026-11-05設計で実機反映は未実施。DGXもaiとscratchの両方を`nconnect=8`に揃える。
+scratchは2026-11-05に追加し、Apps・両DGXで`rw,vers=4.1,nconnect=8`を確認済み。DGXもaiとscratchの両方を`nconnect=8`に揃える。
 
 既存mountへのremountでは接続数を変更できない。設定反映には`192.168.10.11`へのmountを全てunmount
 してからmountし直す必要があり、Apps VMではrebootで実施する。reboot後は次のcommandで確認する。
@@ -210,7 +214,7 @@ Open WebUIのdata pathを追加した時点で、次の1件がさらに加わる
 | --- | --- |
 | `/mnt/tank-gen2/data/k8s-volumes/open-webui/.homelab-export` | `open-webui-data` |
 
-scratchを追加する時点で、次の1件も必要になる（2026-11-05設計、作成未実施）。
+scratchの追加時に次の1件も作成し、Apps・両DGXで値を確認した（2026-11-05）。
 
 | server側の実体path | marker内容 |
 | --- | --- |

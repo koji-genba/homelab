@@ -8,10 +8,13 @@
 DGX Spark 2台から使うモデルと学習データ（tar.gz）の置き場を、`tank-gen3/data/ai`の単一NFS export
 として用意する。read-only exportもclientごとの分割も行わず、Apps VMとDGX 2台が同じ条件でmountする。
 
-## aiとscratchの違い（2026-11-05設計）
+## aiとscratchの違い（2026-11-05反映済み）
 
 既存の以下の手順A〜Cと実施記録はaiを対象とする。
-scratchのpve1・Apps・DGX反映は未実施で、実機動作は未検証。
+scratchは2026-11-05にpve1・Apps・両DGXへ反映済み。運用者が両DGXでfstab行が1つ、
+`mnt-scratch.automount`と`mnt-scratch.mount`がactive、`nfs4`・`rw,vers=4.1,nconnect=8`、
+marker `scratch`を確認した。`/mnt/ai`（tank-gen3）は維持され、DGXで作ったファイルは
+pve1で`10002:10004`・`664`だった。試験ファイルは削除済み。残る確認事項は[scratch運用](scratch-storage.md#未検証の項目)を参照。
 
 | 項目 | ai | scratch |
 | --- | --- | --- |
