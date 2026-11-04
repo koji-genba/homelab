@@ -17,7 +17,9 @@ backupせず喪失を許容する。喪失時は再deploy後すぐに`/setup`で
 
 Sambaは既存共有に加えて[scratch](../../../docs/operations/scratch-storage.md)を公開する宣言を持つ。
 `SCRATCH_MOUNT_PATH`を`/mnt/scratch`へbindし、他containerには渡さない。
-2026-11-05設計、実機反映は未実施・動作未検証。消えてもよい作業用でsnapshot/backupは無い。
+2026-11-05に反映済み。Sambaのhealthy、rw bind、`testparm -s`の`[scratch]`、
+匿名一覧の拒否、Windowsからの作成・読み取り・削除を確認した。消えてもよい作業用でsnapshot/backupは無い。
+残る確認事項は同運用手順を参照する。
 
 HTTP(S)のentry pointはedge projectだけで、DNSとSMBは必要なhost portだけを公開する。
 内部名はApps VMのtailnet IPへ解決される（[ADR-0007](../../../docs/adr/0007-apps-vm-tailnet-dns.md)）。

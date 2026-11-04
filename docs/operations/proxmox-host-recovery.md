@@ -155,7 +155,7 @@ by-idと再構築前の採取記録で照合する。
 | nvme1n1 | KIOXIA-EXCERIA PLUS G3 SSD / 931.5G | OS（LVM + ext4） |
 | nvme0n1 | WD_BLACK SN770 1TB / 931.5G | VM disk / vmpool |
 | sda / sdb | TOSHIBA HDWG62CUZSVA / 各20T | tank-gen2 mirror（shared・k8s-volumes） |
-| sdc / sde | TOSHIBA MD04ACA400 / 各3.6T | tank-gen1 mirror（[scratch作業用](scratch-storage.md)、2026-11-05設計・反映未実施） |
+| sdc / sde | TOSHIBA MD04ACA400 / 各3.6T | tank-gen1 mirror（[scratch作業用](scratch-storage.md)、2026-11-05反映・確認済み） |
 | sdd | PLEXTOR PX-512M8VC / 476.9G | tank-gen2 L2ARC |
 | by-idで識別 | Seagate ST24000DM001-3Y7103 / 各24TB、DN02 | tank-gen3 mirror（ai・archive） |
 | sdf / sdg | KIOXIA-EXCERIA SATA SSD / 各894.3G | cache-pool mirror |
@@ -163,7 +163,7 @@ by-idと再構築前の採取記録で照合する。
 | pool / 配置 | by-id識別子（`/dev/disk/by-id/`配下） |
 | --- | --- |
 | vmpool（単一disk） | `nvme-WD_BLACK_SN770_1TB_22390J802169-part1` |
-| tank-gen1 mirror（scratch用、SLOG / L2ARCなし。反映未実施） | `wwn-0x50000398bb903d0d-part1`、`wwn-0x50000398bb883e91-part1` |
+| tank-gen1 mirror（scratch用、SLOG / L2ARCなし。2026-11-05反映済み） | `wwn-0x50000398bb903d0d-part1`、`wwn-0x50000398bb883e91-part1` |
 | tank-gen2 mirror（shared・k8s-volumes） | `ata-TOSHIBA_HDWG62CUZSVA_9562A00WFDQJ-part1`、`ata-TOSHIBA_HDWG62CUZSVA_9562A00QFDQJ-part1` |
 | tank-gen3 mirror（ai・archive） | `ata-ST24000DM001-3Y7103_ZXA2KJFS`、`ata-ST24000DM001-3Y7103_K1N00Y6B`（disk全体。作成後はpartitionも照合） |
 | tank-gen2 L2ARC | `ata-PLEXTOR_PX-512M8VC_P02947400134-part1` |
@@ -244,9 +244,12 @@ Linuxでは`/etc/zfs/zpool.cache`が0バイトになる。cache方式との混�
 
 復旧時のdatasetとmountpointの契約は次のとおり。旧`tank-gen2/data/ai`と`tank-gen1/data/archive`は
 2026-11-04に移行用snapshotとともに削除済みで、復旧対象に含めない。ai・archiveのexportはtank-gen3側だけを使う。
-tank-gen1は2026-11-05に[scratch作業用](scratch-storage.md)とする設計を決めた（実機反映は未実施、動作未検証）。
+tank-gen1は2026-11-05に[scratch作業用](scratch-storage.md)として反映済み。dataset・property・入口権限・
+marker・README・exportと全poolのhealthy、Appsのmount・guard・Samba、両DGXのmountと書き込み、
+WindowsのSMB作成・読み取り・削除を確認した。
+確認範囲と残る確認事項は同運用手順を参照する。
 復旧ではscratchの中身を戻さず、dataset・property・入口権限・marker・README・exportを作り直せばよい。
-以下の一覧はscratch追加後の復旧契約であり、実機の現存確認結果ではない。
+以下の一覧はscratch追加後の復旧契約であり、scratchのdatasetとmountpointも2026-11-05に現存を確認済み。
 archiveの2つ目のコピーにする案は見送った。
 削除後のtank-gen2は使用12.6T、空き7.41T（62%）。確認内容は[tank-gen3運用](tank-gen3.md#旧コピー削除の実施記録2026-11-04)を参照する。
 
@@ -341,7 +344,7 @@ archiveのscript・logrotateと04:30のroot cronも[tank-gen3運用](tank-gen3.m
 既存4 exportはApps VMの`192.168.10.101/32`、DGXも使う`ai`だけは`192.168.10.0/24`である。
 2026-10-12の確認は移行前のexportに対する記録である。復旧時は現行契約のtank-gen3側pathを照合する。
 
-scratchを含むrepo宣言の10 mount（scratchは2026-11-05設計、反映未実施）の正は`files/infrastructure/ansible/apps/group_vars/apps.yml`の`nfs_mounts`である。
+scratchを含むrepo宣言の10 mount（scratchは2026-11-05反映・確認済み）の正は`files/infrastructure/ansible/apps/group_vars/apps.yml`の`nfs_mounts`である。
 各exportと[marker](nfs-export.md#マーカー契約)が揃わないと、Apps VMのmount guardが失敗し、
 全Compose projectの起動を止める。markerを未mountの空directoryへ作って検査を通さない。
 保持したdataset上のdata / owner / modeとmarker内容を照合してからVMを復旧する。

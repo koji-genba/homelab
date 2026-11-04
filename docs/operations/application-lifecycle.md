@@ -155,6 +155,8 @@ ssh deploy@192.168.10.101 sudo rm /var/lib/homelab/reconcile.paused
 ssh deploy@192.168.10.101 sudo systemctl start homelab-app-reconcile.service
 ```
 
+`deploy`は`/var/lib/homelab`（`root:root 0750`）内を参照できないため、pause・pendingの有無は`sudo`を付けて確認する。
+
 ### rollbackが失敗したとき
 
 `homelab-rollback-app.sh.j2`は起動試行前に`/var/lib/homelab/reconcile.paused`を作る。
