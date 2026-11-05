@@ -39,13 +39,15 @@ role が Agent VM に配置するヘルパー（`/usr/local/sbin`、root 0755）
 | `runner-work.tar.gz.age` | Runner の作業ツリー（キャッシュ・マウント直下の `./lost+found`・`./share` を除外、SSH 経由でストリーム） |
 | `METADATA.txt` / `MANIFEST.txt` / `SHA256SUMS` | 非秘密のメタデータと破損検知用チェックサム |
 
-### Hermes 共有の除外（repo 実装、実機未反映）
+### Hermes 共有の除外（2026-11-05反映済み）
 
 `agent_ops_runner_excludes` に `./share` を指定する（末尾 slash 無し）。
 Runner の `tar -C /srv/agent-work ... .` が NFS の directory 自体を除外し、中へ降りない。
 `--one-file-system` も付けるが、これだけでは automount へのアクセス防止にならないため明示除外を維持する。
 ローカル fixture で非 mount の share directory も archive に入らないことを確認する。
-実 NFS 上の traversal と本番 backup での除外は未検証。[共有運用](hermes-share.md) の反映時に確認する。
+2026-11-05 10:23 JSTの`make ansible-apply-agent`で反映し、Agentのbackup除外設定に
+`./share`が含まれることを確認した。成果物の検査など今回の確認に含まれない範囲は
+[共有運用の未検証事項](hermes-share.md#未検証の項目)を参照する。
 共有の snapshot・backup は無く、復旧は空の dataset と権限・marker の再作成で行う。
 共有から他のローカル directory へコピーしたファイルはこの除外では消えない。
 

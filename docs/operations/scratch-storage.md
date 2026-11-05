@@ -279,5 +279,5 @@ marker・README・exportを手順1で作り直し、client mountとguard・SMB�
 
 [Hermes 共有](hermes-share.md) は別 dataset `tank-gen1/data/hermes`（quota 2T）を使う。
 scratch は Apps・DGX 用を維持し、Runner へ公開しない。hermes は Apps・Runner のみで、DGX へ公開しない。
-hermes の実機反映は未実施であり、このページの scratch の実施済み記録とは区別する。
+hermesも2026-11-05に反映済み。共有利用の確認結果と残る確認事項は[Hermes共有運用](hermes-share.md)を参照する。
 両 quota は容量予約ではないため、合計より先に pool の空きが尽き得る。

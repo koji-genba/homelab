@@ -19,4 +19,4 @@ ADR は採用時点の判断を固定するもので、前提が変わった場�
 | [0011](0011-ups-nut-shutdown.md) | 承認済み。2026-10-31に本番停止・killpowerを確認。復帰方針とNFS順序は0012で更新 | pve1 NUT primary・DGX早期停止・VM逆順停止（startupはAnsible管理）・killpowerとDiscord通知 |
 | [0012](0012-ups-stayoff-nfs-order.md) | 承認済み。2026-10-31反映、11-01の商用電源ありFSD試験でstayoff・手動復旧・NFS順序を確認 | UPSをondelay=-1で手動復旧し、pve-guestsをNFSより先に停止する |
 | [0013](0013-hermes-webapp-caddy.md) | 承認済み。2026-11-02に本番反映（PR #179・#181・#182・#180）、Webappログイン・会話、到達性・認証境界、Gatus監視、Discordでのrecall・ブラウザtool・MEDIA配送・既登録コマンド表示を確認 | Hermes Webapp を Apps Caddy 経由で公開し、Agent の9120到達元を Apps のみに限定する。0009の追加例外、Agentはtailnet外を維持 |
-| [0014](0014-hermes-share-nfs.md) | 採用、repo実装。実機反映は未実施、実機受入は未検証 | Hermes受け渡し用の専用NFSをRunnerへ直接mountし、pve1:2049/tcpだけを隔離の例外にする。先にaiのexportを3 clientの/32へ絞る |
+| [0014](0014-hermes-share-nfs.md) | 採用。2026-11-05反映済み。export・mount・guard・隔離・SMB・Hermesの共有利用を確認。残る確認事項は[共有運用](../operations/hermes-share.md#未検証の項目) | Hermes受け渡し用の専用NFSをRunnerへ直接mountし、pve1:2049/tcpだけを隔離の例外にする。先にaiのexportを3 clientの/32へ絞る |

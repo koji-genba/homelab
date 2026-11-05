@@ -1,8 +1,10 @@
 # Hermes とのファイル受け渡し共有
 
-2026-11-05: issue #194 の repo 実装。**実機反映は未実施**。
-このページの反映・切り離し・撤去コマンドは実施予定の手順であり、実施記録ではない。
-実機での mount・SMB・Hermes の受入は未検証。判断は [ADR-0014](../adr/0014-hermes-share-nfs.md)。
+2026-11-05 JST: issue #194 / PR #195 の共有を**実機反映済み**。
+10:21にpve1、10:23にAgent/Runner、10:28にAppsへ反映し、main merge後の10:33〜10:35にreconcileを再開した。
+export・mount・guard・隔離・Sambaを確認し、運用者がWindows・AndroidとHermesから共有を利用できた。
+手順は再反映・復旧用に残し、各手順に今回の結果を記す。切り離し・撤去は今回の実施対象外。
+残る確認は[未検証の項目](#未検証の項目)にまとめる。判断は [ADR-0014](../adr/0014-hermes-share-nfs.md)。
 
 ## 目的と消失許容
 
@@ -36,7 +38,8 @@ README の削除を防ぐが、利用者同士を分離しない。`async` は�
 
 Runner の firewall を開ける**前に** ai の export を `.101/32`・`.51/32`・`.52/32` に絞る。
 既存の `rw,sync,no_subtree_check,no_root_squash` は維持する。
-仕様によれば 2026-11-05 に ai の NFS 利用者がこの 3 台と確認されているが、今回の作業では実機確認していない。
+2026-11-05 10:21に`/proc/fs/nfsd/clients`の相手が`.101`・`.104`・`.51`・`.52`だけと確認し、
+aiのclientを上記3台へ絞った。反映後もAppsと両DGXのaiはnfs4のまま読み取れた。
 
 quota は予約ではない。scratch の 3T と hermes の 2T は pool 容量を合計で超え得る。
 `zpool list tank-gen1` と `zfs list -o name,used,avail,quota tank-gen1/data/hermes tank-gen1/data/scratch`
@@ -56,6 +59,8 @@ fstab generator が boot 時の依存を作るため、生成 unit に `enable` 
 firewall handler はアクセス前に flush する。`showmount` は使わず、marker の `cat` で
 automount を発火させ、`findmnt -t nfs4 -M` の source・fstype と marker `hermes` を照合する。
 check mode では接続検査を実行しない。
+Runnerの`/srv/agent-work/share`やDGXの`/mnt/ai`・`/mnt/scratch`では、
+`findmnt -M`がautofsとnfs4の2行を返す。接続先を確かめるときは`-t nfs4`を付ける。
 
 export 未作成・アクセス拒否・marker 不一致は apply の失敗とし、skip やローカル書き込みへ逃がさない。
 検査の Ansible 待機は async 120 秒 / poll 3 秒で制限する。初回 mount は systemd の mount timeout にも従う。
@@ -106,9 +111,11 @@ remote fetch は元パスと realpath の両方を denylist で検査する。NF
 client の共有パスのまま解決され、許可される。禁止先への symlink は拒否される。
 既存 remote MEDIA fixture に inbox/outbox の成功と禁止 realpath の拒否を加えてローカル image で検査する。
 strict mode、サイズ・配送先制限で失敗し得るため、大きいファイルは SMB パスを案内する。
-実 NFS と Discord を通した共有ファイルの配送は未検証。
+実 NFS と Discord を通した配送の確認範囲は[未検証の項目](#未検証の項目)を参照。
 
-## 反映の順番と確認（未実施）
+## 反映の順番と確認（2026-11-05実施済み）
+
+以下の順番で反映した。時刻はJST。確認手順と、今回確認した結果を区別して記す。
 
 1. **pve1**: 既存 dataset/export/property と pool 状態を確認し、exports の控えを取る。
    ai の `/24` entry を下の 3 client の行へ**置換**する。追加して `/24` を残さない。
@@ -147,21 +154,55 @@ strict mode、サイズ・配送先制限で失敗し得るため、大きいフ
 
    `exportfs -v` で ai の `/24` が消えたこと、新共有の 2 client と `secure`、他 export が不変であることを確認する。
    Apps と両 DGX の既存 ai mount の source・marker `ai`・読み書きが継続することを確認する。
+
+   **実施記録（2026-11-05 10:21）**: スクリプトで`/etc/exports`をバックアップし、
+   ai行のclientだけを置換した（path・空白は維持）。上記property・継承mountpoint・権限でdatasetを作成し、
+   markerとREADMEを配置、hermes行を追加して`exportfs -ra`を実行した。
+   `exportfs -v`でaiの3 client、hermesの`.101`・`.105`と
+   `async,no_subtree_check,anonuid=10002,anongid=10004,rw,root_squash,all_squash`を確認した。
+   他exportは不変、全poolはhealthy。Appsの`/srv/homelab/nfs/ai`と両DGXの`/mnt/ai`は
+   nfs4のまま読み取れた。
 2. **Agent/Runner**: 会話を止められる時間に PR branch から `make ansible-apply-agent`。
    新 skill 配布で Hermes と CDP tunnel が再作成される。Runner の nftables は `.11:2049/tcp` のみ追加。
    `cat /srv/agent-work/share/.homelab-export` の後、`findmnt -rn -t nfs4 -M /srv/agent-work/share -o SOURCE,FSTYPE,OPTIONS`
    で契約を確認する。`sudo -u hermes-runner` で outbox に試験ファイルを作成・読取・削除し、
    pve1 で UID:GID を確認する。`.11:22`・`.11:111`・他 LAN への新規接続が拒否されることも確認する。
    backup の Runner tar に `share` とその中身が無いことを運用者が安全な復号環境で確かめる。
+   Hermesのcontainerにはhealthcheckが無いため、状態は`running`で確認する。
+
+   **実施記録（2026-11-05 10:23）**: PR branchからapplyし、Agentはok=87 changed=4、
+   Runnerはok=57 changed=5、どちらもfailed=0。新skill配布でHermesとCDP tunnelを再作成した。
+   Runnerのoutput chainは`lo`、`established,related`、
+   `ip daddr 192.168.10.11 tcp dport 2049 accept`、LAN範囲への`ct state new reject`の4つだけだった。
+   shareは`192.168.10.11:/mnt/tank-gen1/data/hermes`からnfs4・`vers=4.1,nconnect=8`で
+   automountされ、markerを読めた。`hermes-runner`でinbox・outboxに書いて削除できた。
+   pve1の22・111、Appsの445、Agentの22、DGXの8000への接続は拒否された。
+   Agentのbackup除外設定に`./share`があることと、Hermesの`running`を確認した。
 3. **Apps**: reconcile を pause して PR branch から `make ansible-apply`。
    `compose.env` の追加は全 project を再作成する。Apps checkout は apply 自体では更新されないので、
    checkout と branch 反映の扱いは [scratch の手順](scratch-storage.md) に従う。
    source・marker と `homelab-mount-guard` を確認する。
+
+   **実施記録（2026-11-05 10:28）**: reconcileを止めて作業用pauseを作り、PR branchからapplyした。
+   ok=108 changed=10 failed=0。`compose.env`変更で全projectを再作成した。
+   hermesのnfs4・`rw,vers=4.1,nconnect=8`、marker、mount guard、`HERMES_SHARE_MOUNT_PATH`、
+   全13コンテナとAdGuardのDNSを確認した。scratchも維持された。
 4. **main merge**。ここで Compose 変更は本番 deploy 対象になる。pause を維持したまま merge する。
+
+   **実施記録（2026-11-05）**: PR #195をmainへmergeした。
 5. **Apps**: pause を外して reconcile。Samba の bind、healthy、`testparm -s` の `[hermes]`、
    匿名拒否と認証済みアクセス、Windows/Android の作成・読取・削除を確認する。
+
+   **実施記録（2026-11-05 10:33〜10:35）**: pauseを外し、`/opt/homelab`をmainへfast-forwardした。
+   `.env.example`変更で全projectを再作成した。Sambaのhealthy、
+   `/srv/homelab/nfs/hermes` → `/mnt/hermes`のrw bind、`testparm -s`の`[hermes]`、
+   匿名の一覧拒否を確認した。運用者はWindows・Androidから`\\samba.kojigenba-srv.com\hermes`を利用できた。
 6. **Hermes**: 新 skill が読めること、inbox を原本削除無しで読めること、outbox に成果物を置けること、
    Windows から見えることを確認する。小さい MEDIA 添付も実際に試す。
+
+   **実施記録（2026-11-05、運用者確認）**: Hermesから共有を利用できた。
+   outboxに作ったdirectoryはpve1で`10002:10004`・`2775`となり、setgidの継承を確認した。
+   使用量は9.25M / quota 2T。
 
 ## 障害時の切り離し
 
@@ -187,6 +228,10 @@ dataset/data の削除は別の明示判断で行い、この手順だけで削�
 
 ## 未検証の項目
 
-実機作業は未実施なので、pve1 の ai 絞り込み、新 dataset/export、Runner の automount と障害時の待機・切り離し、
-実 packet の遮断、backup で NFS に入らないこと、Apps の guard・Samba、Windows/Android と Hermes の往復、
-共有からの Discord MEDIA 配送は実機未検証。ローカル検証は実機受入を代替しない。
+- Runner・Apps・pve1の再起動後の自動mountとguardの通過。
+- 大きいファイルの転送速度。
+- READMEとmarkerをSMB・Runnerから消そうとしたとき、stickyで削除が拒否されること。
+
+従来の確認手順のうち、実NFSの障害時の待機・切り離し、backupがNFSへ入らないことと
+本番Runner tarの内容検査、共有ファイルのDiscord MEDIA配送も今回の確認には含まれず、未検証のまま。
+backupは`./share`の除外設定までを確認した。ローカルfixtureはこれらの実機受入を代替しない。
