@@ -20,7 +20,7 @@ tank-gen3 (Seagate BarraCuda 24TB ×2 mirror)
   └─ data/archive  → Apps Samba（書き込み可、毎日04:30に自動snapshot）
 tank-gen1/data/scratch → DGX / Apps Samba（消失許容、quota 3T、snapshot無し）
   ※ 2026-11-05反映・確認済み
-tank-gen1/data/hermes → Runner / Apps Samba（受け渡し、quota 2T、snapshot/backup無し、実機未反映）
+tank-gen1/data/hermes → Runner / Apps Samba（受け渡し、quota 2T、snapshot/backup無し、2026-11-05反映・共有利用確認済み）
 vmpool → VM disk
 
 pve1 /mnt/shared (NFS export)
@@ -38,7 +38,7 @@ SMB経路の宣言は`files/infrastructure/ansible/apps/group_vars/apps.yml`の`
 | cache-pool | KIOXIA EXCERIA SATA SSD ×2 (mirror) | mergerfsライトキャッシュ |
 | tank-gen2 | Toshiba N300 ×2 (mirror) | 実体ストレージ |
 | tank-gen3 | Seagate ST24000DM001 24TB ×2 (mirror) | ai・archive。運用は[tank-gen3](tank-gen3.md) |
-| tank-gen1 | Toshiba MD04ACA400 ×2 (mirror) | [scratch作業用](scratch-storage.md)（quota 3T、snapshot/backup無し。2026-11-05反映・確認済み）と [Hermes共有](hermes-share.md)（quota 2T、実機未反映） |
+| tank-gen1 | Toshiba MD04ACA400 ×2 (mirror) | [scratch作業用](scratch-storage.md)（quota 3T、snapshot/backup無し。2026-11-05反映・確認済み）と [Hermes共有](hermes-share.md)（quota 2T、2026-11-05反映・共有利用確認済み） |
 | vmpool | WD_BLACK SN770 1TB | VM disk |
 | M8VC | Plextor PX-512M8VC 476GB | tank-gen2 L2ARC |
 | /mnt/shared | mergerfs union mount | クライアントから見えるパス |
@@ -115,7 +115,7 @@ pve1の異常停止時には完了応答済みの直近数秒程度の書き込�
 DGXでの所有者統一とWindowsのSMB作成・読み取り・削除を確認した。残る確認事項は同運用手順を参照する。
 FUSEファイルシステムはカーネルがfsidを自動取得できないため`/mnt/shared`に`fsid=100`を明示。
 `/mnt/tank-gen2/data/shared`にも`fsid=101`を明示して、NFS再起動・mergerfs再マウント後のstale file handleを避ける。
-既存4 exportはApps VMの`/32`へ制限し、DGXも使う`ai`は`/24`だったが、[Hermes共有](hermes-share.md)追加時にApps・両DGXの3つの`/32`へ絞る（未実施）。
+既存4 exportはApps VMの`/32`へ制限し、DGXも使う`ai`は`/24`だったが、[Hermes共有](hermes-share.md)追加時にApps・両DGXの3つの`/32`へ絞った（2026-11-05 10:21 JST反映、既存aiの読み取り継続を確認）。
 新規hermesはApps・Runnerの2つの`/32`のみ、async・all_squash、snapshot/backup無しとする。
 2026-10-12にpve1の`exportfs -v`で、このclient範囲とfsidが契約どおりであることを確認した
 （[確認記録](nfs-export.md#実測された親export)）。`/etc/exports`はrepoで管理していないため、変更時は`exportfs -v`で確認する。
@@ -160,7 +160,7 @@ modeやmtimeは元のSSDディレクトリが削除されていると復元元�
 ## ZFS snapshotポリシー
 
 moverの対象: `tank-gen2/data/shared`のみ（スクリプトの`DATASET`で指定し自動取得）。
-この自動取得には`cache-pool`上の残存ファイル、`ai`、`archive`、`k8s-volumes`、`scratch`、`hermes`（追加予定）、VM内named volumeは含まれない。
+この自動取得には`cache-pool`上の残存ファイル、`ai`、`archive`、`k8s-volumes`、`scratch`、`hermes`（2026-11-05追加済み）、VM内named volumeは含まれない。
 `archive`は別の`archive-snapshot.sh`で毎日04:30に自動取得する（後述）。
 `k8s-volumes`には自動snapshotがなく、2026-11-04に最後の手動snapshotも削除した。
 取得方針の統一は[issue #185](https://github.com/koji-genba/homelab/issues/185)、

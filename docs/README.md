@@ -34,7 +34,7 @@
 ## ストレージ・性能
 
 - [tank-gen3運用](operations/tank-gen3.md): ai・archive mirrorのプロパティ、監視、scrubとarchiveの書き込み可・自動snapshot運用。
-- [Hermes共有運用](operations/hermes-share.md): SMB と Runner NFS の受け渡し。repo実装、実機反映は未実施。ai export の絞り込み、再起動を伴う反映順序と切り離し。[ADR-0014](adr/0014-hermes-share-nfs.md)。
+- [Hermes共有運用](operations/hermes-share.md): SMB と Runner NFS の受け渡し。2026-11-05反映済み。ai export の絞り込み、mount・guard・隔離・SMB・Hermesの確認結果、未検証事項と切り離し。[ADR-0014](adr/0014-hermes-share-nfs.md)。
 - [scratch運用](operations/scratch-storage.md): tank-gen1の消えてもよい作業領域。2026-11-05にpve1・Apps・両DGXへ反映済み。mount・guard・DGX書き込み・WindowsのSMB作成/読み取り/削除を確認し、残る確認事項も記録。
 - [Tiered Storage](operations/tiered-storage.md): mergerfsのSSD書き込み層、moverとZFS snapshotの運用。
 - [SMB転送速度トラブルシューティング](operations/smb-performance-troubleshooting.md): Tailscale経路とcache-poolのTRIMに関する調査記録。

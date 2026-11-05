@@ -8,13 +8,15 @@
 DGX Spark 2台から使うモデルと学習データ（tar.gz）の置き場を、`tank-gen3/data/ai`の単一NFS export
 として用意する。read-only exportもclientごとの分割も行わず、Apps VMとDGX 2台が同じ条件でmountする。
 
-## Hermes 共有に伴う ai client の絞り込み（未実施）
+## Hermes 共有に伴う ai client の絞り込み（2026-11-05反映済み）
 
 [Hermes 共有](hermes-share.md) で Runner の pve1:2049/tcp を許可する前に、
 ai の export を `192.168.10.0/24` から Apps `.101/32`・DGX `.51/32`・`.52/32` に置換する。
 同じ dataset と `rw,sync,no_subtree_check,no_root_squash` を維持し、DGX の fstab は変えない。
 反映時に両 DGX と Apps の ai mount・marker・読み書き継続を確認する。
-仕様では2026-11-05にこの3台がaiの利用者と確認済みだが、絞り込みは未実施、反映後は未検証。
+2026-11-05 10:21 JSTにこの手順で反映済み。事前に`/proc/fs/nfsd/clients`の相手が
+`.101`・`.104`・`.51`・`.52`だけであることを確認し、aiは3 clientの`/32`に置換した。
+`exportfs -v`と、Appsの`/srv/homelab/nfs/ai`・両DGXの`/mnt/ai`がnfs4のまま読めることを確認した。
 hermes 自体は DGX へ公開しない。以下の初回構築例も新しい client 契約で記載する。
 
 ## aiとscratchの違い（2026-11-05反映済み）
@@ -30,7 +32,7 @@ pve1で`10002:10004`・`664`だった。試験ファイルは削除済み。残�
 | 目的 | モデル・学習データ | 消えてもよい雑多な作業用 |
 | dataset | `tank-gen3/data/ai` | `tank-gen1/data/scratch`（quota 3T） |
 | DGX mount | `/mnt/ai` | `/mnt/scratch` |
-| export | Apps・両DGXの3つの`/32`へ絞る予定（未実施）、sync、UID/GID通過 | Apps・両DGXの3つの`/32`、async、全て10002:10004へsquash |
+| export | Apps・両DGXの3つの`/32`（2026-11-05反映・確認済み）、sync、UID/GID通過 | Apps・両DGXの3つの`/32`、async、全て10002:10004へsquash |
 | snapshot / backup | 再取得可能なデータとして扱う | どちらも無し、復元無し、自動削除無し |
 
 scratchはユーザーが両DGXでfstabへ次の行を追加する。既存ai行は変更しない。
@@ -41,7 +43,9 @@ scratchはユーザーが両DGXでfstabへ次の行を追加する。既存ai行
 
 pve1・Apps・Samba反映後に`sudo mkdir -p /mnt/scratch`、`sudo systemctl daemon-reload`、
 `sudo systemctl start mnt-scratch.automount`を実施する。`ls /mnt/scratch`でアクセス後、
-`findmnt -M /mnt/scratch`と`cat /mnt/scratch/.homelab-export`（期待値`scratch`）、一般ユーザーの書き込みを確認する。
+`findmnt -t nfs4 -M /mnt/scratch`と`cat /mnt/scratch/.homelab-export`（期待値`scratch`）、一般ユーザーの書き込みを確認する。
+automount先の`/mnt/ai`・`/mnt/scratch`では`findmnt -M`がautofsとnfs4の2行を返すため、
+接続先を確かめるときは`-t nfs4`を付ける。
 所有者は全て10002となりDGXからchownはできない。gitのsafe.directory警告が出る場合がある。
 相互読み書き試験と撤去を含む全手順は[scratch運用](scratch-storage.md)を参照する。
 

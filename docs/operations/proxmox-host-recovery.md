@@ -249,8 +249,9 @@ marker・README・exportと全poolのhealthy、Appsのmount・guard・Samba、�
 WindowsのSMB作成・読み取り・削除を確認した。
 確認範囲と残る確認事項は同運用手順を参照する。
 復旧ではscratchの中身を戻さず、dataset・property・入口権限・marker・README・exportを作り直せばよい。
-以下の一覧はscratch追加後の実測に、[Hermes共有](hermes-share.md)の予定契約を加えたもの。
-scratchのdatasetとmountpointは2026-11-05に現存を確認済み。hermesはrepo実装のみで実機作成は未実施。
+以下の一覧はscratchと[Hermes共有](hermes-share.md)の反映後の構成。
+scratchに加え、hermesのdataset・継承mountpoint・property・権限・marker・README・exportも
+2026-11-05 10:21 JSTに作成・確認済み。
 hermesもデータを戻さず、quota 2T・property・入口1775・inbox/outbox 2775・marker・日英README・exportを作り直す。
 archiveの2つ目のコピーにする案は見送った。
 削除後のtank-gen2は使用12.6T、空き7.41T（62%）。確認内容は[tank-gen3運用](tank-gen3.md#旧コピー削除の実施記録2026-11-04)を参照する。
@@ -260,7 +261,7 @@ cache-pool                    /mnt/cache-sata
 tank-gen1                     /mnt/tank-gen1
 tank-gen1/data                /mnt/tank-gen1/data
 tank-gen1/data/scratch        /mnt/tank-gen1/data/scratch
-tank-gen1/data/hermes         /mnt/tank-gen1/data/hermes  # 作成予定、実機未反映
+tank-gen1/data/hermes         /mnt/tank-gen1/data/hermes
 tank-gen2                     /mnt/tank-gen2
 tank-gen2/data                /mnt/tank-gen2/data
 tank-gen2/data/k8s-volumes    /mnt/tank-gen2/data/k8s-volumes
@@ -344,11 +345,11 @@ archiveのscript・logrotateと04:30のroot cronも[tank-gen3運用](tank-gen3.m
 ## NFS exportとmarker
 
 [NFS export契約](nfs-export.md)を正として、pve1のNFS server設定とexport tableを手動で復元する。
-既存4 exportはApps VMの`192.168.10.101/32`、DGXも使う`ai`はApps・両DGXの3つの`/32`へ絞る契約（変更は未実施）。
+既存4 exportはApps VMの`192.168.10.101/32`、DGXも使う`ai`はApps・両DGXの3つの`/32`へ2026-11-05に絞り込み済み。
 Runnerの2049例外を開ける前に絞り込み、hermesはApps・Runnerの2つの`/32`だけへexportする。
 2026-10-12の確認は移行前のexportに対する記録である。復旧時は現行契約のtank-gen3側pathを照合する。
 
-scratchとhermesを含むrepo宣言の11 mount（scratchは2026-11-05反映・確認済み、hermesは未反映）の正は`files/infrastructure/ansible/apps/group_vars/apps.yml`の`nfs_mounts`である。
+scratchとhermesを含むrepo宣言の11 mount（scratchは2026-11-05反映・確認済み、hermesも同日反映・確認済み）の正は`files/infrastructure/ansible/apps/group_vars/apps.yml`の`nfs_mounts`である。
 各exportと[marker](nfs-export.md#マーカー契約)が揃わないと、Apps VMのmount guardが失敗し、
 全Compose projectの起動を止める。markerを未mountの空directoryへ作って検査を通さない。
 保持したdataset上のdata / owner / modeとmarker内容を照合してからVMを復旧する。

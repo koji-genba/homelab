@@ -1,7 +1,7 @@
 # ADR-0014: Hermes の受け渡し共有を Runner に NFS で渡す
 
 - 日付: 2026-11-05
-- 状態: 採用、repo 実装。実機反映は未実施、実機での受入は未検証
+- 状態: 採用。2026-11-05 実機反映済み（確認結果と残る確認事項は末尾補足）
 - 背景と決定: [issue #194](https://github.com/koji-genba/homelab/issues/194)
 - 変更する前提: [ADR-0008](0008-hermes-agent-hindsight-vms.md) の Runner の LAN 宛新規接続遮断
 
@@ -49,3 +49,14 @@ pve1 の ai 絞り込みと新 export → Agent/Runner apply → Apps reconcile 
 → main merge → reconcile 再開 → SMB と Hermes の受入の順。
 新 skill の初回配置で Hermes と CDP tunnel が再作成されるため、会話中を避ける。
 具体的な契約、操作、未検証事項は [Hermes 共有運用](../operations/hermes-share.md) を正とする。
+
+## 2026-11-05 補足: 反映と受入の結果
+
+上記は採用時の判断と反映前の記述を保持している。同日10:21にpve1でaiを3 clientの`/32`へ絞り、
+hermesのdataset・権限・marker・README・exportを作成した。10:23にAgent/Runner、10:28にAppsへ
+PR branchからapplyし、PR #195をmainへmerge後、10:33〜10:35にreconcileを再開した（JST）。
+export・既存aiの読み取り継続、Runnerのautomount・書き込み・TCP 2049以外のLAN遮断、
+backupの`./share`除外設定、Appsのmount・guard・全13コンテナ、Sambaのbind・healthy・匿名拒否を確認。
+運用者がWindows・AndroidからSMB共有を利用し、Hermesがoutboxに作ったdirectoryは
+`10002:10004`・`2775`で、setgidの継承を確認した。使用量は9.25M / quota 2T。
+実施手順と[未検証の項目](../operations/hermes-share.md#未検証の項目)は共有運用にまとめる。

@@ -58,7 +58,7 @@ shared metricsの収集・送信、skill sync、Nous guest、connectors、外部
 Hermesは一度きりの案内を出すと`config.yaml`の`onboarding.seen`へ印を書き込み、次のapplyで描画し直されて差分になるため、Gatewayの印は最初からseenにしておく。
 これは機能設定による制限であり、Agent全体のnetwork egress遮断ではない。
 
-[Hermes 共有](hermes-share.md)（repo 実装、実機反映は未実施）は Runner に NFS の内容を直接見せる。
+[Hermes 共有](hermes-share.md)（2026-11-05反映・共有利用を確認済み）は Runner に NFS の内容を直接見せる。
 置かれたファイルはコマンドの公開インターネット通信や Agent の MEDIA 配送で外へ出得る。
 共有への配置はアップロードの許可ではない。skill は外部サービスへの送信を禁じるが、強制境界ではない。
 唯一のコピーや機密は置かない。Runner の LAN 遮断には pve1:2049/tcp の例外が一つ加わる
@@ -845,7 +845,7 @@ secret bundleの復号確認は別枠で`make secrets-decrypt-check-agent`（ide
 | 2026-10-18 JST | 運用者 | PR #108反映後のmainから5回目`make ansible-apply-agent` | agent-vm changed=1。bannerを除いたCDP known_hostsのcopyを一度限りで反映 |
 | 2026-10-18 JST | 運用者 | mainから6回目`make ansible-apply-agent` | agent-vm changed=0、runner-vm changed=0。PGDATA 999:999 0700、export root 0700を維持。健康確認all checks passed、再適用の冪等性を確認 |
 
-## ファイルの受け渡し（issue #194、実機反映は未実施）
+## ファイルの受け渡し（issue #194、2026-11-05反映済み）
 
 大きいファイルは `\\samba.kojigenba-srv.com\hermes\inbox\` に置き、Hermes にファイル名を伝える。
 成果物は `outbox/…` と Windows の `\\samba.kojigenba-srv.com\hermes\outbox\…` で受け取る。
@@ -857,3 +857,7 @@ Runner の実体は `/srv/agent-work/share`。inbox/outbox は約束で、権限
 新 `hermes-share` skill は既存の skills tree の再帰 copy で配布される。`force: false` は
 既存ファイルを保護し、新ファイルは追加する。初回追加で Hermes と CDP tunnel の再作成 handler が走る。
 会話中を避けて `make ansible-apply-agent` を実施する。既存 skill 改訂は自動上書きされない。
+2026-11-05 10:23 JSTにPR branchからapplyし、Agentはok=87 changed=4、Runnerはok=57 changed=5、
+どちらもfailed=0。新skillの配布でHermesとCDP tunnelを再作成し、Hermesはrunningを確認した。
+運用者がWindows・AndroidでSMB共有を利用し、Hermesのoutboxへのdirectory作成と
+`10002:10004`・`2775`の継承を確認した。詳細と残る確認事項は[共有運用](hermes-share.md)。
