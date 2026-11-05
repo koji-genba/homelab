@@ -58,10 +58,18 @@ agent_stack_llm_max_concurrent: 1
 # The local GLM accepted low effort: the same strict-schema probe used 8 output
 # tokens with no reasoning text vs 69 with its default. Keep background work light.
 agent_stack_hindsight_reasoning_effort: low
-# The served window is reported as 1M, but that is not a useful per-turn budget.
-# Pin a bounded value for the shared text/vision endpoint.
-agent_stack_llm_context_length: 131072
+# Report the server's actual window; bound per-turn work separately with the
+# compression threshold.
+agent_stack_llm_context_length: 1048576
 agent_stack_llm_max_output_tokens: 16384
+# Stay within the observed working range of roughly 260k-280k prompt tokens.
+agent_stack_compression_threshold_tokens: 262144
+# Keep thinking enabled for summaries: high used 7.4k total output tokens;
+# the default (presumed max) used 21k, exceeding the inherited 16384 cap.
+agent_stack_compression_summary_max_tokens: 32768
+# High preserved nearly the default's detail in 189s vs 487s;
+# thinking off lost detail.
+agent_stack_compression_reasoning_effort: high
 
 # Hindsight's structured extraction (retain/consolidate/reflect) uses OpenAI-style
 # strict json_schema. The GLM endpoint accepts it: the main-side check sent a

@@ -416,7 +416,10 @@ role `agent_stack`がテンプレートから描画する。週次振り返りcr
 変更はrepoで`group_vars`や
 `roles/agent_stack/templates/`を編集し、`make ansible-apply-agent`で反映する。`config.yaml`は毎回上書きされる
 ため、VM上で直接編集しない。同じ内容・属性ならtemplate taskは`ok`となる。Hermesにも設定を保存する経路があり、
-runtime側で変わった内容は次回applyで戻る。`config.yaml` / `hindsight/config.json`の変更時はhandler
+runtime側で変わった内容は次回applyで戻る。Webappの設定画面でcontext等を変更しても、次の
+`make ansible-apply-agent`で上書きされる。「コンテキストウィンドウ」に0（自動検出）を保存しても、
+上流の不具合で既存値が復活して元の値に戻る（2026-11-05確認）。DGXの`/v1/models`は長さを返さないため、
+自動検出には頼れない。`config.yaml` / `hindsight/config.json`の変更時はhandler
 `Recreate Hermes and the CDP tunnel`が`up -d --no-deps --force-recreate --wait`で両サービスを再作成する。
 Hermesのimageは起動のたびに`config.yaml`を`chmod 640`するため、Ansibleも0640で置く（0600だと再起動のたびに差分になる）。待機上限は起動helperと同じ`agent_stack_compose_wait_timeout`（既定600秒）。`cdp-tunnel`はHermesの
 network namespaceを共有するため、必ず一緒に再作成する。SSH鍵の生成・Runnerのknown_hostsの変更と、
@@ -818,7 +821,13 @@ secret bundleの復号確認は別枠で`make secrets-decrypt-check-agent`（ide
   reasoning effortと有限の出力上限を調整し救済した。無人で常に完走することや記憶の正確性までは保証しない。
 - `memory.write_approval: false`、`skills.write_approval: true`は2026-10-17にユーザー決定済み。
   2026-10-25のコマンド承認は`smart`（GLM guard、thinking off）へ変更。方針・Always Allow禁止は「記憶の運用」を参照。
-  context_length・出力上限等のその他ユーザー確認項目は未決であり、決定後に設定とこの文書を更新する。
+- 2026-11-05に`context_length: 1048576`、圧縮開始`262144`トークン、要約は`reasoning_effort: high`・出力上限`32768`と決定した。
+  サーバーの実際の窓を伝え、1ターンの作業量は26〜28万トークンの実績がある範囲で圧縮の閾値により絞る。
+  要約は指定なし（サーバー既定、maxとみられる）でthinkingを含む出力合計が21,127トークンとなり、継承した上限`16384`で`finish_reason=length`になっていた。
+  highは出力合計7,432トークン・189秒で、指定なしの487秒とほぼ同等の詳しさだったため、highに下げて要約専用の出力枠に余裕を持たせる。
+  比較は1会話で各設定1回ずつ、キャッシュなしで実施し、thinking off（118秒・出力合計4,050トークン）は詳細が欠けた。
+  DGX側の文書（edgexpert-ai-stack）もGLM-5.3-Flashのthinking offは品質が落ちるとして勧めず、強さは`reasoning_effort`で調整する方針としている。
+  会話の出力上限`16384`は据え置く。本番反映は未実施で、highの要約が本番でtruncateしなくなるかは未検証。
 - AdGuardはHugging Faceのxet CDNをNXDOMAIN化する。回避はモデル事前取得コンテナのresolver変更だけで行い、
   AdGuard設定・TEI実行時の通信は変更しない。
 
