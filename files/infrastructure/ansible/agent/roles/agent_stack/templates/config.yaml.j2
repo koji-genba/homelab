@@ -17,8 +17,7 @@ model:
   api_mode: chat_completions
   # The DGX endpoint accepts images (verified 2026-10-18).
   supports_vision: true
-  # The endpoint advertises a 1M window, but an unbounded per-turn budget is not
-  # useful. 131072 is the bounded working value.
+  # Report the server's actual window; compression separately bounds per-turn work.
   context_length: {{ agent_stack_llm_context_length }}
 
 providers:
@@ -32,6 +31,10 @@ providers:
     # Bound the response so one turn cannot run away on the shared endpoint.
     extra_body:
       max_tokens: {{ agent_stack_llm_max_output_tokens }}
+
+# Start compression within the observed working prompt range.
+compression:
+  threshold_tokens: {{ agent_stack_compression_threshold_tokens }}
 
 fallback_providers: []
 
@@ -164,6 +167,11 @@ auxiliary:
     timeout: 600
     no_progress_timeout: 120
     max_concurrency: 1
+    # Default (presumed max) thinking exhausted the inherited cap and truncated summaries.
+    # Lower effort to high and give summaries their own output budget.
+    reasoning_effort: {{ agent_stack_compression_reasoning_effort }}
+    extra_body:
+      max_tokens: {{ agent_stack_compression_summary_max_tokens }}
   title_generation:
     provider: auto
   background_review:
