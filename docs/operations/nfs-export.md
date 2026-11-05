@@ -3,6 +3,7 @@
 - 状態: `ai`・`archive`の切り替え完了時に適用する契約。pool運用は[tank-gen3運用](tank-gen3.md)を参照
 - `shared`は2026-10-29に`async`へ変更済み。既存の`shared-hdd`とほかのexportは`sync`を維持。
 - `scratch`は2026-11-05反映・確認済み（`async`・all_squash）。確認結果と残る確認事項は[scratch運用](scratch-storage.md)を参照。
+- `hermes` と ai client の `/32` 化は repo 契約を追加した段階で、実機反映は未実施。手順は [Hermes 共有運用](hermes-share.md)。
 - サーバー: Proxmox/NFS host `192.168.10.11`
 - データ復旧: このリポジトリの対象外
 - 関連設計: [目標ストレージ契約](../architecture/target-state.md#storage-contract)
@@ -29,6 +30,8 @@
 | `/mnt/tank-gen2/data/shared` | `192.168.10.101/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid=101` |
 | `/mnt/shared` | `192.168.10.101/32` | `async,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid=100`（2026-10-29にasync化） |
 | `/mnt/tank-gen1/data/scratch` | `192.168.10.101/32`・`192.168.10.51/32`・`192.168.10.52/32` | `rw,async,no_subtree_check,all_squash,anonuid=10002,anongid=10004` | `fsid`なし（2026-11-05反映・確認済み） |
+| `/mnt/tank-gen1/data/hermes` | `192.168.10.101/32`・`192.168.10.105/32` | `rw,async,no_subtree_check,all_squash,anonuid=10002,anongid=10004`（既定`secure`維持） | `fsid`なし、実機未反映 |
+| `/mnt/tank-gen3/data/ai` | `192.168.10.101/32`・`192.168.10.51/32`・`192.168.10.52/32` | `rw,sync,no_subtree_check,no_root_squash` | `/24`からの絞り込みは未実施 |
 | `/mnt/tank-gen2/data/agent-backups` | `192.168.10.104/32` | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` | `fsid`なし（2026-10-18作成） |
 
 `ai`と`archive`には明示的な`fsid`を追加しない。marker名・値は移行前と同じで、
@@ -67,6 +70,7 @@ export設定は変わらない。pve1側のdirectoryとmarkerは2026-10-10に作
 | 追加利用path | Apps VMでの用途 | アクセス |
 | --- | --- | --- |
 | `/mnt/tank-gen1/data/scratch` | Samba `scratch`だけ（2026-11-05反映・確認済み） | read/write、消失許容 |
+| `/mnt/tank-gen1/data/hermes` | Samba `hermes`だけ（実機未反映） | read/write、消失許容 |
 
 ## AI dataset export（ADR-0006）
 
@@ -79,7 +83,7 @@ DGX Spark 2台とApps VMが共有する、モデルと学習データ（tar.gz�
 | dataset | `tank-gen3/data/ai` |
 | 明示するproperty | `recordsize=1M`のみ（`atime=off`と`compression=lz4`はpool継承） |
 | server側path | `/mnt/tank-gen3/data/ai` |
-| client範囲 | `192.168.10.0/24` |
+| client範囲 | `192.168.10.101/32`・`192.168.10.51/32`・`192.168.10.52/32`（絞り込み未実施） |
 | option | `rw,sync,no_subtree_check,no_root_squash`（固有optionなし。`fsid`は指定しない） |
 | owner / mode | 既存の数値UID/GIDとmodeをsend/recvで保持。markerは`10002:10002` / `0644` |
 | marker | `/mnt/tank-gen3/data/ai/.homelab-export`、内容は`ai` |
@@ -95,6 +99,10 @@ clientは次の3つで、いずれも同じ条件でmountする。read-only moun
 
 DGX側の手順は[DGX Sparkストレージ運用](dgx-storage.md)にある。
 
+Hermes 共有追加時は Runner の TCP 2049 を開ける前に、ai の既存 `/24` entry を上記 3 つの `/32` に置換する。
+option と dataset・mountpoint は変えない。仕様では2026-11-05に利用者3台を確認済みだが、
+この絞り込みの実機反映は未実施。過去の `/24` 実測を新契約の確認済み記録として扱わない。
+
 ## scratch export（2026-11-05反映済み）
 
 00:18にdataset・exportを作成し、`exportfs -v`で3 clientの`/32`と契約のoption、
@@ -108,6 +116,15 @@ markerとREADMEは`root:root 0644`で、stickyにより利用者からの削除�
 スナップショット・バックアップ・自動削除は無い。既存aiのUID通過・sync契約とは異なる。
 property、exportsの完全な1行、作成・確認・切り離し・撤去は[scratch運用](scratch-storage.md)を参照する。
 
+## Hermes 受け渡し export（実機反映は未実施）
+
+専用 dataset `tank-gen1/data/hermes`、quota 2T、入口 `root:10004 1775`、
+`inbox/`・`outbox/` は `10002:10004 2775`。Apps と Runner だけへ公開し、DGX へは公開しない。
+全 NFS アクセスを `10002:10004` へ squash する。`secure` を維持し、高位送信元ポートからの直接 NFS を許可しない。
+非特権ユーザーは root が mount した kernel NFS を使う。snapshot・backup 無し、内容は外へ出得る。
+Runner は `/srv/agent-work/share` で automount、Apps は `/srv/homelab/nfs/hermes` から Samba のみへ渡す。
+完全な exports 行、marker・日英 README の作成と反映順序は [共有運用](hermes-share.md) を参照する。
+
 ## Agentバックアップ用export（2026-10-18作成）
 
 Agent VM専用の暗号化バックアップ置き場。pve1側の作成と`exportfs -ra`後の`exportfs -v`確認まで実施済み。
@@ -116,7 +133,9 @@ Agent VM専用の暗号化バックアップ置き場。pve1側の作成と`expo
 | --- | --- |
 | dataset | `tank-gen2/data/agent-backups` |
 | property | `quota=300G`、`recordsize=1M`、`compression=lz4`（継承） |
-| server側path / mountpoint | `/mnt/tank-gen2/data/agent-backups` |
+| server側path / mountpoint | `/mnt/tank-gen1/data/hermes` | `192.168.10.101/32`・`192.168.10.105/32` | `rw,async,no_subtree_check,all_squash,anonuid=10002,anongid=10004`（既定`secure`維持） | `fsid`なし、実機未反映 |
+| `/mnt/tank-gen3/data/ai` | `192.168.10.101/32`・`192.168.10.51/32`・`192.168.10.52/32` | `rw,sync,no_subtree_check,no_root_squash` | `/24`からの絞り込みは未実施 |
+| `/mnt/tank-gen2/data/agent-backups` |
 | client範囲 | `192.168.10.104/32` |
 | `/etc/exports`のoption | `rw,sync,no_subtree_check,sec=sys,secure,no_root_squash,no_all_squash`（`fsid`なし） |
 | 有効option | `sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,no_root_squash,no_all_squash` |
@@ -168,7 +187,7 @@ cutover確認後だけApps VM側mountを`rw`へ変更する。
 ## Apps VMの`nconnect`
 
 `nconnect`はmountごとではなく、server address、protocol、NFS versionが同じNFS client単位で共有される。
-このため、repo宣言の`192.168.10.11`への10 mount（既存9つ＋scratch）は全て`nconnect=8`を指定する。
+このため、repo宣言の`192.168.10.11`への11 mount（既存9つ＋scratch＋hermes。hermesは未反映）は全て`nconnect=8`を指定する。
 scratchは2026-11-05に追加し、Apps・両DGXで`rw,vers=4.1,nconnect=8`を確認済み。DGXもaiとscratchの両方を`nconnect=8`に揃える。
 
 既存mountへのremountでは接続数を変更できない。設定反映には`192.168.10.11`へのmountを全てunmount
@@ -220,10 +239,13 @@ scratchの追加時に次の1件も作成し、Apps・両DGXで値を確認し�
 | --- | --- |
 | `/mnt/tank-gen1/data/scratch/.homelab-export` | `scratch`（`root:root 0644`、改行付き） |
 
+hermes の追加時には `/mnt/tank-gen1/data/hermes/.homelab-export` を値 `hermes`（改行付き）、
+`root:root 0644` で作成する（未実施）。Runner と Apps の双方で照合する。
+
 scratchのmarkerはsnapshot/backupに含めず、喪失時はREADME・dataset・exportとともに作り直す。
 
 markerはApps VMの未mount directoryには絶対に作らない。NFS server local consoleで対象datasetとpathを
-確認して作成し、scratch以外は各datasetのsnapshot/backup方針に従う。`archive`は毎日04:30の自動snapshot対象である。
+確認して作成し、scratch・hermes以外は各datasetのsnapshot/backup方針に従う。`archive`は毎日04:30の自動snapshot対象である。
 `k8s-volumes`には自動snapshotがないため、少なくとも移行前snapshotを別途取得してからフェーズ2へ進む。
 
 2026-11-04の補足: 明示の了承を得てPhase 5直前の手動snapshotも削除したため、

@@ -8,6 +8,15 @@
 DGX Spark 2台から使うモデルと学習データ（tar.gz）の置き場を、`tank-gen3/data/ai`の単一NFS export
 として用意する。read-only exportもclientごとの分割も行わず、Apps VMとDGX 2台が同じ条件でmountする。
 
+## Hermes 共有に伴う ai client の絞り込み（未実施）
+
+[Hermes 共有](hermes-share.md) で Runner の pve1:2049/tcp を許可する前に、
+ai の export を `192.168.10.0/24` から Apps `.101/32`・DGX `.51/32`・`.52/32` に置換する。
+同じ dataset と `rw,sync,no_subtree_check,no_root_squash` を維持し、DGX の fstab は変えない。
+反映時に両 DGX と Apps の ai mount・marker・読み書き継続を確認する。
+仕様では2026-11-05にこの3台がaiの利用者と確認済みだが、絞り込みは未実施、反映後は未検証。
+hermes 自体は DGX へ公開しない。以下の初回構築例も新しい client 契約で記載する。
+
 ## aiとscratchの違い（2026-11-05反映済み）
 
 既存の以下の手順A〜Cと実施記録はaiを対象とする。
@@ -21,7 +30,7 @@ pve1で`10002:10004`・`664`だった。試験ファイルは削除済み。残�
 | 目的 | モデル・学習データ | 消えてもよい雑多な作業用 |
 | dataset | `tank-gen3/data/ai` | `tank-gen1/data/scratch`（quota 3T） |
 | DGX mount | `/mnt/ai` | `/mnt/scratch` |
-| export | `/24`、sync、UID/GID通過 | Apps・両DGXの3つの`/32`、async、全て10002:10004へsquash |
+| export | Apps・両DGXの3つの`/32`へ絞る予定（未実施）、sync、UID/GID通過 | Apps・両DGXの3つの`/32`、async、全て10002:10004へsquash |
 | snapshot / backup | 再取得可能なデータとして扱う | どちらも無し、復元無し、自動削除無し |
 
 scratchはユーザーが両DGXでfstabへ次の行を追加する。既存ai行は変更しない。
@@ -65,7 +74,7 @@ chown 10002:10002 /mnt/tank-gen3/data/ai/.homelab-export
 chmod 0644 /mnt/tank-gen3/data/ai/.homelab-export
 
 cat >> /etc/exports <<'EOF'
-/mnt/tank-gen3/data/ai           192.168.10.0/24(rw,sync,no_subtree_check,no_root_squash)
+/mnt/tank-gen3/data/ai 192.168.10.101/32(rw,sync,no_subtree_check,no_root_squash) 192.168.10.51/32(rw,sync,no_subtree_check,no_root_squash) 192.168.10.52/32(rw,sync,no_subtree_check,no_root_squash)
 EOF
 
 exportfs -ra

@@ -1,0 +1,79 @@
+---
+# pve1 provisioning (including ai export hardening) must precede this play.
+# No showmount/RPC discovery: Runner can reach only TCP 2049 on pve1.
+- name: Install the NFS client
+  ansible.builtin.apt:
+    name: nfs-common
+    state: present
+
+- name: Inspect the exchange mount without triggering automount
+  ansible.builtin.command:
+    argv: [findmnt, -rn, -M, "{{ runner_share_path }}"]
+  register: runner_share_mountpoint
+  changed_when: false
+  failed_when: runner_share_mountpoint.rc not in [0, 1]
+  check_mode: false
+
+# Never chmod/chown the exported root or an active autofs mount.
+- name: Protect the underlying exchange directory when unmounted
+  ansible.builtin.file:
+    path: "{{ runner_share_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0555'
+  when: runner_share_mountpoint.rc == 1
+
+- name: Declare the exchange automount in fstab
+  ansible.posix.mount:
+    path: "{{ runner_share_path }}"
+    src: "{{ runner_share_source }}"
+    fstype: nfs4
+    opts: "{{ runner_share_options }}"
+    state: present
+
+# firewall's reload handler normally runs at play end, too late for the probe.
+- name: Apply pending firewall changes before accessing NFS
+  ansible.builtin.meta: flush_handlers
+
+- name: Resolve the exchange automount unit name
+  ansible.builtin.command:
+    argv: [systemd-escape, --path, --suffix=automount, "{{ runner_share_path }}"]
+  register: runner_share_unit
+  changed_when: false
+  check_mode: false
+
+- name: Start the fstab generated automount
+  ansible.builtin.systemd:
+    name: "{{ runner_share_unit.stdout }}"
+    daemon_reload: true
+    state: started
+
+# Starting autofs alone proves nothing about the NFS export. Access the marker
+# to trigger the real mount; absent/wrong exports fail the apply. Async bounds
+# Ansible's wait, but cannot guarantee killing a process stuck in hard NFS I/O.
+- name: Verify the active exchange export
+  when: not ansible_check_mode
+  block:
+    - name: Trigger automount and read the exchange marker
+      ansible.builtin.command:
+        argv: [cat, "{{ runner_share_path }}/{{ runner_share_marker }}"]
+      async: 120
+      poll: 3
+      register: runner_share_probe
+      changed_when: false
+
+    - name: Read the mounted NFS source and type
+      ansible.builtin.command:
+        argv: [findmnt, -rn, -t, nfs4, -M, "{{ runner_share_path }}", -o, "SOURCE,FSTYPE"]
+      register: runner_share_active
+      changed_when: false
+
+    - name: Require the intended NFS export and marker
+      ansible.builtin.assert:
+        that:
+          - runner_share_active.stdout.split() == [runner_share_source, 'nfs4']
+          - runner_share_probe.stdout == runner_share_marker_value
+        fail_msg: >-
+          Hermes exchange source or marker mismatch. Provision and verify the
+          pve1 export first; never fall back to local writes under share/.

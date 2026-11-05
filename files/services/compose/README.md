@@ -15,6 +15,11 @@ Daguの管理者・実行履歴・ログ・キュー・HF_HOME・ロックはApp
 backupせず喪失を許容する。喪失時は再deploy後すぐに`/setup`で管理者を作り、必要な取得を再投入する。
 2026-10-27に本番反映し、2026-10-28の受け入れ結果は同運用手順に記録した。
 
+Sambaは [Hermes共有](../../../docs/operations/hermes-share.md) の宣言も持つ（repo実装、実機反映は未実施）。
+`HERMES_SHARE_MOUNT_PATH` を `/mnt/hermes` へbindし、`[hermes]` と Homepage のカードを追加する。
+AppsではSambaのみが利用する。先にpve1のai export絞り込みと共有作成、Agent/Runner apply、
+Apps reconcile pauseとbranch applyを行い、merge後に再開する。env変更で全projectが再作成される。
+
 Sambaは既存共有に加えて[scratch](../../../docs/operations/scratch-storage.md)を公開する宣言を持つ。
 `SCRATCH_MOUNT_PATH`を`/mnt/scratch`へbindし、他containerには渡さない。
 2026-11-05に反映済み。Sambaのhealthy、rw bind、`testparm -s`の`[scratch]`、

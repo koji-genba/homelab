@@ -89,6 +89,14 @@ nfs_mounts:
     marker: .homelab-export
     marker_value: scratch
     options: hard,_netdev,nfsvers=4.1,noatime,rsize=1048576,wsize=1048576,timeo=600,retrans=2,nconnect=8
+  # Hermes exchange; Samba only on Apps, no snapshots or backups.
+  - name: hermes
+    local_path: /srv/homelab/nfs/hermes
+    server: 192.168.10.11
+    export: /mnt/tank-gen1/data/hermes
+    marker: .homelab-export
+    marker_value: hermes
+    options: hard,_netdev,nfsvers=4.1,noatime,rsize=1048576,wsize=1048576,timeo=600,retrans=2,nconnect=8
   - name: stashpad-media
     local_path: /srv/homelab/nfs/stashpad-media
     server: 192.168.10.11
@@ -137,6 +145,7 @@ archive_mount_path: /srv/homelab/nfs/archive
 ai_mount_path: /srv/homelab/nfs/ai
 # 消えてもよい作業用。Samba だけが使う。スナップショット無し
 scratch_mount_path: /srv/homelab/nfs/scratch
+hermes_share_mount_path: /srv/homelab/nfs/hermes
 stashpad_media_mount_path: /srv/homelab/nfs/stashpad-media
 
 # Existing PVC directory names are intentionally required inputs. Do not

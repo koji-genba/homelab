@@ -35,6 +35,8 @@ firewall_input_allowed_tcp_ports: []
 firewall_egress_restrict: false
 firewall_egress_allowed_dns: []
 firewall_egress_allowed_networks: []
+# Narrow exceptions: destination and TCP port, never a whole host.
+firewall_egress_allowed_tcp: []
 firewall_egress_rejected_networks:
   - 10.0.0.0/8
   - 172.16.0.0/12

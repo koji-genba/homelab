@@ -274,3 +274,10 @@ scratchだけを切り離して他projectを復旧する場合は、承認を得
 pool喪失時には中身を戻さない。pool自体が利用可能になったらdataset・property・入口権限・
 marker・README・exportを手順1で作り直し、client mountとguard・SMBを確認する。
 [ホスト復旧](proxmox-host-recovery.md)も同じ契約を使う。
+
+## Hermes 受け渡しとの使い分け
+
+[Hermes 共有](hermes-share.md) は別 dataset `tank-gen1/data/hermes`（quota 2T）を使う。
+scratch は Apps・DGX 用を維持し、Runner へ公開しない。hermes は Apps・Runner のみで、DGX へ公開しない。
+hermes の実機反映は未実施であり、このページの scratch の実施済み記録とは区別する。
+両 quota は容量予約ではないため、合計より先に pool の空きが尽き得る。

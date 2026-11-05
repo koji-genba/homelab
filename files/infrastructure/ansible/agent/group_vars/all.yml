@@ -59,6 +59,8 @@ firewall_egress_restrict: false
 firewall_egress_allowed_dns: []
 # Extra destinations that must stay reachable before the reject rules.
 firewall_egress_allowed_networks: []
+# Narrow exceptions: destination and TCP port, never a whole host.
+firewall_egress_allowed_tcp: []
 # PRD 4.2: block new Runner connections to the LAN, CGNAT/tailnet,
 # carrier-grade NAT and link-local ranges. The internet stays reachable through
 # the default-accept policy.
