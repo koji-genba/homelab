@@ -69,6 +69,8 @@ agent_ops_runner_workspace: "{{ agent_stack_runner_workspace | default('/srv/age
 agent_ops_runner_excludes:
   # The ext4 mount root contains a root-only recovery directory.
   - ./lost+found
+  # Exclude the directory itself (no trailing slash), before tar descends.
+  - ./share
   - node_modules
   - .venv
   - venv

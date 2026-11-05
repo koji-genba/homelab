@@ -63,6 +63,24 @@ def check_delivery():
         assert env.reads == [("realpath", remote_path), ("file", remote_path)]
         print("PASS: no context + explicit session key -> document cache; missing/wrong key -> None")
 
+        # A normal NFS mount retains its client realpath; sharing it does not
+        # translate it to the server's /mnt/tank-gen1 path. Test both directions.
+        for shared in ("/srv/agent-work/share/inbox/small.png",
+                       "/srv/agent-work/share/outbox/small.png"):
+            env.reads.clear()
+            result = _validated_delivery_path(shared, key, "share MEDIA fixture")
+            assert result is not None
+            assert Path(result).read_bytes() == env.payload
+            assert env.reads == [("realpath", shared), ("file", shared)]
+        env.reads.clear()
+        env.resolved = "/etc/shadow"
+        assert _validated_delivery_path("/srv/agent-work/share/outbox/link.png", key,
+                                        "share MEDIA fixture") is None
+        assert env.reads == [("realpath", "/srv/agent-work/share/outbox/link.png")]
+        env.resolved = None
+        env.reads.clear()
+        print("PASS: share inbox/outbox paths accepted; denied realpath rejected")
+
         # A live context remains authoritative over the delivery fallback.
         other = RemoteEnv()
         context_key = key + ":context"

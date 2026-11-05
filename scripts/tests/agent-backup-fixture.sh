@@ -74,6 +74,13 @@ assert defaults["agent_ops_backup_on_calendar"] == "*-*-* 03:30:00"
 timer = (role / "templates" / "homelab-agent-backup.timer.j2").read_text()
 assert "OnCalendar={{ agent_ops_backup_on_calendar }}" in timer
 assert "Persistent=true" in timer
+
+# Exclude the mount root itself before traversal, even when not mounted.
+# one-file-system is defence in depth; it alone may still stat an automount.
+assert "./share" in defaults["agent_ops_runner_excludes"]
+assert "tar --one-file-system -C" in backup
+# The restore target's agent-ops-behavior fixture executes the rendered tar
+# against an unreadable share tree and verifies no directory/member is archived.
 PY
 
 echo "Agent backup fixture: ok"

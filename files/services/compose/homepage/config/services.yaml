@@ -102,6 +102,12 @@
         description: |-
           \\samba.kojigenba-srv.com\scratch
           消えてもよい作業用・snapshot/backup無し・SMB認証・tailnet必須
+    - hermes:
+        id: copy-storage-hermes
+        icon: mdi-folder-network
+        description: |-
+          \\samba.kojigenba-srv.com\hermes
+          Hermes受け渡し・inbox/outbox・snapshot/backup無し・SMB認証・tailnet必須
 - SSH 先:
     - Apps VM:
         id: copy-ssh-apps

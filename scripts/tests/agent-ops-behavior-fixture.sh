@@ -58,6 +58,9 @@ with tempfile.TemporaryDirectory() as directory:
     nested.mkdir(parents=True)
     (nested / 'keep.txt').write_text('user data')
     (workspace / 'work.txt').write_text('runner data')
+    share = workspace / 'share'
+    (share / 'inbox').mkdir(parents=True)
+    (share / 'inbox/disposable.txt').write_text('must never be archived')
     arguments = root / 'runner-tar-arguments'
     setup = f'''
 RUNNER_WORKSPACE={json.dumps(str(workspace))}
@@ -70,6 +73,7 @@ ssh() {{
 }}
 '''
     recovery.chmod(0)
+    share.chmod(0)
     try:
         run('backup', setup + stream)
         with tarfile.open(root / 'runner-work.tar.gz') as archive:
@@ -78,10 +82,12 @@ ssh() {{
         assert not any(name.startswith('./lost+found/') for name in members)
         assert './project/lost+found/keep.txt' in members
         assert './work.txt' in members
+        assert './share' not in members
+        assert not any(name.startswith('./share/') for name in members)
         # Also covers root-run fixtures, where chmod cannot cause a read error:
         # the rendered EXCLUDES must reach tar with no error-suppression flags.
         assert arguments.read_text().splitlines() == [
-            'tar', '-C', str(workspace),
+            'tar', '--one-file-system', '-C', str(workspace),
             *('--exclude=' + pattern for pattern in defaults['agent_ops_runner_excludes']),
             '-czf', '-', '.',
         ]
@@ -102,6 +108,7 @@ ssh() {{
             print('Runner archive permission checks: rendered tar arguments only (UID 0 bypasses permissions)')
     finally:
         recovery.chmod(0o700)
+        share.chmod(0o700)
 
     # API failure/malformed JSON must be a failed stats check, and an unhealthy
     # running container must not be counted as healthy.

@@ -257,7 +257,7 @@ main() {
         -o StrictHostKeyChecking=yes \
         -o BatchMode=yes -o ConnectTimeout=10 \
         "$RUNNER_USER@$RUNNER_HOST" \
-        tar -C "$RUNNER_WORKSPACE" "${EXCLUDES[@]}" -czf - . >"$tmp/runner-work.tar.gz" \
+        tar --one-file-system -C "$RUNNER_WORKSPACE" "${EXCLUDES[@]}" -czf - . >"$tmp/runner-work.tar.gz" \
         || fail "could not stream $RUNNER_WORKSPACE from the Runner"
     gzip -t "$tmp/runner-work.tar.gz" || fail 'Runner work tree archive is corrupt'
 

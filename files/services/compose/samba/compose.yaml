@@ -14,6 +14,7 @@ services:
       - "${ARCHIVE_MOUNT_PATH:?set ARCHIVE_MOUNT_PATH}:/mnt/archive"
       - "${AI_MOUNT_PATH:?set AI_MOUNT_PATH}:/mnt/ai"
       - "${SCRATCH_MOUNT_PATH:?set SCRATCH_MOUNT_PATH}:/mnt/scratch"
+      - "${HERMES_SHARE_MOUNT_PATH:?set HERMES_SHARE_MOUNT_PATH}:/mnt/hermes"
       - samba-logs:/var/log/samba
       - samba-state:/var/lib/samba
     networks:

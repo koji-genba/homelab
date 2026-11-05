@@ -11,6 +11,12 @@ runner_data_disk: /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
 runner_data_disk_label: runner-work
 runner_data_mount: /srv/agent-work
 
+runner_share_path: /srv/agent-work/share
+runner_share_source: 192.168.10.11:/mnt/tank-gen1/data/hermes
+runner_share_options: hard,_netdev,nofail,nfsvers=4.1,noatime,rsize=1048576,wsize=1048576,timeo=600,retrans=2,nconnect=8,x-systemd.automount
+runner_share_marker: .homelab-export
+runner_share_marker_value: hermes
+
 # Unprivileged execution account (no sudo, no docker group) and the dedicated
 # CDP tunnel account (forwarding-only, no shell).
 runner_user: hermes-runner
@@ -45,10 +51,14 @@ firewall_ssh_allowed_networks:
   - 192.168.20.0/24
   - 100.64.0.0/10
 firewall_input_allowed_tcp_ports: []
-# Egress: internet only; reject new connections to the LAN/CGNAT/link-local
-# ranges. Explicit exceptions go here (variable-driven, PRD 4.2).
+# Egress: internet plus the NFS TCP exception below (ADR-0014); reject other
+# new connections to the LAN/CGNAT/link-local ranges (PRD 4.2).
 firewall_egress_restrict: true
 firewall_egress_allowed_dns: []
 firewall_egress_allowed_networks: []
+# ADR-0014: only the dedicated Hermes NFS export, after ai export hardening.
+firewall_egress_allowed_tcp:
+  - address: 192.168.10.11/32
+    port: 2049
 # The Runner never runs Docker, so the DNAT guard is unnecessary here.
 firewall_dnat_guard: false

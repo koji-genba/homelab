@@ -50,6 +50,9 @@ table inet homelab_filter {
     ip daddr {{ resolver }} udp dport 53 accept
     ip daddr {{ resolver }} tcp dport 53 accept
 {% endfor %}
+{% for exception in firewall_egress_allowed_tcp | default([]) %}
+    ip daddr {{ exception.address }} tcp dport {{ exception.port }} accept
+{% endfor %}
 {% for network in firewall_egress_allowed_networks %}
     ip daddr {{ network }} accept
 {% endfor %}
