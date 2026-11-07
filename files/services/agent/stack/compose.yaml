@@ -206,7 +206,7 @@ services:
   hindsight:
     # ghcr.io/vectorize-io/hindsight slim (v1.1.0): external embeddings and
     # reranking, no baked-in models. Pinned by tag and index digest below.
-    image: ghcr.io/vectorize-io/hindsight:1.1.0-slim@sha256:fbc37d194bce007b6cce2fd9f66cd7f8c050bd18b80e662090a92835d9cb191d
+    image: ghcr.io/vectorize-io/hindsight:1.2.0-slim@sha256:c7d494c309fde53d07e79158be08d7a61f3f309b23cc417c7e4b0b8fc8adc77a
     restart: unless-stopped
     # API server only: PostgreSQL and the models are external, so 1 GiB is ample.
     mem_limit: 1g
