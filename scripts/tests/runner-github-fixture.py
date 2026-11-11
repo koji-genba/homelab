@@ -246,13 +246,32 @@ class GitHub(unittest.TestCase):
                  patch('sys.stdout', io.StringIO()):
                 self.assertEqual(operator.main(), 0)
 
-    def test_operator_idempotency_and_protect_before_install(self):
+    def test_operator_check_reads_only_rulesets_without_installation_id(self):
+        endpoint = '/repos/owner/repo/rulesets'
+        for exists in (True, False):
+            calls = []
+            def api(path, method='GET', body=None, pages=False):
+                self.assertEqual(method, 'GET')
+                calls.append(path)
+                if path == endpoint + '?includes_parents=false&per_page=100':
+                    return [[{'name': 'agent-main-protection', 'id': 1}]] if exists else [[]]
+                if path == endpoint + '/1':
+                    return operator.desired()
+                raise AssertionError(path)
+            with patch.object(operator, 'api', api), patch('sys.stdout', io.StringIO()) as output, \
+                 patch.object(sys, 'argv', ['repo', 'check', 'owner/repo']), \
+                 patch.dict(os.environ, {'GITHUB_APP_INSTALLATION_ID': ''}):
+                self.assertEqual(operator.main(), 0 if exists else 1)
+            result = json.loads(output.getvalue())
+            self.assertEqual(set(result), {'repository', 'ruleset'})
+            self.assertTrue(all(path.startswith(endpoint) for path in calls))
+
+    def test_operator_ruleset_idempotency_update_and_manual_install_guidance(self):
         calls, rules = [], []
         current = {}
         def api(path, method='GET', body=None, pages=False):
             calls.append((method, path))
-            if path.startswith('/user/installations?'):
-                return [{'installations': [{'id': 456, 'account': {'login': 'owner'}, 'repository_selection': 'selected'}]}]
+            self.assertTrue(path.startswith('/repos/owner/repo'), path)
             if path == '/repos/owner/repo':
                 return {'id': 99, 'permissions': {'admin': True}, 'owner': {'login': 'owner'}}
             if path.startswith('/repos/owner/repo/rulesets?'):
@@ -262,19 +281,25 @@ class GitHub(unittest.TestCase):
                 rules.append({'name': 'agent-main-protection', 'id': 1})
                 return current
             if path == '/repos/owner/repo/rulesets/1':
+                if method == 'PUT':
+                    current.update(body)
                 return current
-            if path.endswith('/repositories/99'):
-                self.assertEqual(current, operator.desired())
-                return None
-            if '/repositories?' in path:
-                return [{'repositories': [{'full_name': 'owner/repo'}]}]
             raise AssertionError(path)
-        with patch.object(operator, 'api', api), patch('sys.stdout', io.StringIO()), \
+        with patch.object(operator, 'api', api), patch('sys.stdout', io.StringIO()) as output, \
              patch.object(sys, 'argv', ['repo', 'onboard', 'owner/repo', '456']):
             self.assertEqual(operator.main(), 0)
             self.assertEqual(operator.main(), 0)
         self.assertEqual(sum(method == 'POST' for method, _ in calls), 1)
         self.assertFalse(any(method == 'PUT' and '/rulesets/' in path for method, path in calls))
+        self.assertIn('https://github.com/settings/installations/456', output.getvalue())
+        self.assertIn('Repository access', output.getvalue())
+        self.assertIn('not checked or changed', output.getvalue())
+        current['enforcement'] = 'disabled'
+        with patch.object(operator, 'api', api), patch('sys.stdout', io.StringIO()), \
+             patch.object(sys, 'argv', ['repo', 'onboard', 'owner/repo', '456']):
+            self.assertEqual(operator.main(), 0)
+        self.assertEqual(current['enforcement'], 'active')
+        self.assertEqual(sum(method == 'PUT' for method, _ in calls), 1)
         ruleset = operator.desired()
         reordered = dict(ruleset, rules=list(reversed(ruleset['rules'])))
         self.assertTrue(operator.equivalent(reordered, ruleset))

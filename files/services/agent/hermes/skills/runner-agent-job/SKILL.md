@@ -79,3 +79,7 @@ repoのonboardingが必要。mainへのpush・mergeはしない。
 本人に使用CLI・変更内容・テスト結果・残件・PRまたは公開待ちを報告する。
 ログは資格情報らしい文字列をマスクするが完全な漏えい防止境界ではない。
 PR ①のCLI成功・resume・通知は受入済み。Appによる公開は反映後の受入が必要。
+
+repoの追加は本人が先にonboardスクリプトでmainのrulesetを付け、次にGitHubのApp設定画面の
+Repository accessでインストール先へ追加する。checkスクリプトはrulesetだけを確認し、
+Appへの登録状況は確認しない。Hermesから設定変更を行わない。

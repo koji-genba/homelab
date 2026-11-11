@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Operator-side GitHub App onboarding/check using the operator's gh login."""
+"""Operator-side main ruleset management/check using the operator's gh login."""
 import argparse
 import json
 import os
@@ -52,42 +52,34 @@ def equivalent(current, wanted):
     return actual == expected
 
 
-def installation_info(identifier, owner):
-    items = [item for page in api('/user/installations?per_page=100', pages=True)
-             for item in page['installations'] if item['id'] == int(identifier)]
-    if len(items) != 1 or items[0]['account']['login'].lower() != owner.lower():
-        raise ValueError('installation not found on the repository owner account')
-    if items[0]['repository_selection'] != 'selected':
-        raise ValueError('App installation must use selected repositories')
-    if items[0].get('suspended_at'):
-        raise ValueError('App installation is suspended')
-    return items[0]
-
-
 def rulesets(target):
     return [item for page in api('/repos/' + target + '/rulesets?includes_parents=false&per_page=100', pages=True)
             for item in page if item['name'] == 'agent-main-protection']
 
 
-def show(target, identifier):
+def show(target):
     found = rulesets(target)
     if len(found) > 1:
         raise ValueError('duplicate agent-main-protection rulesets; resolve manually')
     configured = api('/repos/' + target + '/rulesets/' + str(found[0]['id'])) if found else None
-    installed = any(repo['full_name'].lower() == target.lower()
-                    for page in api('/user/installations/' + identifier + '/repositories?per_page=100', pages=True)
-                    for repo in page['repositories'])
-    print(json.dumps({'repository': target, 'installation_id': identifier,
-                      'installed': installed, 'ruleset': configured}, indent=2, ensure_ascii=False))
-    return 0 if installed and configured else 1
+    print(json.dumps({'repository': target, 'ruleset': configured}, indent=2, ensure_ascii=False))
+    return 0 if configured else 1
+
+
+def installation_guidance(target, identifier):
+    print('Next: after confirming the ruleset, manually add ' + target +
+          ' under Repository access (Only select repositories) at ' +
+          'https://github.com/settings/installations/' + identifier +
+          '. Installation access is not checked or changed by this script.')
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode', choices=['onboard', 'check'])
     parser.add_argument('repository')
-    parser.add_argument('installation', nargs='?', help='installation ID (or --installation-id / GITHUB_APP_INSTALLATION_ID)')
-    parser.add_argument('--installation-id', default=os.environ.get('GITHUB_APP_INSTALLATION_ID', ''))
+    parser.add_argument('installation', nargs='?', help='installation ID for the manual setup link only')
+    parser.add_argument('--installation-id', default=os.environ.get('GITHUB_APP_INSTALLATION_ID', '180956595'),
+                        help='installation ID for the manual setup link only')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
     target = args.repository
@@ -97,17 +89,16 @@ def main():
     if '--' in owner or repo in ('.', '..') or repo.endswith('.git'):
         parser.error('invalid owner/repo')
     identifier = args.installation or args.installation_id
-    if not re.fullmatch(r'[1-9][0-9]*', identifier):
+    if args.mode == 'onboard' and not re.fullmatch(r'[1-9][0-9]*', identifier):
         parser.error('installation ID required: argument, --installation-id or GITHUB_APP_INSTALLATION_ID')
     if args.dry_run:
-        print('No API calls. Read repo ID, installation owner/selected repositories, and existing rulesets.')
-        print('GET /repos/' + target + '/rulesets; GET /user/installations/' + identifier + '/repositories')
+        print('No API calls. Read the repository ruleset list and matching ruleset details.')
+        print('GET /repos/' + target + '/rulesets')
         if args.mode == 'onboard':
             print('Create or update /repos/' + target + '/rulesets (protect main BEFORE adding repo):')
             print(json.dumps(desired(), indent=2))
-            print('PUT /user/installations/' + identifier + '/repositories/<repo_id>')
+            installation_guidance(target, identifier)
         return 0
-    installation_info(identifier, owner)
     if args.mode == 'onboard':
         repository = api('/repos/' + target)
         if not repository.get('permissions', {}).get('admin'):
@@ -126,8 +117,10 @@ def main():
                 api(endpoint, 'PUT', wanted)
         else:
             api(endpoint, 'POST', wanted)
-        api('/user/installations/' + identifier + '/repositories/' + str(repository['id']), 'PUT')
-    return show(target, identifier)
+    status = show(target)
+    if args.mode == 'onboard' and status == 0:
+        installation_guidance(target, identifier)
+    return status
 
 
 if __name__ == '__main__':

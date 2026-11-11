@@ -1214,30 +1214,36 @@ Agentコンテナのenv、share、runner-workには鍵を配らない。age鍵�
 ### 3. repo の onboarding と反映
 
 本人の作業端末で `gh auth status --hostname github.com` を確認する。
-repo管理・installation追加ができる本人の認証が必要（App tokenは使わない）。
+rulesetを管理できる本人の認証が必要（App tokenは使わない）。
+本人のgh OAuth token（gho_）ではinstallation APIを使えないため、スクリプトはrulesetだけを扱う。
 新規repoは本人が作る。スクリプトはrepoを作成しない。
 
 ```sh
-export GITHUB_APP_INSTALLATION_ID='<installation ID>'
 scripts/github-agent-repo-onboard.sh owner/repo --dry-run
 scripts/github-agent-repo-onboard.sh owner/repo
 scripts/github-agent-repo-check.sh owner/repo
-# IDは第2引数、または --installation-id でも指定できる。
+# onboardingの案内URLは既定でinstallation 180956595。
+# 他のAppでは第2引数 / --installation-id / GITHUB_APP_INSTALLATION_IDで案内先だけを変更できる。
+# checkにinstallation IDは不要。
 ```
 
-`--dry-run`はAPIを呼ばず予定を表示する。checkは読み取りだけでruleset全文とinstalledを表示し、
-未登録なら非0で終了する。onboardは同名rulesetを作成/更新し、次に
-`PUT /user/installations/{installation_id}/repositories/{repo_id}` で追加する。
-重複した同名rulesetは停止して本人へ整理を求める。途中失敗ならcheckで確認して再実行する。
-この順序でも、既にAppへ追加済みのrepoの保護はretroactiveにはならない。
+`--dry-run`はAPIを呼ばず予定を表示する。onboardは同名rulesetを作成/更新し、設定を表示する。
+checkはrulesetの一覧・詳細を読むだけで、ruleset未作成なら非0で終了する。
+Appへのインストール状況は確認しない。重複した同名rulesetは停止して本人へ整理を求める。
+途中失敗ならcheckで確認して再実行する。
+
+**順番は「rulesetを付ける → 画面でインストール先に足す」**。
+onboard完了後、表示されたrulesetを確認し、本人が
+[Appの設定画面](https://github.com/settings/installations/180956595)の **Repository access** を開く。
+**Only select repositories** のまま対象repoを追加してSaveする。
+スクリプトの最後にもこの案内を表示する。APIによるinstallationの一覧取得・確認・追加は行わない。
+既にAppへ追加済みのrepoの保護はretroactiveにはならない。
 
 main保護は `agent-main-protection` 1本。active、対象`refs/heads/main`、update・deletion・
 non_fast_forward、bypassはRepository admin（RepositoryRole ID 5）のalwaysのみ。
 Appはbypassへ入れず、必須レビューのrulesetは追加しない。
 表示された設定を本人が確認する。既存の他rulesetはスクリプトで削除しない。
-[Rulesets API](https://docs.github.com/en/rest/repos/rules) と
-[installationへの追加API](https://docs.github.com/en/rest/apps/installations#add-a-repository-to-an-app-installation)
-を参照する。
+[Rulesets API](https://docs.github.com/en/rest/repos/rules)を参照する。
 
 必要なlintを実行し、本人が明示的に承認してから既存手順で `make ansible-apply-agent` を行う。
 Agent playでcontroller復号したfactをRunner playが使うため、初回は`--limit runner`で省略しない。

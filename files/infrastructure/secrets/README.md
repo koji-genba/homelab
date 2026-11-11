@@ -16,6 +16,9 @@ Agent VMのsecretは`agent/runtime.sops.yaml`として同じSOPS/ageで暗号化
 channel ID、監視用webhook、Webapp認証、任意のGitHub App（`github_app.app_id`、
 `installation_id`、PEM `private_key`）が対象。App鍵はcontroller復号後にRunnerのgh-brokerだけへ
 0400で配布し、Agentコンテナには渡さない。3項目未登録時は公開を無効化する。
+repo追加は本人のgh認証でonboardスクリプトを実行してmainのrulesetを付けた後、
+[App設定画面](https://github.com/settings/installations/180956595)のRepository accessで本人が行う。
+スクリプトはinstallation APIを使わず、checkもrulesetの確認だけを行う。
 登録・失効は[Hermes運用](../../../docs/operations/hermes-agent.md#github-app-による公開pr-②)を参照。
 PostgreSQL passwordとSSH鍵はVM上で生成するためbundleへ
 含めない。

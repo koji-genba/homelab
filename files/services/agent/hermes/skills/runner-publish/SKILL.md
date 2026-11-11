@@ -36,3 +36,7 @@ mainへのpush、force push、PRのmerge、branch保護の変更は行わない�
 `.github/workflows` を変えたpushはAppの権限で拒否される。その場合は本人に対応を頼む。
 homelabではmainのmergeが本番deployになる。mergeは本人だけが行う。
 権限エラー時は別の個人tokenへ切り替えず停止する。
+
+repoの追加は本人が先にonboardスクリプトでmainのrulesetを付け、次にGitHubのApp設定画面の
+Repository accessでインストール先へ追加する。checkスクリプトはrulesetだけを確認し、
+Appへの登録状況は確認しない。Hermesから設定変更を行わない。

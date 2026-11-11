@@ -116,7 +116,9 @@ repo ごとに `agent-main-protection` ruleset **1本**を active で作る。
 bypass は Repository admin（RepositoryRole ID 5）の always のみ。App は bypass に入れない。
 必須レビューの ruleset は付けない。本人作成の PR を本人が承認できず詰まるためである。
 調査レポートの2本案より、この確定設計を優先する。
-本人用 onboarding は保護を先に作り、App の対象 repo に追加する。GitHub 管理操作はRunnerに渡さない。
+本人用 onboarding は保護を先に作り、その後本人がApp設定画面のRepository accessで対象repoを追加する。
+ghのOAuth tokenではinstallation APIが使えない実機結果により、スクリプトはrulesetの作成・更新・確認だけを行う。
+GitHub 管理操作はRunnerに渡さない。
 
 App 鍵は既存 Agent SOPS bundle の任意 `github_app`（app_id、installation_id、private_key）へ保存する。
 復号は controller の既存タスクだけ。host facts 経由で Runner play へ渡し、no_log で配置する。
