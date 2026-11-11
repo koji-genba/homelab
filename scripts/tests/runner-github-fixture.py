@@ -246,11 +246,11 @@ class GitHub(unittest.TestCase):
                  patch('sys.stdout', io.StringIO()):
                 self.assertEqual(operator.main(), 0)
 
-    def test_operator_actions_bypass_opt_in_and_updates(self):
+    def test_operator_deploy_key_bypass_opt_in_and_updates(self):
         admin = {'actor_id': 5, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always'}
-        actions = {'actor_id': 15368, 'actor_type': 'Integration', 'bypass_mode': 'always'}
+        deploy_key = {'actor_id': None, 'actor_type': 'DeployKey', 'bypass_mode': 'always'}
         self.assertEqual(operator.desired()['bypass_actors'], [admin])
-        self.assertEqual(operator.desired(True)['bypass_actors'], [admin, actions])
+        self.assertEqual(operator.desired(True)['bypass_actors'], [admin, deploy_key])
         rules, current, writes = [], {}, []
         def api(path, method='GET', body=None, pages=False):
             if path == '/repos/owner/repo' and method == 'GET':
@@ -267,19 +267,57 @@ class GitHub(unittest.TestCase):
                 current.update(body)
             return current
         for allow in (False, True, True, False):
-            args = ['repo', 'onboard', 'owner/repo'] + (['--allow-actions-bypass'] if allow else [])
+            args = ['repo', 'onboard', 'owner/repo'] + (['--allow-deploy-key-bypass'] if allow else [])
             with patch.object(operator, 'api', api), patch('sys.stdout', io.StringIO()), \
                  patch.object(sys, 'argv', args):
                 self.assertEqual(operator.main(), 0)
-            self.assertEqual(current['bypass_actors'], [admin, actions] if allow else [admin])
+            self.assertEqual(current['bypass_actors'], [admin, deploy_key] if allow else [admin])
             self.assertEqual(current['rules'], operator.desired()['rules'])
         self.assertEqual(len(writes), 3, 'same flag is idempotent; opt-in and opt-out update existing ruleset')
         with patch.object(operator, 'api', side_effect=AssertionError('API forbidden')), \
-             patch.object(sys, 'argv', ['repo', 'onboard', 'owner/repo', '--allow-actions-bypass', '--dry-run']), \
+             patch.object(sys, 'argv', ['repo', 'onboard', 'owner/repo', '--allow-deploy-key-bypass', '--dry-run']), \
              patch('sys.stdout', io.StringIO()) as output:
             self.assertEqual(operator.main(), 0)
-        self.assertIn('"actor_id": 15368', output.getvalue())
+        self.assertIn('"actor_type": "DeployKey"', output.getvalue())
+        self.assertIn('"actor_id": null', output.getvalue())
         self.assertNotIn('5715751', output.getvalue(), 'Hermes App never receives bypass')
+
+    def test_ruleset_response_normalization_and_check(self):
+        import copy
+        for deploy in (False, True):
+            wanted = operator.desired(deploy)
+            response = copy.deepcopy(wanted)
+            response.update(id=27049802, source='owner/repo', source_type='Repository', created_at='fixture')
+            for rule in response['rules']:
+                rule.update(id=1, source='GitHub')
+                if rule['type'] == 'update':
+                    del rule['parameters']
+            for actor in response['bypass_actors']:
+                actor['display_name'] = 'response metadata'
+                if actor['actor_type'] == 'DeployKey':
+                    del actor['actor_id']
+            self.assertTrue(operator.equivalent(response, wanted))
+            self.assertTrue(operator.equivalent(wanted, response))
+            def api(path, method='GET', body=None, pages=False):
+                self.assertEqual(method, 'GET', 'normalized response must not trigger an update')
+                if path == '/repos/owner/repo':
+                    return {'permissions': {'admin': True}, 'owner': {'login': 'owner'}}
+                if path.endswith('?includes_parents=false&per_page=100'):
+                    return [[{'name': 'agent-main-protection', 'id': 27049802}]]
+                self.assertEqual(path, '/repos/owner/repo/rulesets/27049802')
+                return response
+            for mode in ('onboard', 'check'):
+                with patch.object(operator, 'api', api), patch('sys.stdout', io.StringIO()) as output, \
+                     patch.object(sys, 'argv', ['repo', mode, 'owner/repo'] + (['--allow-deploy-key-bypass'] if deploy else [])):
+                    self.assertEqual(operator.main(), 0)
+                self.assertIn('"matches": true', output.getvalue())
+            for field, value in (('enforcement', 'disabled'), ('bypass_actors', []),
+                                 ('conditions', {'ref_name': {'include': ['refs/heads/other'], 'exclude': []}}),
+                                 ('rules', [{'type': 'update', 'parameters': {'update_allows_fetch_and_merge': True}},
+                                            {'type': 'deletion'}, {'type': 'non_fast_forward'}])):
+                changed = copy.deepcopy(response)
+                changed[field] = value
+                self.assertFalse(operator.equivalent(changed, wanted), field)
 
     def test_operator_check_reads_only_rulesets_without_installation_id(self):
         endpoint = '/repos/owner/repo/rulesets'
@@ -298,7 +336,7 @@ class GitHub(unittest.TestCase):
                  patch.dict(os.environ, {'GITHUB_APP_INSTALLATION_ID': ''}):
                 self.assertEqual(operator.main(), 0 if exists else 1)
             result = json.loads(output.getvalue())
-            self.assertEqual(set(result), {'repository', 'ruleset'})
+            self.assertEqual(set(result), {'repository', 'ruleset', 'matches'})
             self.assertTrue(all(path.startswith(endpoint) for path in calls))
 
     def test_operator_ruleset_idempotency_update_and_manual_install_guidance(self):

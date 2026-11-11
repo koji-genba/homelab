@@ -19,6 +19,11 @@ channel ID、監視用webhook、Webapp認証、任意のGitHub App（`github_app
 repo追加は本人のgh認証でonboardスクリプトを実行してmainのrulesetを付けた後、
 [App設定画面](https://github.com/settings/installations/180956595)のRepository accessで本人が行う。
 スクリプトはinstallation APIを使わず、checkもrulesetの確認だけを行う。
+GitHub Freeのprivate repoはrulesetで守れない。App対象をpublic repoだけにするか、Proにするか、
+保護できないリスクを承知して追加するかは本人が判断する。個人repoでGitHub Actionsのbypass登録はできない。
+homelabは別PRで毎時staging更新のpushをdeploy key（Actions secret、main限定environment）へ移し、
+`--allow-deploy-key-bypass`でonboardingするまでAppのインストール先から外しておく。
+このdeploy keyはRunner用SOPS bundleへ入れず、Hermes Appと共有しない。
 登録・失効は[Hermes運用](../../../docs/operations/hermes-agent.md#github-app-による公開pr-②)を参照。
 PostgreSQL passwordとSSH鍵はVM上で生成するためbundleへ
 含めない。

@@ -149,11 +149,20 @@ global ignoreでpyc等をcheckpointに含めない（既に追跡済みの生成
 連続applyの冪等性は反映後の受入対象。手順は[運用書](../operations/hermes-agent.md#github-app-による公開pr-②)。
 
 
-## 2026-11-12 補足: homelab の毎時 staging 更新と Actions bypass
+## 2026-11-12 補足: 実機結果と deploy key による毎時 staging 更新
 
-既定のadmin限定bypassは維持する。`--allow-actions-bypass`を指定したonboardingのみ、
-GitHub Actions（公式公開API確認済みApp ID 15368）のIntegration/alwaysを追加する。
-既存のstaging更新workflowがGITHUB_TOKENでmainへ直接pushするための例外であり、Hermes Appは追加しない。
-個人repoのIntegrationは公式API仕様で除外されていないが、組み込み15368の受理保証はなく422拒否の一次報告もある。
-詳細・公式根拠・拒否時の更新専用App案は[運用書](../operations/hermes-agent.md#homelab-の-github-actions-による-main-更新)に記す。
-updateルールの削除や自動的な保護の緩和は行わない。実GitHub設定・workflow認証は今回変更しない。
+本人の実機でIntegration 15368のbypass登録は422。個人のrepoでは組み込みGitHub Actionsをbypassにできない。
+旧Actions bypassオプションは削除し、`--allow-deploy-key-bypass`を導入する。
+指定時のみDeployKey/alwaysをadminに追加する。actor_idは公式REST APIに従いnullで、特定鍵IDではない。
+update・deletion・non_fast_forwardは維持し、Hermes Appはbypassへ入れない。
+
+homelabはStashPad stagingのworkflowがGITHUB_TOKENでmainに直接pushするため、
+別PRでそのpush認証をdeploy keyへ変える。鍵はActions secretとしてmain限定environmentに保存する。
+workflowの移行と同オプションでのonboardingが済むまでhomelabをAppのインストール先から外しておく。
+今回workflow・GitHub設定は変更しない。詳細と公式根拠は[運用書](../operations/hermes-agent.md#homelab-の-github-actions-による-main-更新)。
+
+GitHub Freeのprivate repoはrulesetで保護できず、実機APIも403。public repoだけをAppへ追加するか、
+Proへ移行するか、main保護が無いリスクを承知して追加するかは本人が判断する。
+最後の場合は「main更新は本人だけ」の保証はない。agent-sandboxは本人がpublic化してonboarding済み
+（ruleset 27049802）。スクリプトは公開化・課金変更を行わない。
+GitHub応答はupdateのfalse parametersを省略するため比較時に正規化し、応答メタデータは比較から除く。

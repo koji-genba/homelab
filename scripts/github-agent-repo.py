@@ -33,15 +33,12 @@ def api(path, method='GET', body=None, pages=False):
     return json.loads(result.stdout) if result.stdout.strip() else None
 
 
-# Verified via unauthenticated GET https://api.github.com/apps/github-actions
-# (2026-11-12): id=15368, slug=github-actions. This is the App ID, not bot user ID.
-GITHUB_ACTIONS_APP_ID = 15368
-
-
-def desired(allow_actions_bypass=False):
+# DeployKey actor_id must be null (not a particular key ID):
+# https://docs.github.com/en/rest/repos/rules#create-a-repository-ruleset
+def desired(allow_deploy_key_bypass=False):
     bypass = [{'actor_id': 5, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always'}]
-    if allow_actions_bypass:
-        bypass.append({'actor_id': GITHUB_ACTIONS_APP_ID, 'actor_type': 'Integration', 'bypass_mode': 'always'})
+    if allow_deploy_key_bypass:
+        bypass.append({'actor_id': None, 'actor_type': 'DeployKey', 'bypass_mode': 'always'})
     return {'name': 'agent-main-protection', 'target': 'branch', 'enforcement': 'active',
             'bypass_actors': bypass,
             'conditions': {'ref_name': {'include': ['refs/heads/main'], 'exclude': []}},
@@ -50,14 +47,24 @@ def desired(allow_actions_bypass=False):
 
 
 def equivalent(current, wanted):
-    actual = {key: current.get(key) for key in wanted}
-    # API response ordering is not part of the protection policy.
-    for key in ('rules', 'bypass_actors'):
-        actual[key] = sorted(actual.get(key) or [], key=lambda value: json.dumps(value, sort_keys=True))
-    expected = dict(wanted)
-    for key in ('rules', 'bypass_actors'):
-        expected[key] = sorted(wanted[key], key=lambda value: json.dumps(value, sort_keys=True))
-    return actual == expected
+    def normalized(policy):
+        # Compare policy fields, not response metadata such as IDs, URLs or timestamps.
+        rules = []
+        for rule in policy.get('rules') or []:
+            value = {'type': rule.get('type')}
+            if value['type'] == 'update':
+                value['parameters'] = {'update_allows_fetch_and_merge':
+                    (rule.get('parameters') or {}).get('update_allows_fetch_and_merge', False)}
+            rules.append(value)
+        actors = [{'actor_type': actor.get('actor_type'), 'actor_id': actor.get('actor_id'),
+                   'bypass_mode': actor.get('bypass_mode', 'always')}
+                  for actor in policy.get('bypass_actors') or []]
+        refs = (policy.get('conditions') or {}).get('ref_name') or {}
+        return {key: policy.get(key) for key in ('name', 'target', 'enforcement')} | {
+            'rules': sorted(rules, key=lambda value: json.dumps(value, sort_keys=True)),
+            'bypass_actors': sorted(actors, key=lambda value: json.dumps(value, sort_keys=True)),
+            'conditions': {'ref_name': {key: sorted(refs.get(key) or []) for key in ('include', 'exclude')}}}
+    return normalized(current) == normalized(wanted)
 
 
 def rulesets(target):
@@ -65,13 +72,14 @@ def rulesets(target):
             for item in page if item['name'] == 'agent-main-protection']
 
 
-def show(target):
+def show(target, wanted):
     found = rulesets(target)
     if len(found) > 1:
         raise ValueError('duplicate agent-main-protection rulesets; resolve manually')
     configured = api('/repos/' + target + '/rulesets/' + str(found[0]['id'])) if found else None
-    print(json.dumps({'repository': target, 'ruleset': configured}, indent=2, ensure_ascii=False))
-    return 0 if configured else 1
+    matches = configured is not None and equivalent(configured, wanted)
+    print(json.dumps({'repository': target, 'ruleset': configured, 'matches': matches}, indent=2, ensure_ascii=False))
+    return 0 if matches else 1
 
 
 def installation_guidance(target, identifier):
@@ -88,12 +96,10 @@ def main():
     parser.add_argument('installation', nargs='?', help='installation ID for the manual setup link only')
     parser.add_argument('--installation-id', default=os.environ.get('GITHUB_APP_INSTALLATION_ID', '180956595'),
                         help='installation ID for the manual setup link only')
-    parser.add_argument('--allow-actions-bypass', action='store_true',
-                        help='onboard only: allow GitHub Actions to bypass main protection (all repository workflows)')
+    parser.add_argument('--allow-deploy-key-bypass', action='store_true',
+                        help='allow deploy keys to bypass main protection; check compares against this policy')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
-    if args.mode == 'check' and args.allow_actions_bypass:
-        parser.error('--allow-actions-bypass is only supported for onboard')
     target = args.repository
     if not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?/[A-Za-z0-9_.-]{1,100}', target):
         parser.error('invalid owner/repo')
@@ -108,7 +114,7 @@ def main():
         print('GET /repos/' + target + '/rulesets')
         if args.mode == 'onboard':
             print('Create or update /repos/' + target + '/rulesets (protect main BEFORE adding repo):')
-            print(json.dumps(desired(args.allow_actions_bypass), indent=2))
+            print(json.dumps(desired(args.allow_deploy_key_bypass), indent=2))
             installation_guidance(target, identifier)
         return 0
     if args.mode == 'onboard':
@@ -121,7 +127,7 @@ def main():
         if len(found) > 1:
             raise ValueError('duplicate agent-main-protection rulesets; resolve manually')
         endpoint = '/repos/' + target + '/rulesets'
-        wanted = desired(args.allow_actions_bypass)
+        wanted = desired(args.allow_deploy_key_bypass)
         if found:
             endpoint += '/' + str(found[0]['id'])
             current = api(endpoint)
@@ -129,7 +135,7 @@ def main():
                 api(endpoint, 'PUT', wanted)
         else:
             api(endpoint, 'POST', wanted)
-    status = show(target)
+    status = show(target, desired(args.allow_deploy_key_bypass))
     if args.mode == 'onboard' and status == 0:
         installation_guidance(target, identifier)
     return status

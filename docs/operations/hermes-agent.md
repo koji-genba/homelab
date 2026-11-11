@@ -1228,7 +1228,8 @@ scripts/github-agent-repo-check.sh owner/repo
 ```
 
 `--dry-run`はAPIを呼ばず予定を表示する。onboardは同名rulesetを作成/更新し、設定を表示する。
-checkはrulesetの一覧・詳細を読むだけで、ruleset未作成なら非0で終了する。
+checkはrulesetの一覧・詳細を読むだけで、期待する設定との比較をmatchesに表示する。
+未作成または不一致なら非0で終了する。GitHubが省略するupdateのfalse既定値や応答のメタデータは正規化する。
 Appへのインストール状況は確認しない。重複した同名rulesetは停止して本人へ整理を求める。
 途中失敗ならcheckで確認して再実行する。
 
@@ -1245,46 +1246,55 @@ Hermes Appはbypassへ入れず、必須レビューのrulesetは追加しない
 表示された設定を本人が確認する。既存の他rulesetはスクリプトで削除しない。
 [Rulesets API](https://docs.github.com/en/rest/repos/rules)を参照する。
 
+#### public/private と GitHub のプラン
+
+**GitHub Freeのprivate repoはrulesetで守れない。** 実機でrulesets APIは
+403「Upgrade to GitHub Pro or make this repository public」を返した。
+[公式の提供範囲](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository)
+もFreeではpublic、Proではprivateを含む。
+Appのインストール先はpublic repoだけにするか、Proにするか、mainを守れないリスクを承知して
+private repoにも入れるかを本人が判断する。最後の選択ではAppがmainへpush・mergeできるため、
+「main更新は本人だけ」の保証は成立しない。スクリプトは403で停止し、保護済みとは表示しない。
+本人の実機結果ではagent-sandboxをpublicにしてonboardingし、ruleset IDは27049802となった。
+公開化はコードや履歴の公開を伴うため、スクリプトはvisibilityを変更しない。
+
 #### homelab の GitHub Actions による main 更新
 
-homelabの `.github/workflows/stashpad-staging-image.yml` は毎時、`GITHUB_TOKEN`の
-`contents: write`でstagingのdigestをmainへ直接pushする。adminだけのupdate制限ではこのpushも拒否される。
-この既存動作を維持するための例外指定が `--allow-actions-bypass` である。
+**homelabは、下記の別PRによる移行とonboardingが完了するまでAppのインストール先から外しておく。**
+現在の `.github/workflows/stashpad-staging-image.yml` は毎時、`GITHUB_TOKEN`でstagingのdigestを
+mainへ直接pushする。adminだけのupdate制限ではこのpushも拒否される。
+本人がhomelabへIntegration 15368をbypassに指定してPOSTした実機結果は422
+「Actor GitHub Actions integration must be part of the ruleset source or owner organization」。
+**個人のrepoでは組み込みGitHub Actionsをbypassにできない。** 旧Actions bypassオプションは削除した。
+
+別PRで、このworkflowのpush認証をrepo専用の書込可能deploy keyへ変更する。
+秘密鍵は**Actions secretとして、利用branchをmainだけに限定したenvironment**に保存し、
+そのenvironmentを使うmain上のjobだけに渡す。Hermes App・Runnerには配らない。
+workflow変更、鍵の生成/登録、environment/secret設定は今回行わない。
+本人が移行を確認した後、次の順に進める。
 
 ```sh
-scripts/github-agent-repo-onboard.sh koji-genba/homelab --allow-actions-bypass --dry-run
-# 次は本人が設定変更を承認し、下記の受理条件・代替案を確認してから行う。
-scripts/github-agent-repo-onboard.sh koji-genba/homelab --allow-actions-bypass
-scripts/github-agent-repo-check.sh koji-genba/homelab
+scripts/github-agent-repo-onboard.sh koji-genba/homelab --allow-deploy-key-bypass --dry-run
+# workflowとActions側の鍵/environmentの移行後、本人が設定変更を承認して実行する。
+scripts/github-agent-repo-onboard.sh koji-genba/homelab --allow-deploy-key-bypass
+scripts/github-agent-repo-check.sh koji-genba/homelab --allow-deploy-key-bypass
+# ruleset確認・deploy keyによる毎時push確認後、画面でAppのインストール先へ戻す。
 ```
 
-指定時は `Integration`、`actor_id: 15368`、`bypass_mode: always` をadminに追加する。
-IDは2026-11-12に[GitHub公式公開API](https://api.github.com/apps/github-actions)から認証なしのGETで
-`id=15368, slug=github-actions`を確認した。bot user ID 41898282とは異なる。
-この例外は特定workflowだけではなくrepoのActions全体に適用され、3ルールすべてをbypassする。
-再実行時にも同じオプションが必要で、省略するとadminのみへ戻る。checkは設定を変更しない。
-
-[公式のrepo ruleset作成文書](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository#granting-bypass-permissions-for-your-branch-or-tag-ruleset)
-はGitHub Appsをbypass対象として挙げ、[REST API仕様](https://docs.github.com/en/rest/repos/rules#create-a-repository-ruleset)
-はIntegrationを許可する。個人repoで明示的に除外されるactorはOrganizationAdminであり、
-Integration自体が個人repoで禁止される記述はない。ただし、これは**組み込みActions Appの受理保証ではない**。
-[Flatcarの一次報告](https://github.com/flatcar/Flatcar/issues/2248)では15368の登録が
-「rulesetのsourceまたはowner organizationに属している必要がある」という422で拒否されている。
-GitHub公式文書にはこの組み込みAppの例外可否を確定する説明が見つからず、homelabでの設定変更も未実施。
-スクリプトは拒否時に停止し、ルールを弱めるfallbackは行わない。
-
-15368が登録できなければ、update制限を維持したまま**staging更新専用の別GitHub App**を作り、
-そのインストール済みAppだけをadminに加えてbypassし、workflowのpush認証をその短命tokenへ変更する案を採る。
-鍵はActions側だけで管理し、Hermes App・Runnerとは共有しない。別途設計・承認が必要で、今回workflowは変更しない。
-updateルールを単に外すとHermesのContents writeでmain更新・mergeが可能になるので代替にならない。
-PR必須だけへの置換も、毎時の直接pushと「mergeは本人だけ」の両条件を満たさない。
+指定時は `actor_type: DeployKey`、`actor_id: null`、`bypass_mode: always` をadminに追加する。
+[公式REST API仕様](https://docs.github.com/en/rest/repos/rules#create-a-repository-ruleset)では
+DeployKeyのactor_idはnullであり、特定の鍵IDを指定しない。これはrepoのdeploy keyに対する例外で、
+単一workflow/単一鍵だけの例外ではない。書込可能deploy keyの一覧と保管先も本人が管理する。
+再実行時にも同じオプションが必要で、省略するとadminのみへ戻る。Hermes Appはbypassへ入れない。
+checkは同じオプションを付けて期待する設定を選択するだけで、設定変更は行わない。
+update制限は維持し、workflowの更新専用認証だけを例外とする。
 
 Hermes AppにはWorkflows権限がなく、workflowの追加・書き換えはpushできない。
 現行の書込可能workflowはschedule/手動起動でmainをcheckoutし、固定のinline処理でstagingファイルだけをcommitする。
-PRで実行される他workflowのcontentsはreadで、Hermes AppにはActions操作権限も渡していない。
-したがって**現行のworkflow構成では**、Hermes Appがworkflowを書き換え、Actionsのbypass経由で
-mainへpushする経路は作れない。これはWorkflows権限がないことだけで任意のworkflowを安全とする意味ではなく、
-将来write tokenでPRコード・repo内scriptを実行するworkflowを追加する際はこの境界を再レビューする。
+PRで動く他workflowのcontentsはreadで、Hermes AppにはActions操作権限もない。
+別PRでもdeploy keyをmain限定environmentに隔離し、PRコードや作業branchで鍵を使わせない。
+この構成を守る限り、Hermes AppがActions経由でmainへpushする経路は作れない。
+将来write token/鍵でPRコード・repo内scriptを実行するworkflowを加える際は再レビューする。
 
 必要なlintを実行し、本人が明示的に承認してから既存手順で `make ansible-apply-agent` を行う。
 Agent playでcontroller復号したfactをRunner playが使うため、初回は`--limit runner`で省略しない。

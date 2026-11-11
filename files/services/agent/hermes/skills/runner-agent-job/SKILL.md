@@ -83,3 +83,8 @@ PR ①のCLI成功・resume・通知は受入済み。Appによる公開は反�
 repoの追加は本人が先にonboardスクリプトでmainのrulesetを付け、次にGitHubのApp設定画面の
 Repository accessでインストール先へ追加する。checkスクリプトはrulesetだけを確認し、
 Appへの登録状況は確認しない。Hermesから設定変更を行わない。
+
+GitHub Freeのprivate repoはruleset保護が使えない。publicだけを対象にするか、Proにするか、
+保護できないリスクを承知で追加するかは本人が決める。個人repoでGitHub Actionsをbypassにできない。
+homelabは毎時staging更新をdeploy key（Actions secret、main限定environment）へ移す別PRと、
+`--allow-deploy-key-bypass`でのonboardingが終わるまで、Appの対象から外しておく。

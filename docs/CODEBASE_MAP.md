@@ -519,8 +519,13 @@ PR create/edit and PR view/list. Runner global Git config carries the public App
 global ignore. Without credentials jobs remain ready_to_publish; removing fields disables publication.
 Operator scripts `scripts/github-agent-repo-{onboard,check}.sh` share `github-agent-repo.py` and use
 operator gh OAuth auth for rulesets only. Onboard protects main with one admin-only bypass ruleset
-(`--allow-actions-bypass` optionally adds Integration 15368/always; API acceptance of the built-in App
-requires manual verification, with a separate updater App as the documented alternative),
-then prints instructions for the operator to add the repo via the installation settings UI. Check reads
+(`--allow-deploy-key-bypass` optionally adds DeployKey/null/always; built-in Actions bypass was
+rejected on the personal repo). Onboard then prints instructions for the operator to add the repo via
+the installation settings UI. Homelab stays outside the installation until a separate PR migrates
+the hourly staging push to an Actions deploy key in a main-only environment and onboarding completes. Check reads
 only rulesets; neither script calls installation APIs. Neither script is run automatically by Ansible. Offline
 `make runner-github-fixture` runs in CI; live acceptance remains manual. See ADR-0015 and Hermes operations.
+
+GitHub Free private repositories cannot use ruleset protection; installation policy must account for
+public-only targets, Pro, or an explicitly accepted lack of main protection. Ruleset comparison ignores
+response metadata and normalizes omitted update parameters to false; check reports matches.
