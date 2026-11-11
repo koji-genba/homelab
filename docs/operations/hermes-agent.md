@@ -1206,7 +1206,9 @@ gh api '/users/<slug>[bot]' --jq '{login, id}'
 PR作成者はcommit名義とは別にApp tokenで決まる。
 
 bundleはcontrollerだけで復号し、Runner playへno_logのfactで渡す。
-`/etc/homelab/secrets/github-app.pem` と `github-app.json` はgh-broker所有0400。
+`/etc/gh-broker`（gh-broker所有0700）内の `github-app.pem` と `github-app.json` はgh-broker所有0400。
+旧 `/etc/homelab/secrets/github-app.{pem,json}` はapply時に削除する。
+`/etc/homelab/secrets` はcommon roleのroot:root 0700で維持し、broker taskでは属性を変更しない。
 非ログインのgh-brokerだけが鍵を読み、root所有brokerがrepo限定の短命tokenを作る。
 cacheは`/var/lib/gh-broker`（0700）のrepo別0600ファイル。残り5分未満なら更新する。
 Agentコンテナのenv、share、runner-workには鍵を配らない。age鍵もVMへ配らない。

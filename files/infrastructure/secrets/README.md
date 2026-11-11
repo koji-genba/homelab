@@ -15,7 +15,8 @@ Agent VMのsecretは`agent/runtime.sops.yaml`として同じSOPS/ageで暗号化
 `make secrets-encrypt-agent` / `make secrets-decrypt-check-agent`を使う。Discordのbot tokenと
 channel ID、監視用webhook、Webapp認証、任意のGitHub App（`github_app.app_id`、
 `installation_id`、PEM `private_key`）が対象。App鍵はcontroller復号後にRunnerのgh-brokerだけへ
-0400で配布し、Agentコンテナには渡さない。3項目未登録時は公開を無効化する。
+専用 `/etc/gh-broker`（gh-broker所有0700）の `github-app.pem` と `github-app.json` へ
+0400で配布し、Agentコンテナには渡さない。旧 `/etc/homelab/secrets/github-app.{pem,json}` はapply時に削除する。3項目未登録時は公開を無効化する。
 repo追加は本人のgh認証でonboardスクリプトを実行してmainのrulesetを付けた後、
 [App設定画面](https://github.com/settings/installations/180956595)のRepository accessで本人が行う。
 スクリプトはinstallation APIを使わず、checkもrulesetの確認だけを行う。

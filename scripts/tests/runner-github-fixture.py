@@ -53,6 +53,7 @@ class GitHub(unittest.TestCase):
                        check=True, capture_output=True)
         self.calls = []
         self.fail_api = False
+        self.token_response = 'ghs_FIXTURE'
         case = self
 
         class API(BaseHTTPRequestHandler):
@@ -71,7 +72,7 @@ class GitHub(unittest.TestCase):
                 self.send_response(403 if case.fail_api else 201)
                 self.end_headers()
                 expires = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
-                self.wfile.write(json.dumps({'token': 'ghs_FIXTURE', 'expires_at': expires.isoformat(),
+                self.wfile.write(json.dumps({'token': case.token_response, 'expires_at': expires.isoformat(),
                                             'error': 'secret-response-sentinel'}).encode())
 
         server = ThreadingHTTPServer(('127.0.0.1', 0), API)
@@ -115,6 +116,40 @@ class GitHub(unittest.TestCase):
         broker.CONFIG.write_text(json.dumps({'app_id': '124', 'installation_id': '456'}))
         broker.token('owner/repo')
         self.assertEqual(len(self.calls), 8, 'rotation invalidates cached token')
+
+    def test_token_formats_and_length_limits(self):
+        source = 'protocol=https\nhost=github.com\npath=owner/repo\n\n'
+        for token in ('ghs_header.payload_with-hyphen.signature', 'a', 'a' * 2048,
+                      '', 'a' * 2049, 'ghs_bad/token', 'ghs_bad/\nheader', 'ghs_bad token'):
+            valid = bool(token) and len(token) <= 2048 and not any(c in token for c in '/\n ')
+            with self.subTest(length=len(token), valid=valid):
+                self.token_response = token
+                for cached in broker.CACHE.glob('*.json'):
+                    cached.unlink()
+                if valid:
+                    self.assertEqual(broker.token('owner/repo'), token)
+                    self.assertEqual(broker.token('owner/repo'), token, 'cached token preserves format')
+                else:
+                    with self.assertRaises(ValueError):
+                        broker.token('owner/repo')
+                result = subprocess.CompletedProcess([], 0, stdout=token + '\n')
+                with patch.object(helper.subprocess, 'run', return_value=result):
+                    if valid:
+                        self.assertEqual(helper.credential('get', source),
+                                         'username=x-access-token\npassword=' + token + '\n\n')
+                    else:
+                        with self.assertRaises(ValueError):
+                            helper.credential('get', source)
+                result.stdout = 'username=x-access-token\npassword=' + token + '\n\n'
+                # Use list so no branch-ref subprocess is needed before the helper.
+                with patch.object(wrapper.subprocess, 'run', return_value=result) as run:
+                    if valid:
+                        self.assertEqual(wrapper.run('owner/repo', ['pr', 'list']), 0)
+                        self.assertEqual(run.call_args.kwargs['env']['GH_TOKEN'], token)
+                    else:
+                        with self.assertRaises(ValueError):
+                            wrapper.run('owner/repo', ['pr', 'list'])
+                        self.assertEqual(run.call_count, 1, 'invalid token must never reach gh')
 
     def test_owner_and_repository_validation(self):
         for value in ('owner/../repo', '../repo', 'a/b/c', '-owner/repo', 'owner/.', 'owner/..',
@@ -216,8 +251,29 @@ class GitHub(unittest.TestCase):
         block = next(task['block'] for task in tasks if 'block' in task)
         for task in block:
             copy = task.get('ansible.builtin.copy', {})
-            if copy.get('dest') in ('/etc/homelab/secrets/github-app.pem', '/etc/homelab/secrets/github-app.json'):
+            if copy.get('dest') in ('/etc/gh-broker/github-app.pem', '/etc/gh-broker/github-app.json'):
                 self.assertEqual((copy['mode'], copy['owner'], task['no_log']), ('0400', 'gh-broker', True))
+        copies = {task['ansible.builtin.copy']['dest'] for task in block if 'ansible.builtin.copy' in task}
+        self.assertTrue({'/etc/gh-broker/github-app.pem', '/etc/gh-broker/github-app.json'} <= copies)
+        directory = next(task['ansible.builtin.file'] for task in block
+                         if task.get('ansible.builtin.file', {}).get('path') == '/etc/gh-broker')
+        self.assertEqual((directory['owner'], directory['group'], directory['mode']),
+                         ('gh-broker', 'gh-broker', '0700'))
+        for task in [*tasks, *block]:
+            file = task.get('ansible.builtin.file', {})
+            paths = task.get('loop', [file.get('path')])
+            self.assertFalse({'/etc/homelab', '/etc/homelab/secrets'} & {path for path in paths if isinstance(path, str)})
+        cleanup = next(task for task in tasks if task['name'] == 'Remove legacy GitHub App credential files')
+        self.assertNotIn('when', cleanup)
+        self.assertEqual(cleanup['ansible.builtin.file']['state'], 'absent')
+        self.assertEqual(set(cleanup['loop']), {'/etc/homelab/secrets/github-app.pem',
+                                              '/etc/homelab/secrets/github-app.json'})
+        disabled = next(task for task in tasks if task['name'].startswith('Disable GitHub publication'))
+        self.assertIn('/etc/gh-broker', disabled['loop'])
+        common = yaml.safe_load((role.parent / 'common/tasks/main.yml').read_text())
+        secrets = next(task['ansible.builtin.file'] for task in common
+                       if task.get('ansible.builtin.file', {}).get('path') == '/etc/homelab/secrets')
+        self.assertEqual((secrets['owner'], secrets['group'], secrets['mode']), ('root', 'root', '0700'))
         template = environment.from_string((role / 'templates/runner.gitconfig.j2').read_text())
         for enabled in (False, True):
             rendered = template.render(runner_user='hermes-runner', runner_github_enabled=enabled,

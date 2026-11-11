@@ -14,8 +14,8 @@ import tempfile
 import time
 import urllib.request
 
-CONFIG = Path('/etc/homelab/secrets/github-app.json')
-KEY = Path('/etc/homelab/secrets/github-app.pem')
+CONFIG = Path('/etc/gh-broker/github-app.json')
+KEY = Path('/etc/gh-broker/github-app.pem')
 CACHE = Path('/var/lib/gh-broker')
 API = 'https://api.github.com'
 SAFE_ENV = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}
@@ -89,7 +89,7 @@ def token(target):
         item = request('/app/installations/' + str(settings['installation_id']) + '/access_tokens', authorization,
                        {'repositories': [repo], 'permissions': {
                            'contents': 'write', 'pull_requests': 'write', 'metadata': 'read'}})
-        if expiry(item['expires_at']) - time.time() < 300 or not re.fullmatch(r'[A-Za-z0-9_]+', item['token']):
+        if expiry(item['expires_at']) - time.time() < 300 or not re.fullmatch(r'[A-Za-z0-9_.-]{1,2048}', item['token']):
             raise ValueError('invalid token response')
         fd, name = tempfile.mkstemp(dir=CACHE, prefix='.token-')
         try:

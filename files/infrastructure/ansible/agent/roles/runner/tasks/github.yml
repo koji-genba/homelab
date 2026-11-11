@@ -42,6 +42,14 @@
         group: gh-broker
         mode: '0700'
 
+    - name: Create the private broker configuration directory
+      ansible.builtin.file:
+        path: /etc/gh-broker
+        state: directory
+        owner: gh-broker
+        group: gh-broker
+        mode: '0700'
+
     - name: Create root-owned broker installation directories
       ansible.builtin.file:
         path: "{{ item }}"
@@ -50,13 +58,11 @@
         group: root
         mode: '0755'
       loop:
-        - /etc/homelab
-        - /etc/homelab/secrets
         - /usr/local/libexec
 
     - name: Install the GitHub App private key
       ansible.builtin.copy:
-        dest: /etc/homelab/secrets/github-app.pem
+        dest: /etc/gh-broker/github-app.pem
         content: "{{ runner_github_app.private_key }}"
         owner: gh-broker
         group: gh-broker
@@ -65,7 +71,7 @@
 
     - name: Install the GitHub App broker configuration
       ansible.builtin.copy:
-        dest: /etc/homelab/secrets/github-app.json
+        dest: /etc/gh-broker/github-app.json
         content: >-
           {{ {'app_id': runner_github_app.app_id | string,
               'installation_id': runner_github_app.installation_id | string} | to_json }}
@@ -99,6 +105,14 @@
       ansible.builtin.command: /usr/sbin/visudo -c
       changed_when: false
 
+- name: Remove legacy GitHub App credential files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/homelab/secrets/github-app.pem
+    - /etc/homelab/secrets/github-app.json
+
 # Initial empty bundles skip provisioning. Removing fields later also disables
 # previously installed credentials; do not leave a working broker behind.
 - name: Disable GitHub publication when the bundle is incomplete
@@ -110,8 +124,7 @@
     - /usr/local/libexec/agent-job-github-credential
     - /usr/local/libexec/agent-job-github-token
     - /usr/local/bin/gh-agent
-    - /etc/homelab/secrets/github-app.pem
-    - /etc/homelab/secrets/github-app.json
+    - /etc/gh-broker
     - /var/lib/gh-broker
   when: not (runner_github_enabled | bool)
 
