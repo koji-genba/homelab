@@ -8,6 +8,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -185,6 +186,55 @@ class GitHub(unittest.TestCase):
             for target in ('owner/../repo', 'owner/repo/extra', '-o/repo', 'o/..', 'o/repo\rjunk'):
                 with self.assertRaises(ValueError):
                     helper.credential('get', 'protocol=https\nhost=github.com\npath=' + target + '\n')
+
+    def test_credential_ignores_array_fields(self):
+        source = ('capability[]=authtype\ncapability[]=state\n'
+                  'protocol=https\nhost=github.com\npath=owner/repo.git\n'
+                  'wwwauth[]=Basic realm="GitHub"\nwwwauth[]=Bearer\n'
+                  'state[]=other-helper:opaque\nstate[]=\n'
+                  'unknown[]=first\nunknown[]=second\n\n')
+        with patch.object(helper, 'BROKER', self.fake_broker()):
+            self.assertEqual(helper.credential('get', source),
+                             'username=x-access-token\npassword=ghs_LOCAL_FIXTURE\n\n')
+
+    def test_credential_rejects_duplicate_scalar_fields(self):
+        source = 'capability[]=authtype\ncapability[]=state\nprotocol=https\nhost=github.com\npath=owner/repo\n'
+        for field, value in (('protocol', 'https'), ('host', 'github.com'),
+                             ('path', 'owner/repo'), ('username', 'user'), ('unknown', 'value')):
+            extra = field + '=' + value + '\n'
+            duplicate = extra if field in ('protocol', 'host', 'path') else extra * 2
+            with self.subTest(field=field), patch.object(helper.subprocess, 'run') as run:
+                with self.assertRaisesRegex(ValueError, 'duplicate field'):
+                    helper.credential('get', source + duplicate + '\n')
+                run.assert_not_called()
+
+    def test_git_credential_fill_calls_helper(self):
+        # Isolate Git from user/system configuration and use only a fake token.
+        launcher = self.root / 'credential.py'
+        captured = self.root / 'credential-input'
+        launcher.write_text(
+            'import io, pathlib, runpy, sys\n'
+            'source = sys.stdin.read()\n'
+            f'pathlib.Path({str(captured)!r}).write_text(source)\n'
+            'sys.stdin = io.StringIO(source)\n'
+            f'module = runpy.run_path({str(FILES / "agent-job-github-credential")!r})\n'
+            f'module["credential"].__globals__["BROKER"] = {self.fake_broker()!r}\n'
+            'sys.exit(module["main"]())\n')
+        source = ('protocol=https\nhost=github.com\npath=owner/repo.git\n'
+                  'wwwauth[]=Basic realm="GitHub"\nwwwauth[]=Bearer\n\n')
+        result = subprocess.run(
+            ['git', '-c', 'credential.helper=', '-c',
+             'credential.helper=!' + shlex.join([sys.executable, '-I', str(launcher)]),
+             '-c', 'credential.useHttpPath=true', 'credential', 'fill'],
+            input=source, text=True, capture_output=True, check=True, timeout=10,
+            cwd=self.root, env={'PATH': '/usr/bin:/bin', 'HOME': str(self.root),
+                               'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null',
+                               'GIT_TERMINAL_PROMPT': '0'})
+        self.assertIn('username=x-access-token\npassword=ghs_LOCAL_FIXTURE\n', result.stdout)
+        received = captured.read_text().splitlines()
+        for field in source.splitlines():
+            if field:
+                self.assertIn(field, received)
 
     def fake_gh(self, draft=True):
         script = self.root / 'gh'
