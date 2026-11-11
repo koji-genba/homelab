@@ -921,11 +921,20 @@ pi-ai・model 切替・approval 保存などの修正を理由に rc.1 を選ん
   [公式の managed settings](https://code.claude.com/docs/en/managed-settings) と
   [自動更新停止](https://code.claude.com/docs/en/setup#disable-auto-updates) の仕組みを使う。
   CLI が管理者設定を書き戻す経路ではなく、本人の `~/.claude` 設定・認証には触れない。
-- Codex の `~/.codex/config.toml` は model=`gpt-6.1-sol`、effort=`medium`、
-  `check_for_update_on_startup=false`。model 未指定で起動時の確認画面に止まる問題を避ける。
+- Codex の既定は root 管理の `/etc/codex/config.toml`（system 設定）に置く。model=`gpt-6.1-sol`、
+  effort=`medium`、`check_for_update_on_startup=false`。model 未指定で起動時の確認画面に止まる問題を避ける。
   [設定リファレンス](https://learn.chatgpt.com/docs/config-file/config-reference) に従う。
+  system 設定は最も弱い層で、`~/.codex/config.toml`（user）が上書きする
+  （[公式の優先順位](https://developers.openai.com/codex/config-basic)、
+  [採用版の loader](https://github.com/openai/codex/blob/rust-v0.167.1/codex-rs/config/src/loader/mod.rs)
+  の `SYSTEM_CONFIG_TOML_FILE_UNIX`、
+  [層の優先度](https://github.com/openai/codex/blob/rust-v0.167.1/codex-rs/config/src/config_layer_source.rs)
+  は System 10 < User 20）。
   [採用版の config writer](https://github.com/openai/codex/blob/rust-v0.167.1/codex-rs/core/src/config/edit.rs)
-  はモデル等を保存できるため、対話操作で変えた値は次の apply で戻る。
+  は model・trust・通知の確認済み状態を user 側へ保存する。`~/.codex/config.toml` は Ansible が作らず、
+  置換も削除もしないので、Codex が書いた値は apply で消えない（対話で変えた model 等は system の既定より優先される）。
+  旧版が置いた同じ3行の `~/.codex/config.toml` は既存 Runner に残る。値は同じで害はないが、
+  system の既定を変えるときは本人がその3行を消す。
 - dsh の `~/.dsh/cordis.patch.yml` は作業端末と同じ DGX provider・ダミー Authorization を使う。
   glm-5.3-flash、context 1048576、output 65536、developer role 無効、max_tokens、
   bash timeout 600000ms。DeepSeek の API/account/web search と session telemetry を止める。
@@ -936,11 +945,13 @@ pi-ai・model 切替・approval 保存などの修正を理由に rc.1 を選ん
   CLI/headless に自動本体更新の経路・停止スイッチは確認されず、Desktop updater は使わない。
   plugin の追加・更新を worker に行わせず、必要なら repo の固定依存として見直す。
 
-`.codex` と `.dsh` は hermes-runner 所有0700、設定は0600。
+`.codex` と `.dsh` は hermes-runner 所有0700、Ansible が置く `.dsh` の設定は0600。
+`/etc/codex/config.toml` は root 所有0644。
 ディレクトリを再帰変更せず、`.claude/.credentials.json` と `.codex/auth.json` は
 読み取り・配置・削除・属性変更の対象にしない。ログイン後も token refresh 用の書き込みを残す。
 通常の headless 実行での設定の不変性、認証更新との併用、2回目 apply の changed=0 は実機で未検証。
-対話設定の変更や Hermes の skill 編集があれば、その復元分は changed になる。
+`/etc/codex/config.toml` が実機の Codex に読まれて既定が効くことも未検証。
+dsh の対話設定の変更や Hermes の skill 編集があれば、その復元分は changed になる。
 
 ### 初回ログイン（本人が行う）
 
@@ -1072,12 +1083,19 @@ CLIがsessionを作る前に失敗した場合だけ、次回も新規起動に�
 `done` の表示だけで本人への完了報告を済ませない。
 
 `/srv/agent-work/tasks/<id>/` には plan.json、atomic更新のstate.json、
-runs/<累積起動番号>/stdout・stderr・result.json・exit-code がある。
+runs/<累積起動番号>/stdout・stderr・result.json・exit-code と、公開の試行ごとの
+runs/publish-<n>/stdout・stderr・result.json（下記）がある。
 state.json の stage は0始まり、sessionsは段階ごと、cli_sessionsは各CLIの直近のID。
 launches、consecutive_failures、deadline_at（Unix時刻）、summaryを確認する。
 CLI出力は既知のcredential文字列をマスクする。ログ・計画は0700のtask配下に置き、公開しない。
 マスクは完全な秘密検出ではない。資格情報を読む依頼は禁止し、公開前に差分を点検する。
 資格情報らしいファイル名が変更されると checkpoint を作らず blocked にする。
+
+同じ clone で人や Hermes が別の branch に切り替えていた場合、driver は起動時、各段階の CLI 起動前、
+checkpoint の前、公開の前に branch を確かめる。作業ツリーが clean ならジョブの branch へ
+`git switch` で戻して続ける。未コミットの変更があれば切り替えず、`working tree changed outside the job`
+を summary に書いて blocked で止める（CLI は起動せず、checkpoint も作らない）。
+変更を本人が片付けてから resume する。以前はこの不一致が `driver error` の failed になっていた。
 
 | 状態 | 対処 |
 | --- | --- |
@@ -1085,7 +1103,7 @@ CLI出力は既知のcredential文字列をマスクする。ログ・計画は0
 | done | 公開無効の計画を完了。差分・テスト・ログをレビュー |
 | ready_to_publish | 段階は完了、App鍵/helper未導入。登録・導入後にresume |
 | published | draft PR作成済み。本人がレビューしmergeを判断 |
-| blocked / failed | 理由とrun結果を確認し、必要な修復後にresume |
+| blocked / failed | 理由とrun結果（公開は `runs/publish-<n>/`）を確認し、必要な修復後にresume。clone が別 branch で変更ありなら片付けてから |
 | stopped | 停止済み。再開前に部分変更を確認 |
 | deadline | 期限到達。本人の判断で時間・予算を追加してresume |
 
@@ -1111,6 +1129,14 @@ PR ② のhelper契約は `/usr/local/libexec/agent-job-github-credential`（roo
 Git credential protocolで短命App tokenを返し、CLIの環境には渡さない。
 公開時だけdriverがhelperを使い、対象owner/repoと一致するGitHub HTTPS originへ
 `agent/...` をpushし、`gh-agent <owner/repo> pr create --draft --base <planのbase>` を実行する。
+公開の試行ごとに `runs/publish-<n>/` を作り、`push`・`pr create`（と credential helper）の
+標準出力・標準エラーを `== <名前> ==` の見出し付きで stdout・stderr に、各コマンドの終了コードを
+result.json の `steps` に残す。保存前に `clean()` で伏せ字にし、`gh[pousr]_`・`github_pat_`・`sk-`
+の形（新しい形式の「.」と「-」を含むものを含む）、`Bearer`・`token=` 等、URL の
+`user:password@`（`https://x-access-token:<token>@host/...`）を `[REDACTED]` にする。
+credential helper の標準出力は token そのものなので保存しない（標準エラーのみ）。
+失敗時の state の summary は `publication failed at push (exit 128); see runs/publish-1; ...` のように
+失敗したコマンドと終了コードを示す。原因はこのログで追う。
 失敗後はpushまたはPRが既に作られていないかを本人が確認してから再開する。
 公開失敗後の自動復旧は冪等ではない。helper/wrapperのローカル統合はfixtureで検証し、実GitHub受入は別途行う。
 
@@ -1316,7 +1342,7 @@ Git helperはHTTPS github.comとowner/repo pathだけに応え、store/eraseは�
 workerにtokenを発行・表示させない。CLI sandbox/skillは同一UIDの資格情報を隔離する境界ではない。
 
 `agent-job`はチェックポイントにglobal bot名義を使い、公開時にhelper所有権とorigin/push URLを照合し、
-上記wrapperでdraftを作る。失敗後はremoteと既存PRを確認してからresumeする。
+上記wrapperでdraftを作る。失敗後は `runs/publish-<n>/` のログと、remoteと既存PRを確認してからresumeする。
 公開復旧は自動で冪等化していない。push成功後のPR作成失敗や応答断では既存PRを本人が確認する。
 `.github/workflows`の変更を含むpushはAppの権限で拒否されるので、本人に対応を頼む。
 main更新・mergeも本人だけが行う。

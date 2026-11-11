@@ -22,8 +22,11 @@ EVENTS = {'done', 'ready_to_publish', 'published', 'blocked', 'failed', 'deadlin
 
 
 def clean(text):
-    text = re.sub(r'(?i)(bearer\s+|(?:api[_-]?key|token|password|secret)\s*[=:]\s*)[^\s,"\x27]+', r'\1[REDACTED]', str(text))
-    text = re.sub(r'\b(?:sk-[\w-]+|gh[pousr]_[\w]+|github_pat_[\w]+)\b', '[REDACTED]', text)
+    # URL userinfo (https://x-access-token:<token>@host/...) first, so the host stays readable.
+    text = re.sub(r'(?i)(?<=://)[^\s/@:]*:[^\s/@]*@|x-access-token:[^\s@]*@', '[REDACTED]@', str(text))
+    text = re.sub(r'(?i)(bearer\s+|(?:api[_-]?key|token|password|secret)\s*[=:]\s*)[^\s,"\x27]+', r'\1[REDACTED]', text)
+    # GitHub tokens may contain dots and hyphens (installation tokens: ghs_<header>.<payload>.<signature>).
+    text = re.sub(r'\b(?:sk-[\w-]+|gh[pousr]_[\w.-]+|github_pat_[\w.-]+)', '[REDACTED]', text)
     return re.sub(r'-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----', '[REDACTED]', text, flags=re.S)
 
 
@@ -219,10 +222,60 @@ def git(repo, *args, capture=False):
     return result.stdout.strip() if capture else None
 
 
+def ensure_branch(repo, branch):
+    """Return None when the checkout is on branch, switching back first if the tree is clean.
+
+    A human or Hermes may have switched branches in the same clone between runs.
+    With uncommitted changes the switch is not safe, so return the current branch instead.
+    """
+    current = git(repo, 'branch', '--show-current', capture=True)
+    if current == branch:
+        return None
+    if git(repo, 'status', '--porcelain', capture=True):
+        return current or '(detached HEAD)'
+    git(repo, 'switch', '--no-guess', branch)
+    return None
+
+
+def output_text(data):
+    if data is None:
+        return ''
+    return data.decode('utf-8', 'replace') if isinstance(data, bytes) else str(data)
+
+
+def log_step(run, steps, name, code, out, err, timed_out=False):
+    """Append one publication step's redacted output to run/stdout, run/stderr and run/result.json."""
+    for stream, data in (('stdout', out), ('stderr', err)):
+        with (run / stream).open('a') as log:
+            log.write('== ' + name + ' ==\n' + clean(output_text(data)).rstrip('\n') + '\n')
+    steps.append({'name': name, 'exit_code': code, 'timeout': timed_out})
+    atomic(run / 'result.json', {'status': 'running', 'steps': steps})
+
+
+def publish_step(run, steps, name, argv, **kwargs):
+    """Run one publication command; returns (exit code, timed out)."""
+    code, timed_out, out, err = None, False, None, None
+    try:
+        result = subprocess.run(argv, capture_output=True, **kwargs)
+        code, out, err = result.returncode, result.stdout, result.stderr
+    except subprocess.TimeoutExpired as exc:
+        timed_out, out, err = True, exc.stdout, exc.stderr
+    log_step(run, steps, name, code, out, err, timed_out)
+    return code, timed_out
+
+
 def worker(task, state):
     plan = read(task / 'plan.json')
     repo = plan['repo']
     key = hashlib.sha256(repo.encode()).hexdigest()
+
+    def on_branch():
+        found = ensure_branch(repo, plan['branch'])
+        if found is not None:
+            save(task, state, 'blocked', 'working tree changed outside the job: checkout is on ' + found
+                 + ', not ' + plan['branch'] + ', and has uncommitted changes; clean it up and resume')
+        return found is None
+
     with lock(ROOT / 'tasks' / ('.repo-' + key), True):
         save(task, state, 'running')
         if (task / 'stop').exists():
@@ -235,6 +288,8 @@ def worker(task, state):
             git(repo, 'switch', '-c', plan['branch'], plan['base'])
             state['prepared'] = True
             save(task, state)
+        if not on_branch():
+            return
         while state['stage'] < len(plan['stages']):
             if (task / 'stop').exists():
                 return save(task, state, 'stopped', 'stop requested')
@@ -243,8 +298,8 @@ def worker(task, state):
             if state['launches'] >= plan['max_launches']:
                 return save(task, state, 'failed', 'launch limit reached')
             stage = plan['stages'][state['stage']]
-            if git(repo, 'branch', '--show-current', capture=True) != plan['branch']:
-                raise ValueError('branch changed unexpectedly')
+            if not on_branch():
+                return
             slot = str(state['stage'])
             session = state['sessions'].get(slot)
             prompt = ('受入条件: ' + stage['acceptance'] + '\ncommit、push、資格情報の読み取りは禁止。'
@@ -317,8 +372,8 @@ def worker(task, state):
                 if status == 'blocked':
                     return save(task, state, 'blocked')
                 if status == 'done':
-                    if git(repo, 'branch', '--show-current', capture=True) != plan['branch']:
-                        raise ValueError('branch changed before checkpoint')
+                    if not on_branch():
+                        return
                     paths = git(repo, 'ls-files', '--others', '--modified', '--deleted', '--exclude-standard', '-z', capture=True).split('\0')
                     paths += git(repo, 'diff', '--cached', '--name-only', '-z', capture=True).split('\0')
                     paths = [path for path in paths if Path(path).name not in {'.env.example', '.env.sample'}]
@@ -349,37 +404,55 @@ def worker(task, state):
         helper_stat = HELPER.stat()
         if helper_stat.st_uid != 0 or helper_stat.st_mode & 0o022:
             raise ValueError('credential helper must be root owned and not writable by group/others')
-        if git(repo, 'branch', '--show-current', capture=True) != plan['branch']:
-            raise ValueError('branch changed before publishing')
+        if not on_branch():
+            return
         remote = git(repo, 'remote', 'get-url', 'origin', capture=True)
         relative = Path(repo).relative_to(ROOT / 'repos')
         expected = 'https://github.com/' + relative.as_posix()
         push_remote = git(repo, 'remote', 'get-url', '--push', '--all', 'origin', capture=True)
         if remote not in (expected, expected + '.git') or push_remote not in (expected, expected + '.git'):
             raise ValueError('origin must match approved GitHub repo over HTTPS')
+        # Every attempt keeps redacted command output in runs/publish-<n>/. The
+        # credential helper's stdout is the token and is never written.
+        state['publishes'] = state.get('publishes', 0) + 1
+        save(task, state)
+        run = task / 'runs' / ('publish-' + str(state['publishes']))
+        run.mkdir(parents=True, exist_ok=True)
+        (run / 'stdout').touch()
+        (run / 'stderr').touch()
+        steps = []
+        atomic(run / 'result.json', {'status': 'running', 'steps': steps})
+
+        def finish(status, summary, failed_step=None):
+            atomic(run / 'result.json', {'status': status, 'failed_step': failed_step, 'steps': steps})
+            return save(task, state, status, summary)
+
         remaining = max(1, state['deadline_at'] - time.time())
         credential = subprocess.run([str(HELPER), 'get'], input='protocol=https\nhost=github.com\npath=' + relative.as_posix() + '.git\n\n', env=env(), capture_output=True, text=True, timeout=min(60, remaining))
         fields = dict(line.split('=', 1) for line in credential.stdout.splitlines() if '=' in line)
         if credential.returncode or not fields.get('password'):
-            raise ValueError('credential helper failed')
+            log_step(run, steps, 'credential helper', credential.returncode, None, credential.stderr)
+            return finish('failed', 'publication failed at credential helper (exit ' + str(credential.returncode) + '); see runs/' + run.name, 'credential helper')
         publish_env = env() | {'GIT_TERMINAL_PROMPT': '0'}
         del fields, credential
         body = task / 'pr-body.md'
         body.write_text(plan['publish']['body'])
         commands = [
-            ['git', '-c', 'core.hooksPath=/dev/null', '-c', 'credential.helper=', '-c', 'credential.helper=' + str(HELPER), '-c', 'credential.useHttpPath=true', 'push', '--set-upstream', 'origin', 'HEAD:refs/heads/' + plan['branch']],
-            ['/usr/local/bin/gh-agent', relative.as_posix(), 'pr', 'create', '--draft', '--base', plan['base'], '--head', plan['branch'], '--title', plan['publish']['title'], '--body-file', str(body)],
+            ('push', ['git', '-c', 'core.hooksPath=/dev/null', '-c', 'credential.helper=', '-c', 'credential.helper=' + str(HELPER), '-c', 'credential.useHttpPath=true', 'push', '--set-upstream', 'origin', 'HEAD:refs/heads/' + plan['branch']]),
+            ('pr create', ['/usr/local/bin/gh-agent', relative.as_posix(), 'pr', 'create', '--draft', '--base', plan['base'], '--head', plan['branch'], '--title', plan['publish']['title'], '--body-file', str(body)]),
         ]
-        for argv in commands:
+        for name, argv in commands:
             if (task / 'stop').exists():
-                return save(task, state, 'stopped', 'stop requested')
+                return finish('stopped', 'stop requested')
             remaining = state['deadline_at'] - time.time()
             if remaining <= 0:
-                return save(task, state, 'deadline', 'deadline reached')
-            result = subprocess.run(argv, cwd=repo, env=publish_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=remaining)
-            if result.returncode:
-                return save(task, state, 'failed', 'publication failed; inspect remote before resuming')
-        save(task, state, 'published', 'draft PR created')
+                return finish('deadline', 'deadline reached')
+            code, timed_out = publish_step(run, steps, name, argv, cwd=repo, env=publish_env, timeout=remaining)
+            if timed_out:
+                return finish('deadline', 'deadline reached during ' + name, name)
+            if code:
+                return finish('failed', 'publication failed at ' + name + ' (exit ' + str(code) + '); see runs/' + run.name + '; inspect remote before resuming', name)
+        finish('published', 'draft PR created')
 
 
 def main():
