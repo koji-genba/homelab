@@ -14,6 +14,9 @@ Hermes は計画を作って起動し、必要なときに状態を調べ、最�
 計画と対象 checkout は Runner に置く。同じ checkout で別 worker を起動しない。
 開始時は clean な repo が必要。driver が base から新しい `agent/` branch を作るので、
 既存 branch は再利用しない。id は英数字で始まる英数字・`_`・`-` の64文字以内。
+実行中・resume 前にその clone で別 branch へ切り替えない。切り替わっていても、作業ツリーが clean なら
+driver が job の branch へ戻す。未コミットの変更があれば切り替えず、`working tree changed outside the job`
+で blocked になる。変更を片付けてから resume する。
 
 ```json
 {
@@ -72,6 +75,8 @@ checkpointの名義はAnsible管理のApp bot、未設定時はAgent Job Bot。
 repoのonboardingが必要。mainへのpush・mergeはしない。
 `.github/workflows` を変更したpushが拒否されたら、本人に対応を頼む。
 公開失敗後はremote branchと既存PRを確認してから再開し、重複PRを作らない。
+失敗したコマンド（push・pr create）と終了コードはstateのsummaryに出る。標準出力・標準エラーは
+資格情報らしい文字列を伏せて `runs/publish-<n>/` の stdout・stderr・result.json に残るので、原因はそこで読む。
 
 完了後は Hermes 自身で `git diff <base>...<branch>` と commit 一覧、テスト結果、
 各 run の result.json・stdout・stderr を読む。秘密や無関係なファイルがないか確認し、

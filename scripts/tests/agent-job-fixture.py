@@ -49,9 +49,13 @@ if mode == 'sleep': time.sleep(10)
 if mode in ('no-session-fail', 'no-session-malformed') and n == 1:
  if mode == 'no-session-malformed': print('not-json')
  sys.exit(1 if mode == 'no-session-fail' else 0)
-status = 'blocked' if mode == 'blocked' else 'continue' if mode == 'continue' or n == 1 and mode == 'sequence' else 'done'
+status = 'blocked' if mode == 'blocked' else 'continue' if mode == 'continue' or n == 1 and mode in ('sequence', 'drift', 'drift-dirty') else 'done'
 text = 'AGENT_JOB_STATUS: ' + status + ' fixture'
 if status == 'done': pathlib.Path('implementation.txt').write_text('implemented')
+if mode == 'drift-dirty' and n == 1: pathlib.Path('stray.txt').write_text('left by someone else')
+if mode.startswith('drift') and n == 1:
+ import subprocess
+ subprocess.run(['git', 'switch', '-q', 'main'], check=True)
 if mode == 'no-status' and n == 1: text = 'still working'
 if mode == 'recover' and n < 4: text = 'AGENT_JOB_STATUS: continue fixture'
 if cli == 'claude': print(json.dumps({'session_id':'claude-session','result':text,'is_error':False}))
@@ -160,6 +164,177 @@ sys.exit(1 if mode == 'fail' or mode == 'recover' and n in (1, 3) else 0)
         self.assertEqual(self.git('log', '-1', '--format=%an <%ae>'),
                          'fixture-app[bot] <123+fixture-app[bot]@users.noreply.github.com>')
         self.assertNotIn('generated.pyc', self.git('ls-files'))
+
+    def current_branch(self):
+        return self.git('branch', '--show-current')
+
+    def test_branch_restored_when_clean(self):
+        # Between runs someone switched the clone to another branch (clean tree).
+        task, state = self.run_job()
+        self.assertEqual(state['status'], 'ready_to_publish')
+        self.git('switch', '-q', 'main')
+        job.worker(task, state)
+        self.assertEqual((state['status'], self.current_branch()), ('ready_to_publish', 'agent/fixture'))
+        # Detached HEAD is restored in the same way.
+        self.git('switch', '-q', '--detach', 'main')
+        job.worker(task, state)
+        self.assertEqual((state['status'], self.current_branch()), ('ready_to_publish', 'agent/fixture'))
+
+    def test_branch_restored_before_next_launch(self):
+        # The CLI itself leaves the job branch without changes; the next launch must run on it again.
+        task, state = self.run_job(mode='drift')
+        self.assertEqual((state['status'], state['launches']), ('ready_to_publish', 2))
+        self.assertEqual(self.current_branch(), 'agent/fixture')
+        self.assertEqual(self.git('log', '--format=%s', 'main..HEAD').splitlines(), ['agent-job(fixture): stage-0'])
+        self.assertEqual(self.git('show', 'HEAD:implementation.txt'), 'implemented')
+
+    def test_dirty_tree_on_other_branch_blocks(self):
+        # Uncommitted work appears on another branch: do not switch, do not launch the CLI.
+        task, state = self.run_job(mode='drift-dirty')
+        self.assertEqual((state['status'], state['launches']), ('blocked', 1))
+        self.assertIn('working tree changed outside the job', state['summary'])
+        self.assertEqual(self.current_branch(), 'main')
+        self.assertEqual((self.repo / 'stray.txt').read_text(), 'left by someone else')
+        # After a human cleans up, resuming returns to the job branch and finishes.
+        (self.repo / 'stray.txt').unlink()
+        job.worker(task, state)
+        self.assertEqual((state['status'], self.current_branch()), ('ready_to_publish', 'agent/fixture'))
+
+    def test_dirty_tree_blocks_before_checkpoint(self):
+        # The CLI reports done after leaving the branch with its changes in the tree: no checkpoint.
+        task, state = self.run_job(mode='drift-done')
+        self.assertEqual((state['status'], state['stage']), ('blocked', 0))
+        self.assertIn('working tree changed outside the job', state['summary'])
+        self.assertEqual(self.git('log', '--format=%s', 'main..agent/fixture'), '')
+
+    def test_dirty_tree_blocks_before_publication(self):
+        task, state = self.run_job()
+        self.assertEqual(state['status'], 'ready_to_publish')
+        self.trust_helper()
+        self.git('remote', 'add', 'origin', 'https://github.com/owner/repo.git')
+        self.git('switch', '-q', 'main')
+        (self.repo / 'stray.txt').write_text('uncommitted')
+        calls = []
+        with patch.object(subprocess, 'run', self.fake_publish(calls)):
+            job.worker(task, state)
+        self.assertEqual(state['status'], 'blocked')
+        self.assertIn('working tree changed outside the job', state['summary'])
+        self.assertEqual((calls, self.current_branch()), ([], 'main'))
+
+    def trust_helper(self, token='ghs_FIXTURE'):
+        from types import SimpleNamespace
+        class TrustedHelper(type(Path())):
+            def stat(self, **kwargs):
+                return SimpleNamespace(st_uid=0, st_mode=0o100755)
+        helper = self.root / 'helper'
+        helper.write_text('#!/bin/sh\ncat >/dev/null\nprintf "username=x-access-token\\npassword=' + token + '\\n\\n"\n')
+        helper.chmod(0o755)
+        job.HELPER = TrustedHelper(helper)
+
+    def fake_publish(self, calls, push=(0, b'', b''), create=(0, b'', b'')):
+        # Only the push and gh-agent commands are replaced; every other command runs for real.
+        original = subprocess.run
+        def run(args, **kwargs):
+            step = push if args[0] == 'git' and 'push' in args else create if args[0] == '/usr/local/bin/gh-agent' else None
+            if step is None:
+                return original(args, **kwargs)
+            calls.append(args)
+            if isinstance(step, BaseException):
+                raise step
+            return subprocess.CompletedProcess(args, *step)
+        return run
+
+    def test_publish_failure_is_logged_and_redacted(self):
+        token = 'ghs_header.payload_with-hyphen.signature'
+        self.trust_helper(token)
+        self.git('remote', 'add', 'origin', 'https://github.com/owner/repo.git')
+        task, state = self.prepare(self.plan())
+        calls = []
+        pushed = (0, b'To https://github.com/owner/repo.git\n * [new branch]      HEAD -> agent/fixture\n', b'')
+        failed = (1, b'', ('error: https://x-access-token:' + token + '@github.com/owner/repo.git failed\n'
+                           'Authorization: Bearer ' + token + '\nGH_TOKEN=' + token + '\n').encode())
+        with patch.object(subprocess, 'run', self.fake_publish(calls, pushed, failed)):
+            job.worker(task, state)
+        self.assertEqual(state['status'], 'failed')
+        self.assertIn('pr create', state['summary'])
+        self.assertIn('exit 1', state['summary'])
+        self.assertIn('runs/publish-1', state['summary'])
+        self.assertEqual(len(calls), 2)
+        log = task / 'runs/publish-1'
+        stdout, stderr = (log / 'stdout').read_text(), (log / 'stderr').read_text()
+        self.assertIn('== push ==', stdout)
+        self.assertIn('[new branch]', stdout)
+        self.assertIn('== pr create ==', stderr)
+        self.assertIn('https://[REDACTED]@github.com/owner/repo.git failed', stderr)
+        for text in (stdout, stderr, (log / 'result.json').read_text(), state['summary']):
+            for part in (token, 'payload_with-hyphen', 'signature', 'ghs_FIXTURE'):
+                self.assertNotIn(part, text)
+        result = job.read(log / 'result.json')
+        self.assertEqual((result['status'], result['failed_step']), ('failed', 'pr create'))
+        self.assertEqual([(step['name'], step['exit_code']) for step in result['steps']], [('push', 0), ('pr create', 1)])
+        # A later resume gets its own directory and keeps the earlier log.
+        with patch.object(subprocess, 'run', self.fake_publish(calls)):
+            job.worker(task, state)
+        self.assertEqual(state['status'], 'published')
+        self.assertEqual(job.read(task / 'runs/publish-2/result.json')['status'], 'published')
+        self.assertIn('== pr create ==', (log / 'stderr').read_text())
+
+    def test_publish_push_failure_stops_before_pr(self):
+        self.trust_helper()
+        self.git('remote', 'add', 'origin', 'https://github.com/owner/repo.git')
+        task, state = self.prepare(self.plan())
+        calls = []
+        rejected = (128, b'', b'remote: Permission denied\nfatal: unable to access https://x-access-token:ghu_abc.def-ghi@github.com/owner/repo.git/\n')
+        with patch.object(subprocess, 'run', self.fake_publish(calls, rejected)):
+            job.worker(task, state)
+        self.assertEqual(state['status'], 'failed')
+        self.assertIn('push (exit 128)', state['summary'])
+        self.assertEqual(len(calls), 1)
+        stderr = (task / 'runs/publish-1/stderr').read_text()
+        self.assertIn('Permission denied', stderr)
+        self.assertNotIn('ghu_abc', stderr)
+        self.assertNotIn('def-ghi', stderr)
+
+    def test_publish_timeout_is_deadline_with_partial_log(self):
+        self.trust_helper()
+        self.git('remote', 'add', 'origin', 'https://github.com/owner/repo.git')
+        task, state = self.prepare(self.plan())
+        timeout = subprocess.TimeoutExpired(['git'], 1, output=b'partial', stderr=b'ghs_a.b-c waiting')
+        with patch.object(subprocess, 'run', self.fake_publish([], timeout)):
+            job.worker(task, state)
+        self.assertEqual(state['status'], 'deadline')
+        self.assertIn('push', state['summary'])
+        self.assertIn('partial', (task / 'runs/publish-1/stdout').read_text())
+        self.assertNotIn('ghs_a', (task / 'runs/publish-1/stderr').read_text())
+
+    def test_credential_helper_failure_is_logged_without_token(self):
+        self.trust_helper()
+        self.git('remote', 'add', 'origin', 'https://github.com/owner/repo.git')
+        Path(job.HELPER).write_text('#!/bin/sh\ncat >/dev/null\nprintf "password=ghs_SHOULD_NOT_LOG\\n"\necho "broker unavailable" >&2\nexit 1\n')
+        task, state = self.prepare(self.plan())
+        calls = []
+        with patch.object(subprocess, 'run', self.fake_publish(calls)):
+            job.worker(task, state)
+        self.assertEqual((state['status'], calls), ('failed', []))
+        self.assertIn('credential helper (exit 1)', state['summary'])
+        log = task / 'runs/publish-1'
+        self.assertIn('broker unavailable', (log / 'stderr').read_text())
+        self.assertNotIn('SHOULD_NOT_LOG', (log / 'stdout').read_text() + (log / 'stderr').read_text())
+
+    def test_clean_redacts_github_token_shapes(self):
+        for text in ('ghs_FIXTURE', 'ghu_FIXTURE', 'ghp_FIXTURE', 'github_pat_FIX_TURE',
+                     'ghs_header.payload_with-hyphen.signature', 'ghu_a-b.c_d.e-f',
+                     'https://x-access-token:secret.value@github.com/o/r.git',
+                     'https://user:hunter2@example.com/path', 'x-access-token:abc@github.com'):
+            with self.subTest(text=text):
+                cleaned = job.clean('before ' + text + ' after')
+                self.assertTrue(cleaned.startswith('before ') and cleaned.endswith(' after'))
+                for part in ('ghs_', 'ghu_', 'ghp_', 'github_pat_', 'payload', 'signature', 'secret.value', 'hunter2', 'abc@', 'e-f'):
+                    self.assertNotIn(part, cleaned)
+        # Hosts and ordinary text stay readable.
+        self.assertEqual(job.clean('https://x-access-token:t0k3n@github.com/o/r.git'), 'https://[REDACTED]@github.com/o/r.git')
+        self.assertEqual(job.clean('git@github.com:o/r.git ssh://git@github.com/o/r.git'), 'git@github.com:o/r.git ssh://git@github.com/o/r.git')
+        self.assertEqual(job.clean('push to origin: 3 commits'), 'push to origin: 3 commits')
 
     def test_retry_without_session_keeps_original_prompt(self):
         for cli in ('claude', 'codex', 'dsh'):

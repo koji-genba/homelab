@@ -178,6 +178,36 @@ installation tokenはドット・ハイフンを含む形式に対応し、許�
 長さを1〜2048文字としてbroker・credential helper・gh-agentで検査する。
 
 
+## 2026-11-12 補足: 公開前の branch 復帰、公開ログ、Codex の既定設定
+
+issue #207 の受け入れ試験で見つかった3点を直す。
+
+**branch の復帰**: 同じ clone で別 branch へ切り替えたあとの resume は、公開の直前に branch 不一致の
+例外になり `driver error` の failed だった。driver は起動時、各段階の CLI 起動前、checkpoint の前、
+公開の前に branch を確かめる。作業ツリーが clean なら job の branch へ `git switch` で戻して続け、
+未コミットの変更があれば切り替えずに blocked で止める（summary は
+`working tree changed outside the job`）。変更を失う操作はしない。
+
+**公開ログ**: 公開の標準出力・標準エラーを捨てていたため、失敗の原因を追えなかった。
+試行ごとに `runs/publish-<n>/` へ stdout・stderr・result.json を残し、保存前に既存の伏せ字処理で
+マスクする。`ghs_`・`ghu_` 等の新しい token 形式（「.」「-」を含む）と URL の `user:password@` を
+伏せ字の対象に加えた。credential helper の標準出力は token なので保存しない。
+state の summary には失敗したコマンド（push / pr create）と終了コードを示す。
+伏せ字は既知の形式の検出で、完全な秘密検出ではない（前節と同じ）。
+
+**Codex の既定設定**: Ansible が `~/.codex/config.toml` を毎回置換していたため、Codex が user 設定へ
+書く状態（trust、通知の確認済み、対話で選んだ model）と衝突し、apply のたびに消えて changed になり得た。
+採用版 0.167.1 は `/etc/codex/config.toml` を system 層として読み、user 層（`~/.codex/config.toml`）が
+上書きする（[公式](https://developers.openai.com/codex/config-basic)、
+[loader](https://github.com/openai/codex/blob/rust-v0.167.1/codex-rs/config/src/loader/mod.rs)、
+[層の優先度](https://github.com/openai/codex/blob/rust-v0.167.1/codex-rs/config/src/config_layer_source.rs)）。
+そこで model=`gpt-6.1-sol`、effort=`medium`、`check_for_update_on_startup=false` を root 所有の
+`/etc/codex/config.toml` へ移し、`~/.codex/config.toml` は Ansible が作らず触らない。
+`managed_config.toml` / `requirements.toml` は強制と制約の仕組みで、既定値の置き場ではないため使わない。
+既存 Runner に残る旧版の `~/.codex/config.toml`（同じ値）は、既定を変えるときに本人が消す。
+dsh の `~/.dsh/cordis.patch.yml` は従来どおり apply で戻す。
+実機で `/etc/codex/config.toml` の既定が効くことは **未検証**。
+
 ## 2026-11-12 補足: staging 更新 workflow の deploy key 化（実装）
 
 前節の方針を実装した。`stashpad-staging-image.yml` は `permissions: contents: read` に下げ、

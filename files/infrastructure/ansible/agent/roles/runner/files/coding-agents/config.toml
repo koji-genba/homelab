@@ -1,4 +1,5 @@
-# Managed by Ansible. Interactive CLI edits are reverted on the next apply.
+# Managed by Ansible as the Codex system defaults (/etc/codex/config.toml).
+# ~/.codex/config.toml overrides these and is not managed.
 model = "gpt-6.1-sol"
 model_reasoning_effort = "medium"
 check_for_update_on_startup = false

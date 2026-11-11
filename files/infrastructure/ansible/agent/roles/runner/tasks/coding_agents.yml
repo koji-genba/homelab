@@ -12,6 +12,7 @@
     - /opt/coding-agents
     - /var/cache/coding-agents
     - /etc/claude-code
+    - /etc/codex
 
 - name: Install the coding CLI manifest and integrity lock
   ansible.builtin.copy:
@@ -86,6 +87,17 @@
     group: root
     mode: '0644'
 
+# Codex reads /etc/codex/config.toml as the lowest-precedence "system" layer;
+# ~/.codex/config.toml overrides it and stays Codex's own (trust, notices, model
+# picks), so Ansible only provides defaults here and never writes the user file.
+- name: Install the Codex system defaults
+  ansible.builtin.copy:
+    src: coding-agents/config.toml
+    dest: /etc/codex/config.toml
+    owner: root
+    group: root
+    mode: '0644'
+
 # Do not recurse, replace the home, or manage either auth file. CLI token
 # refresh needs user-owned writable directories and its existing credentials.
 - name: Ensure the runner CLI configuration directories exist
@@ -99,18 +111,13 @@
     - .codex
     - .dsh
 
-- name: Install the runner CLI configuration files
+- name: Install the dsh runner configuration
   ansible.builtin.copy:
-    src: "coding-agents/{{ item.src }}"
-    dest: "/home/{{ runner_user }}/{{ item.dest }}"
+    src: coding-agents/cordis.patch.yml
+    dest: "/home/{{ runner_user }}/.dsh/cordis.patch.yml"
     owner: "{{ runner_user }}"
     group: "{{ runner_user }}"
     mode: '0600'
-  loop:
-    - src: config.toml
-      dest: .codex/config.toml
-    - src: cordis.patch.yml
-      dest: .dsh/cordis.patch.yml
 
 # ssh.py uses bash -c; remote background jobs additionally use bash -lc.
 # /usr/local/bin is in Debian's default PATH for both, without .bashrc edits.
