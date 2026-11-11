@@ -9,6 +9,8 @@ platforms: [linux]
 実行先は terminal の SSH backend（hermes-runner）、作業場所は
 `/srv/agent-work/repos/<owner>/<repo>`。このtreeはRunner上にあり、Agentのローカルではない。
 
+- 長時間または放置する作業は `runner-agent-job` を読み、計画から driver を起動する。
+  dsh を含む3 CLIをどの段階にも選べる。以下の直接起動は短い作業に使う。
 - 安い作業、読むだけの調査、小さな変更は `runner-dsh`（DGX glm-5.3-flash）。
 - 複雑な実装、設計、難しい不具合は `runner-claude` または `runner-codex`。
   本人の指定があれば優先する。失敗を無限に別CLIへ回さず、原因と制限を伝える。

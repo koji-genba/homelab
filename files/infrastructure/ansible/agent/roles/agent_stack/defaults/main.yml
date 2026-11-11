@@ -45,6 +45,7 @@ agent_stack_managed_skills:
   - runner-codex
   - runner-dsh
   - runner-publish
+  - runner-agent-job
 
 # --- Runtime inputs ----------------------------------------------------------
 agent_stack_timezone: "{{ agent_system_timezone | default('Asia/Tokyo') }}"

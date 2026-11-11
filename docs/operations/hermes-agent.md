@@ -1035,3 +1035,108 @@ Nodeの最低版と設定schema・skillのフラグも更新ごとに確認す�
 
 PR ② では App 鍵の配布、gh-broker、短命tokenラッパー、Git/ghの認証、repo登録スクリプトと
 main rulesetを用意する。その後、branch push/PR成功、main push/merge/workflow push拒否を受け入れる。
+
+## 長時間作業: agent-job（PR ①.5）
+
+長時間・放置する作業は `runner-agent-job` skill を使う。計画と状態の正は Runner、
+Hermes は計画して起動したあと短いターンに戻る。Webapp を閉じても段階は driver が進める。
+以下は Runner の hermes-runner で使うコマンド。**実機は未検証**。
+
+```sh
+agent-job start /srv/agent-work/plans/task-01.json
+agent-job status task-01 --json
+agent-job list
+agent-job stop task-01
+agent-job resume task-01
+# 本人が原因を確認し、追加の時間・予算を承認した場合
+agent-job resume task-01 --deadline-hours 6 --max-launches 60 --max-consecutive-failures 5
+```
+
+計画例と必須項目は [runner-agent-job skill](../../files/services/agent/hermes/skills/runner-agent-job/SKILL.md)。
+対象は `/srv/agent-work/repos/<owner>/<repo>` の clean な checkout。初回は base から新しい
+`agent/` branch を作る。id の再利用、既存 branch への初回起動、同じrepoでの二重起動は拒否する。
+外部の直接CLIも同じcheckoutで走らせない。排他の対象はこのdriver経由のjobである。
+
+| 制限 | 初回 | 再開 |
+| --- | --- | --- |
+| 全体の期限 | 既定・最大6時間 | `--deadline-hours` 指定時点から最大6時間 |
+| CLI起動 | 既定・最大30回 | `--max-launches` で累積上限を増やす |
+| 連続失敗 | 既定・最大3回 | 再開で回数をリセット、上限は明示した場合に増やす |
+| 1段階のtimeout | 既定45分・最大120分 | 既存計画を使う |
+| 同時実行 | 同じrepoは1、全体2 | 同じ |
+| メモリ | serviceごと6GiB（Runner 15GiB・swapなしで、2件合計12GiB） | 同じ |
+
+`continue` と、正常終了したが状態行のない出力は、同じ段階・CLI session へ「続けて」を送る。
+終了コード非0・timeout・不正JSON等は失敗として記録し、session ID が得られた場合はresumeする。
+CLIがsessionを作る前に失敗した場合だけ、次回も新規起動になる。成功応答で連続失敗回数を戻す。
+`blocked` は理由を state.json に残す。受入条件の自動実行判定はCLIに依存するため、
+`done` の表示だけで本人への完了報告を済ませない。
+
+`/srv/agent-work/tasks/<id>/` には plan.json、atomic更新のstate.json、
+runs/<累積起動番号>/stdout・stderr・result.json・exit-code がある。
+state.json の stage は0始まり、sessionsは段階ごと、cli_sessionsは各CLIの直近のID。
+launches、consecutive_failures、deadline_at（Unix時刻）、summaryを確認する。
+CLI出力は既知のcredential文字列をマスクする。ログ・計画は0700のtask配下に置き、公開しない。
+マスクは完全な秘密検出ではない。資格情報を読む依頼は禁止し、公開前に差分を点検する。
+資格情報らしいファイル名が変更されると checkpoint を作らず blocked にする。
+
+| 状態 | 対処 |
+| --- | --- |
+| queued / running | 起動待ち / 実行中。状態と直近runを確認 |
+| done | 公開無効の計画を完了。差分・テスト・ログをレビュー |
+| ready_to_publish | 段階は完了、PR ② のhelper待ち。導入後にresume |
+| published | draft PR作成済み。本人がレビューしmergeを判断 |
+| blocked / failed | 理由とrun結果を確認し、必要な修復後にresume |
+| stopped | 停止済み。再開前に部分変更を確認 |
+| deadline | 期限到達。本人の判断で時間・予算を追加してresume |
+
+`start` は `systemd-run --user` の起動後すぐ戻る。linger と `user@<uid>.service` をAnsibleで用意する。
+`systemctl --user status agent-job-task-01.service`、`journalctl --user -u agent-job-task-01.service`
+も使える。`stop` は停止フラグを置いてserviceのcgroupを停止する（15秒後に強制終了）。
+Hermes会話の `/stop` だけではRunner jobは止まらない。ホスト再起動後にjobは自動再開しない。
+状態がrunningのままserviceがない場合は、通知後、人が差分を確認してresumeする。
+古いtaskを消す前に必要な結果を保存する。自動削除は設けていない。
+
+見張りはAgentコンテナの `$HERMES_HOME/scripts/runner-agent-job-alerts.py`。
+weekly-reviewと同じcron list/createの経路で、名前 `runner-agent-job-alerts`、`*/10 * * * *`、
+`--no-agent --deliver discord:<home_channel>` を登録する。既存同名jobは保持するので、設定を
+変える場合は登録内容も本人が確認する。cron一覧取得に失敗したapplyでは登録を進めない。
+固定版のベースimageにはopenssh-clientがあり、terminalと同じ鍵・known_hosts・ユーザーを使う。
+no_agentはLLMを呼ばずstdoutをそのまま配送する。空stdoutは無通知。
+通知対象は完了・公開待ち・公開済み・blocked・失敗・停止・期限切れ・driver消失。
+明示的なstopだけでなく、Runner再起動時のSIGTERMによるstoppedも一度だけ通知する。
+通知文はIDと状態だけなので、Webappで詳細を調べる。SSH失敗は復旧するまで1回だけ通知する。
+通知済み記録後の配送失敗には自動再送がないため、状態確認も併用する。
+
+PR ② のhelper契約は `/usr/local/libexec/agent-job-github-credential`（root所有・group/other書込不可）。
+Git credential protocolで短命App tokenを返し、CLIの環境には渡さない。
+公開時だけdriverがhelperを使い、対象owner/repoと一致するGitHub HTTPS originへ
+`agent/...` をpushし、`gh pr create --draft --base <base>` を実行する。
+失敗後はpushまたはPRが既に作られていないかを本人が確認してから再開する。
+公開の冪等な復旧とhelper実装の統合試験はPR ② で行う（現時点では未検証）。
+
+apply前には `make agent-job-fixture` と既存Runner・Agent fixtureを実行し、
+Dockerを使う `make ansible-lint-agent ansible-check-agent shellcheck` は管理端末で行う。
+apply後の試験用repoで、user manager・MemoryMax・子孫を含むstop・3 CLIの認証とresume・
+DGX競合・gateway再起動中の継続・空出力の無通知・SSH障害の抑制と復旧・Discord配送を確かめる。
+これら実機受け入れとPR ②の公開試験は **未検証**。
+
+### 固定版CLIのローカル確認（2026-11-12）
+
+PR ①と同じ package-lock.json を scratchpad にコピーして `npm ci` した。
+Claude Code 2.1.322、Codex 0.167.1、dsh 0.2.2-rc.1 の実体でhelpを確認した。
+Node 24.20.0と資格情報のない一時HOMEで、存在しないsessionをresumeするダミー実行も行い、
+3 CLIともsession不存在のエラーになることを確認した。実際の認証情報・本番ホストは使っていない。
+
+| CLI | 初回出力とresumeの確認 |
+| --- | --- |
+| Claude | `-p --output-format json` のresult/session_id/is_errorを読む。`-p --resume <id> --output-format json` はhelpと不存在sessionで確認。成功JSONの解析はfixtureで検証、認証済み成功は未検証 |
+| Codex | JSONLのthread.started.thread_id、item.completedのagent_message、turn.completed/errorを読む。`exec resume <id> --json` はhelpと不存在sessionで確認。resumeに`--sandbox`はないためglobal `-c sandbox_mode="workspace-write"` と network_access、`-a never` を共通で渡す。成功JSONLはfixtureで検証、認証済み成功は未検証 |
+| dsh | 固定npmパッケージのjson-stream実装でsession.sessionIdとfinal.sessionId/text/reason.kindを確認。初回はsession-idなし、再開時のみ`--session-id`。headlessに`--model`はなく、任意modelは`--patch`でlocal-glmのagent-default-modelを指定。helpと不存在sessionのJSONL errorを実行確認。成功・resumeの遷移はfixtureで検証、DGX成功実行は未検証 |
+
+出力形式の変更はdriverの更新が必要。CLIの版を変える際はhelpと実出力を再確認し、
+fixtureの成功・失敗・resumeを更新してから反映する。
+
+ローカルの新fixture 24件と既存Runner・Agent系fixture、`git diff --check` は成功した。
+実行環境はPython 3.12.3。driverはPython 3.13標準ライブラリで使えるAPIに限定しているが、
+RunnerのPython 3.13上での実行は **未検証**。Dockerを使うmakeはこの作業では実行していない。

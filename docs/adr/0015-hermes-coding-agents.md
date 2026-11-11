@@ -67,3 +67,37 @@ issue #207 の決定に従う。PR ② 完了前は公開処理を利用開始�
 - [Codex 設定](https://learn.chatgpt.com/docs/config-file/config-reference)、
   [自動化認証の留保](https://learn.chatgpt.com/docs/auth/ci-cd-auth)
 - [dsh 0.2.2-rc.1 の変更](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.2-rc.1)
+
+## 2026-11-12 補足: 長時間作業の進行役（PR ①.5）
+
+[issue #207 の方針変更](https://github.com/koji-genba/homelab/issues/207#issuecomment-6800944788)
+に従い、長時間作業を進める役は Runner の root 所有 Python driver `agent-job` に置く。
+固定版 c7da41dd の Webapp は platform=local で、閲覧者不在時の background 完了は履歴の
+note になり、次のターンを起こさない。gateway 再起動時も SSH background の追跡・通知は復元されない。
+Hermes の通知を次の段階の起点にすると、ブラウザや gateway の寿命で作業が止まるためである。
+Hermes は計画・起動・問い合わせへの回答・最後のレビューを担う。busy_input_mode は変えない。
+
+Runner の `systemd --user` と linger を使い、SSH セッションから切り離す。
+service は MemoryMax=6G、KillMode=control-group、RuntimeMaxSec=6h とし、stop で子孫も止める。
+状態の正は `/srv/agent-work/tasks/<id>/`。repo ごとの flock と起動受付ロックで同一 repo を排他し、
+全体は2件まで。初回計画は期限6時間・CLI起動30回・連続失敗3回、段階のtimeout最大120分。
+人の明示的な resume で期限を最大6時間更新し、累積起動・連続失敗の上限を増やせる。
+3 CLI は同じ状態遷移を使い、dsh にも重い段階を任せられる。DGX は Hermes と共用する。
+
+CLI の `done` は driver が固定 bot 名義で checkpoint commit する。
+公開を有効にしても PR ② の root 所有 credential helper が無ければ `ready_to_publish`。
+helper の契約は `/usr/local/libexec/agent-job-github-credential` の Git credential protocol
+（get/store/erase）とする。導入後は対象 repo と一致する HTTPS origin の `agent/` branch だけを
+push し、`gh pr create --draft` を実行する。main push・force push・merge はしない。
+この補足は長時間作業での checkpoint・draft公開を driver に移す例外で、短い直接実行のレビュー手順は維持する。
+
+Agent は10分ごとの `no_agent` script cron で同じ鍵・ユーザーから `agent-job alerts` を読む。
+停止（明示的なstop・Runner再起動時のSIGTERMを含む）も通知する。
+空のstdoutは通知しない。届け先は SOPS の Discord home channel を変数で渡し、local は使わない。
+SSH失敗は状態ファイルで復旧まで抑制する。通知済みの記録は送信確認より前なので、配送は厳密な
+exactly-once ではない。状態ファイルを正とし、通知がなくても問い合わせで確認する。
+CLI出力は既知のcredential形式をマスクし、通知には要約を含めない。ただし同じUIDのCLIと
+home credential の境界は変わらず、任意の秘密文字列の完全な検出は保証しない。
+
+ローカル fixture で制御フローを検証する。実機の user manager・cgroup・sandbox・サブスクリプション
+認証での成功とresume・Discord配送・GitHub公開は **未検証**。PR ② と実機受け入れ後に利用開始する。

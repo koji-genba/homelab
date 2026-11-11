@@ -39,5 +39,6 @@
   loop:
     - "{{ agent_stack_hermes_data_dir }}/hindsight"
     - "{{ agent_stack_hermes_data_dir }}/skills"
+    - "{{ agent_stack_hermes_data_dir }}/scripts"
     # The terminal backend reads its known_hosts from ~/.ssh (HOME=/opt/data).
     - "{{ agent_stack_hermes_data_dir }}/.ssh"

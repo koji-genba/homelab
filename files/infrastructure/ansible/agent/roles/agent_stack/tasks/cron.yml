@@ -9,7 +9,7 @@
            'hermes', 'hermes', 'cron', 'list', '--all'] }}
   register: agent_stack_cron_list
   changed_when: false
-  failed_when: false
+  failed_when: agent_stack_cron_list.rc != 0
 
 - name: Register the weekly review job when it is missing
   ansible.builtin.command:
@@ -23,3 +23,16 @@
            '--skill', agent_stack_weekly_review_skill ] }}
   when: agent_stack_weekly_review_name not in (agent_stack_cron_list.stdout | default(''))
   changed_when: true
+
+- name: Register the Runner job watchdog when missing
+  ansible.builtin.command:
+    argv: >-
+      {{ agent_stack_compose_argv_prefix + [
+           'exec', '-T', '--user', agent_stack_uid ~ ':' ~ agent_stack_gid,
+           'hermes', 'hermes', 'cron', 'create', '*/10 * * * *',
+           '--name', 'runner-agent-job-alerts',
+           '--no-agent', '--script', 'runner-agent-job-alerts.py',
+           '--deliver', 'discord:' ~ agent_stack_secrets.discord.home_channel ] }}
+  when: "'runner-agent-job-alerts' not in (agent_stack_cron_list.stdout | default(''))"
+  changed_when: true
+  no_log: true

@@ -162,7 +162,7 @@ Module token estimates were measured on 2026-10-16 with the Cartographer scanner
 | Terraform ElastiFlow / gateway / stashPadDev | `terraform-validate-elastiflow`, `terraform-validate-tailscale-gateway`, `terraform-validate-stashpad-dev` (CI, `-backend=false`); roots selected by `ELASTIFLOW_ROOT`, `TAILSCALE_GATEWAY_ROOT`, `STASHPAD_DEV_ROOT` |
 | pve1 NUT Ansible | `ansible-lint-pve1`, `ansible-check-pve1` (CI syntax only); manual `ansible-apply-pve1 PVE1_ANSIBLE_ARGS='--check --diff'` contacts host; NUT + VM startup/NFS ordering, no sudo; `secrets-encrypt-pve1` creates operator-supplied bundle |
 | ElastiFlow Ansible | `ansible-lint-elastiflow`, `ansible-check-elastiflow` (CI syntax-check); manual `ansible-apply-elastiflow`, separate from Apps reconcile; `ELASTIFLOW_ANSIBLE_{ROOT,INVENTORY,CONFIG,ARGS}` |
-| CI fixtures | `gateway-routes-test`, `ansible-bootstrap-paths-test`, `terraform-apps-vm-lifecycle-test`, `toolbox-uid-test`, `cloud-init-test`, `compose-config`, `adguard-config-check`, `gatus-config-check`, `compose-reconcile-fixture`, `mover-test`, `shellcheck`, `secrets-scan`, `state-backup-test`, `state-restore-test`, `state-backup-preflight-test`, `tailscale-acl-path-test`, `tailscale-import-gates-test`, `agent-compose-config`, `agent-vm-cloud-init-test`, `runner-vm-cloud-init-test`, `terraform-agent-runner-vm-lifecycle-test`, `runner-privilege-fixture`, `runner-firewall-fixture`, `agent-runner-scope-fixture`, `agent-dnat-guard-fixture`, `agent-backup-fixture`, `agent-healthcheck-fixture`, `agent-restore-fixture`, `agent-rebuild-fixture`（restore fixtureからmodel-fetch/ops-cleanup/ops-behaviorも実行） |
+| CI fixtures | `gateway-routes-test`, `ansible-bootstrap-paths-test`, `terraform-apps-vm-lifecycle-test`, `toolbox-uid-test`, `cloud-init-test`, `compose-config`, `adguard-config-check`, `gatus-config-check`, `compose-reconcile-fixture`, `mover-test`, `shellcheck`, `secrets-scan`, `state-backup-test`, `state-restore-test`, `state-backup-preflight-test`, `tailscale-acl-path-test`, `tailscale-import-gates-test`, `agent-compose-config`, `agent-vm-cloud-init-test`, `runner-vm-cloud-init-test`, `terraform-agent-runner-vm-lifecycle-test`, `agent-job-fixture`, `runner-privilege-fixture`, `runner-firewall-fixture`, `agent-runner-scope-fixture`, `agent-dnat-guard-fixture`, `agent-backup-fixture`, `agent-healthcheck-fixture`, `agent-restore-fixture`, `agent-rebuild-fixture`（restore fixtureからmodel-fetch/ops-cleanup/ops-behaviorも実行） |
 | Not in CI | `preflight` |
 | Ops | `state-backup`, `state-backup-push` (alias), `state-backup-preflight`, `state-restore`, `rollback-app` |
 | Secrets | `secrets-encrypt` (needs `AGE_RECIPIENT`, refuses to overwrite), `secrets-decrypt-check` (needs `AGE_IDENTITY_FILE`), `secrets-encrypt-agent` / `secrets-decrypt-check-agent` (the `secrets/agent/runtime.sops.yaml` bundle) |
@@ -495,3 +495,14 @@ HOSTSYNC (~21s), FSD to host off ~70s, VM stop ~34s (Apps19s/Hermes6s), VM→NFS
 CPJ1200 stayed off ~2.5min with AC present until the UPS button was pressed; DGX auto-booted and pve1 was started manually.
 Staying off without AC is inferred from this result, not directly tested. The runbook records both test timelines and recovery;
 Tiered Storage documents mounting mergerfs through mnt-shared.mount to avoid SSH session cgroups.
+
+### Runner long jobs (issue #207, PR ①.5)
+
+`roles/runner/files/agent-job` and `tasks/agent_job.yml` install the stdlib Python driver,
+linger and persistent systemd user manager. State: `/srv/agent-work/tasks/<id>/`; per-repo flock,
+global admission limit 2, bounded CLI continuation and bot checkpoint commits. `runner-agent-job`
+is a force-managed skill. Agent `agent_stack` installs `scripts/runner-agent-job-alerts.py` under
+Hermes home and registers a 10-minute `no_agent` cron to Discord home channel; empty output is silent.
+PR ② credential helper is still absent, so enabled publication stops at `ready_to_publish`.
+`scripts/tests/agent-job-fixture.py` / `make agent-job-fixture` run offline in CI.
+Live systemd/CLI resume/Discord/publication remain **未検証**; see ADR-0015 and Hermes operations.
