@@ -1,0 +1,499 @@
+#!/usr/bin/python3
+"""Bounded Runner jobs. Python 3.13 stdlib; systemd user services own processes."""
+import argparse
+import contextlib
+import fcntl
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import re
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+
+ROOT = Path('/srv/agent-work')
+HELPER = Path('/usr/local/libexec/agent-job-github-credential')
+ACTIVE = {'queued', 'running'}
+EVENTS = {'done', 'ready_to_publish', 'published', 'blocked', 'failed', 'deadline', 'stopped'}
+
+
+def clean(text):
+    text = re.sub(r'(?i)(bearer\s+|(?:api[_-]?key|token|password|secret)\s*[=:]\s*)[^\s,"\x27]+', r'\1[REDACTED]', str(text))
+    text = re.sub(r'\b(?:sk-[\w-]+|gh[pousr]_[\w]+|github_pat_[\w]+)\b', '[REDACTED]', text)
+    return re.sub(r'-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----', '[REDACTED]', text, flags=re.S)
+
+
+def atomic(path, value):
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix='.write-')
+    try:
+        with os.fdopen(fd, 'w') as out:
+            json.dump(value, out, ensure_ascii=False, indent=2, allow_nan=False)
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def read(path):
+    return json.loads(path.read_text())
+
+
+@contextlib.contextmanager
+def lock(path, nonblock=False):
+    with path.open('a') as out:
+        fcntl.flock(out, fcntl.LOCK_EX | (fcntl.LOCK_NB if nonblock else 0))
+        yield
+
+
+def identifier(value):
+    if not isinstance(value, str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}', value):
+        raise ValueError('invalid id')
+    return value
+
+
+def number(obj, key, default, maximum=None, integer=False):
+    value = obj.setdefault(key, default)
+    if isinstance(value, bool) or not isinstance(value, int if integer else (int, float)) or not math.isfinite(value) or value <= 0 or (maximum and value > maximum):
+        raise ValueError('invalid ' + key)
+
+
+def string(obj, key):
+    value = obj.get(key)
+    if not isinstance(value, str) or not value.strip() or '\0' in value:
+        raise ValueError('invalid ' + key)
+    return value
+
+
+def validate(plan):
+    if not isinstance(plan, dict):
+        raise ValueError('plan must be object')
+    identifier(plan.get('id'))
+    repo = Path(string(plan, 'repo'))
+    relative = repo.resolve().relative_to((ROOT / 'repos').resolve())
+    if not repo.is_absolute() or len(relative.parts) != 2 or not repo.is_dir():
+        raise ValueError('repo must be repos/<owner>/<repo>')
+    plan['repo'] = str(repo.resolve())
+    branch = string(plan, 'branch')
+    base = string(plan, 'base')
+    for ref in (branch, base):
+        if ref.startswith('-') or subprocess.run(['git', 'check-ref-format', '--branch', ref], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode:
+            raise ValueError('invalid git ref')
+    if not branch.startswith('agent/') or branch == base:
+        raise ValueError('branch must start agent/ and differ from base')
+    number(plan, 'deadline_hours', 6, 6)
+    number(plan, 'max_launches', 30, 30, True)
+    number(plan, 'max_consecutive_failures', 3, 3, True)
+    stages = plan.get('stages')
+    if not isinstance(stages, list) or not 1 <= len(stages) <= 30:
+        raise ValueError('stages must contain 1..30 stages')
+    for stage in stages:
+        if not isinstance(stage, dict):
+            raise ValueError('stage must be object')
+        for field in ('name', 'prompt', 'acceptance'):
+            string(stage, field)
+        if stage.get('cli') not in ('claude', 'codex', 'dsh') or type(stage.get('network')) is not bool:
+            raise ValueError('invalid cli/network')
+        if 'model' in stage:
+            string(stage, 'model')
+        number(stage, 'timeout_minutes', 45, 120)
+    pub = plan.get('publish')
+    if not isinstance(pub, dict) or type(pub.get('enabled')) is not bool:
+        raise ValueError('invalid publish')
+    for field in ('title', 'body'):
+        string(pub, field)
+    return plan
+
+
+def env():
+    # Deliberate allowlist: no API keys, forwarded tokens, SSH agent or git config.
+    return {'HOME': str(Path.home()), 'USER': os.environ.get('USER', 'hermes-runner'),
+            'PATH': '/usr/local/bin:/usr/bin:/bin', 'LANG': 'C.UTF-8',
+            'XDG_RUNTIME_DIR': '/run/user/' + str(os.getuid()),
+            'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/run/user/' + str(os.getuid()) + '/bus',
+            'DISABLE_AUTOUPDATER': '1'}
+
+
+def unit(job):
+    return 'agent-job-' + identifier(job) + '.service'
+
+
+def systemctl(*args):
+    return subprocess.run(['systemctl', '--user', *args], env=env(), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+
+
+def alive(job):
+    return systemctl('is-active', unit(job)).stdout.strip() in ('active', 'activating', 'deactivating')
+
+
+def states():
+    return [(p.parent, read(p)) for p in sorted((ROOT / 'tasks').glob('*/state.json'))]
+
+
+def save(task, state, status=None, summary=None):
+    if status:
+        state['status'] = status
+    if summary is not None:
+        state['summary'] = clean(summary)[:2000]
+    state['updated_at'] = time.time()
+    atomic(task / 'state.json', state)
+
+
+def launch(task, state):
+    save(task, state, 'queued')
+    result = subprocess.run(['systemd-run', '--user', '--quiet', '--collect', '--service-type=exec', '--unit=' + unit(state['id']),
+                             '--property=MemoryMax=6G', '--property=KillMode=control-group',
+                             '--property=TimeoutStopSec=15s', '--property=RuntimeMaxSec=6h',
+                             str(Path(__file__).resolve()), '_run', state['id']], env=env(),
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if result.returncode:
+        save(task, state, 'failed', 'systemd user service could not start')
+        raise ValueError('systemd user service could not start')
+
+
+def command(stage, session, prompt, run):
+    cli = stage['cli']
+    model = ['--model', stage['model']] if stage.get('model') else []
+    if cli == 'claude':
+        return ['claude', '-p', '--output-format', 'json', '--permission-mode', 'bypassPermissions', *model, *(['--resume', session] if session else []), prompt]
+    if cli == 'codex':
+        # resume has no --sandbox option: put sandbox policy in global config.
+        return ['codex', '-a', 'never', '-c', 'sandbox_mode="workspace-write"', '-c', 'sandbox_workspace_write.network_access=' + str(stage['network']).lower(), 'exec', *(['resume', session] if session else []), '--json', *model, prompt]
+    overlay = []
+    if stage.get('model'):
+        patch = run / 'model.yml'
+        # JSON is a YAML subset. The provider remains the managed DGX endpoint.
+        atomic(patch, [{'id': 'agent-default-model', 'config': {'provider': 'local-glm', 'model': stage['model']}}])
+        overlay = ['--patch', str(patch)]
+    return ['dsh', 'headless', *overlay, '--json', '--permission-mode', 'workspace-write', '--approval-policy', 'never', *(['--session-id', session] if session else []), prompt]
+
+
+def parse(cli, output, session):
+    if cli == 'claude':
+        obj = json.loads(output)
+        session = obj.get('session_id') or session
+        return session, obj.get('result', ''), bool(obj.get('is_error')) or 'result' not in obj or obj.get('type', 'result') != 'result'
+    events, malformed = [], False
+    for line in output.splitlines():
+        if line.strip():
+            try:
+                event = json.loads(line)
+                if not isinstance(event, dict):
+                    raise ValueError('event must be object')
+                events.append(event)
+            except ValueError:
+                malformed = True
+    text, error, final = '', malformed, False
+    for event in events:
+        kind = event.get('type')
+        if cli == 'codex':
+            if kind == 'thread.started':
+                session = event['thread_id']
+            if kind == 'item.completed' and event.get('item', {}).get('type') == 'agent_message':
+                text = event['item']['text']
+            if kind in ('error', 'turn.failed'):
+                error = True
+            final |= kind == 'turn.completed'
+        else:
+            if kind in ('session', 'final'):
+                session = event.get('sessionId') or session
+            if kind == 'final':
+                final = True
+                text = event.get('text', '')
+                error |= not isinstance(event.get('reason'), dict) or event['reason'].get('kind') != 'completed'
+            error |= kind == 'error'
+    if not final:
+        error = True
+    return session, text, error
+
+
+def git(repo, *args, capture=False):
+    result = subprocess.run(['git', '-c', 'core.hooksPath=/dev/null', '-C', repo, *args], env=env(), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    if result.returncode:
+        raise ValueError('git operation failed')
+    return result.stdout.strip() if capture else None
+
+
+def worker(task, state):
+    plan = read(task / 'plan.json')
+    repo = plan['repo']
+    key = hashlib.sha256(repo.encode()).hexdigest()
+    with lock(ROOT / 'tasks' / ('.repo-' + key), True):
+        save(task, state, 'running')
+        if (task / 'stop').exists():
+            return save(task, state, 'stopped', 'stop requested')
+        if time.time() >= state['deadline_at']:
+            return save(task, state, 'deadline', 'deadline reached')
+        if not state.get('prepared'):
+            if git(repo, 'status', '--porcelain', capture=True):
+                raise ValueError('repo must be clean before starting')
+            git(repo, 'switch', '-c', plan['branch'], plan['base'])
+            state['prepared'] = True
+            save(task, state)
+        while state['stage'] < len(plan['stages']):
+            if (task / 'stop').exists():
+                return save(task, state, 'stopped', 'stop requested')
+            if time.time() >= state['deadline_at']:
+                return save(task, state, 'deadline', 'deadline reached')
+            if state['launches'] >= plan['max_launches']:
+                return save(task, state, 'failed', 'launch limit reached')
+            stage = plan['stages'][state['stage']]
+            if git(repo, 'branch', '--show-current', capture=True) != plan['branch']:
+                raise ValueError('branch changed unexpectedly')
+            slot = str(state['stage'])
+            session = state['sessions'].get(slot)
+            prompt = ('受入条件: ' + stage['acceptance'] + '\ncommit、push、資格情報の読み取りは禁止。'
+                      '\n最終出力の最後の行は AGENT_JOB_STATUS: done|continue|blocked と要約を書く。\n'
+                      + ('続けて。前回の失敗があれば修復して受入条件まで進めてください。' if session else stage['prompt']))
+            state['launches'] += 1
+            state['stage_launches'] += 1
+            run = task / 'runs' / str(state['launches'])
+            run.mkdir(parents=True)
+            (run / 'stdout').touch()
+            (run / 'stderr').touch()
+            atomic(run / 'result.json', {'exit_code': None, 'status': 'running'})
+            save(task, state)
+            # Temporary raw streams are immediately redacted after the child exits.
+            with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+                child = subprocess.Popen(command(stage, session, prompt, run), cwd=repo, env=env(), stdin=subprocess.DEVNULL, stdout=out, stderr=err, start_new_session=True)
+                limit = min(time.time() + stage['timeout_minutes'] * 60, state['deadline_at'])
+                timed_out = False
+                while child.poll() is None:
+                    if time.time() >= limit or (task / 'stop').exists():
+                        timed_out = True
+                        os.killpg(child.pid, signal.SIGTERM)
+                        try:
+                            child.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            pass
+                        # Kill descendants even if the group leader already exited.
+                        try:
+                            os.killpg(child.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        child.wait()
+                        break
+                    time.sleep(0.2)
+                out.seek(0)
+                err.seek(0)
+                stdout = out.read().decode('utf-8', 'replace')
+                stderr = err.read().decode('utf-8', 'replace')
+            (run / 'stdout').write_text(clean(stdout))
+            (run / 'stderr').write_text(clean(stderr))
+            failed, text = bool(child.returncode or timed_out), ''
+            try:
+                session, text, parse_error = parse(stage['cli'], stdout, session)
+                failed |= parse_error or not isinstance(session, str) or not session or not isinstance(text, str)
+                if isinstance(session, str) and session:
+                    state['sessions'][slot] = session
+                    state.setdefault('cli_sessions', {})[stage['cli']] = session
+            except (ValueError, KeyError, TypeError, AttributeError):
+                failed = True
+            last = text.strip().splitlines()[-1] if isinstance(text, str) and text.strip() else ''
+            match = re.fullmatch(r'AGENT_JOB_STATUS:\s*(done|continue|blocked)(?:\s+(.*))?', last)
+            if 'AGENT_JOB_STATUS:' in last and not match:
+                failed = True
+            status = match[1] if match else 'continue'
+            summary = (match[2] or status) if match else 'no status line; continuing'
+            atomic(run / 'result.json', {'exit_code': child.returncode, 'timeout': timed_out, 'failed': bool(failed), 'status': status, 'summary': clean(summary)})
+            (run / 'exit-code').write_text(str(child.returncode) + '\n')
+            if (task / 'stop').exists():
+                return save(task, state, 'stopped', 'stop requested')
+            if time.time() >= state['deadline_at']:
+                return save(task, state, 'deadline', 'deadline reached')
+            if failed:
+                state['consecutive_failures'] += 1
+                save(task, state, summary='CLI failed (see run result)')
+                if state['consecutive_failures'] >= plan['max_consecutive_failures']:
+                    return save(task, state, 'failed', 'consecutive failure limit reached')
+            else:
+                state['consecutive_failures'] = 0
+                save(task, state, summary=summary)
+                if status == 'blocked':
+                    return save(task, state, 'blocked')
+                if status == 'done':
+                    if git(repo, 'branch', '--show-current', capture=True) != plan['branch']:
+                        raise ValueError('branch changed before checkpoint')
+                    paths = git(repo, 'ls-files', '--others', '--modified', '--deleted', '--exclude-standard', '-z', capture=True).split('\0')
+                    paths += git(repo, 'diff', '--cached', '--name-only', '-z', capture=True).split('\0')
+                    paths = [path for path in paths if Path(path).name not in {'.env.example', '.env.sample'}]
+                    if any(re.search(r'(^|/)(\.env(?:\..*)?|auth\.json|credentials(?:\.json)?|id_(?:rsa|ed25519)|.*\.(?:pem|key))$', path, re.I) for path in paths if path):
+                        return save(task, state, 'blocked', 'credential-like path changed; human review required')
+                    git(repo, 'add', '--all')
+                    git(repo, '-c', 'user.name=Agent Job Bot', '-c', 'user.email=agent-job@localhost', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'agent-job(' + plan['id'] + '): ' + stage['name'])
+                    state['stage'] += 1
+                    state['stage_launches'] = 0
+                    save(task, state)
+        if (task / 'stop').exists():
+            return save(task, state, 'stopped', 'stop requested')
+        if time.time() >= state['deadline_at']:
+            return save(task, state, 'deadline', 'deadline reached')
+        if not plan['publish']['enabled']:
+            return save(task, state, 'done')
+        # PR 2 contract: a root-owned executable implementing git's credential
+        # helper protocol (get/store/erase). Never use personal ambient tokens.
+        if not HELPER.is_file() or not os.access(HELPER, os.X_OK):
+            return save(task, state, 'ready_to_publish', 'PR 2 credential helper not installed')
+        helper_stat = HELPER.stat()
+        if helper_stat.st_uid != 0 or helper_stat.st_mode & 0o022:
+            raise ValueError('credential helper must be root owned and not writable by group/others')
+        if git(repo, 'branch', '--show-current', capture=True) != plan['branch']:
+            raise ValueError('branch changed before publishing')
+        remote = git(repo, 'remote', 'get-url', 'origin', capture=True)
+        relative = Path(repo).relative_to(ROOT / 'repos')
+        expected = 'https://github.com/' + relative.as_posix()
+        push_remote = git(repo, 'remote', 'get-url', '--push', '--all', 'origin', capture=True)
+        if remote not in (expected, expected + '.git') or push_remote not in (expected, expected + '.git'):
+            raise ValueError('origin must match approved GitHub repo over HTTPS')
+        remaining = max(1, state['deadline_at'] - time.time())
+        credential = subprocess.run([str(HELPER), 'get'], input='protocol=https\nhost=github.com\npath=' + relative.as_posix() + '.git\n\n', env=env(), capture_output=True, text=True, timeout=min(60, remaining))
+        fields = dict(line.split('=', 1) for line in credential.stdout.splitlines() if '=' in line)
+        if credential.returncode or not fields.get('password'):
+            raise ValueError('credential helper failed')
+        publish_env = env() | {'GH_TOKEN': fields['password'], 'GIT_TERMINAL_PROMPT': '0'}
+        body = task / 'pr-body.md'
+        body.write_text(plan['publish']['body'])
+        commands = [
+            ['git', '-c', 'core.hooksPath=/dev/null', '-c', 'credential.helper=', '-c', 'credential.helper=' + str(HELPER), 'push', '--set-upstream', 'origin', 'HEAD:refs/heads/' + plan['branch']],
+            ['gh', 'pr', 'create', '--draft', '--repo', relative.as_posix(), '--base', plan['base'], '--head', plan['branch'], '--title', plan['publish']['title'], '--body-file', str(body)],
+        ]
+        for argv in commands:
+            if (task / 'stop').exists():
+                return save(task, state, 'stopped', 'stop requested')
+            remaining = state['deadline_at'] - time.time()
+            if remaining <= 0:
+                return save(task, state, 'deadline', 'deadline reached')
+            result = subprocess.run(argv, cwd=repo, env=publish_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=remaining)
+            if result.returncode:
+                return save(task, state, 'failed', 'publication failed; inspect remote before resuming')
+        save(task, state, 'published', 'draft PR created')
+
+
+def main():
+    os.umask(0o077)
+    parser = argparse.ArgumentParser(description=__doc__)
+    subs = parser.add_subparsers(dest='cmd', required=True)
+    subs.add_parser('start').add_argument('plan')
+    for cmd in ('stop', 'resume', '_run'):
+        sub = subs.add_parser(cmd)
+        sub.add_argument('id', type=identifier)
+        if cmd == 'resume':
+            sub.add_argument('--deadline-hours', type=float)
+            sub.add_argument('--max-launches', type=int)
+            sub.add_argument('--max-consecutive-failures', type=int)
+    sub = subs.add_parser('status')
+    sub.add_argument('id', nargs='?', type=identifier)
+    sub.add_argument('--json', action='store_true')
+    subs.add_parser('list')
+    subs.add_parser('alerts')
+    args = parser.parse_args()
+    tasks = ROOT / 'tasks'
+    tasks.mkdir(parents=True, exist_ok=True)
+    if args.cmd in ('start', 'resume'):
+        with lock(tasks / '.admission'):
+            current = states()
+            if args.cmd == 'start':
+                plan = validate(read(Path(args.plan)))
+                task = tasks / plan['id']
+                if task.exists():
+                    raise ValueError('id already exists')
+                state = {'id': plan['id'], 'repo': plan['repo'], 'stage': 0, 'launches': 0, 'stage_launches': 0, 'consecutive_failures': 0, 'sessions': {}, 'cli_sessions': {}, 'summary': '', 'created_at': time.time(), 'deadline_at': time.time() + plan['deadline_hours'] * 3600}
+            else:
+                task = tasks / args.id
+                state, plan = read(task / 'state.json'), read(task / 'plan.json')
+                if alive(args.id):
+                    raise ValueError('job still active')
+                if state['status'] in ACTIVE:
+                    if time.time() - state['updated_at'] < 30:
+                        raise ValueError('job may still be starting')
+                    state['status'] = 'failed'
+                if state['status'] not in {'blocked', 'stopped', 'failed', 'deadline', 'ready_to_publish'}:
+                    raise ValueError('job cannot resume')
+                # Explicit human intervention grants a new bounded budget. Initial
+                # plans always enforce 30/3; resume may increase cumulative ceilings.
+                for key, value in [('max_launches', args.max_launches), ('max_consecutive_failures', args.max_consecutive_failures)]:
+                    if value is not None:
+                        if value <= plan[key]:
+                            raise ValueError('resume limits must increase')
+                        plan[key] = value
+                if args.deadline_hours is not None:
+                    if not math.isfinite(args.deadline_hours) or not 0 < args.deadline_hours <= 6:
+                        raise ValueError('resume deadline must be 0..6 hours')
+                    state['deadline_at'] = time.time() + args.deadline_hours * 3600
+                if state['deadline_at'] <= time.time() or (state['stage'] < len(plan['stages']) and state['launches'] >= plan['max_launches']):
+                    raise ValueError('increase exhausted budget explicitly')
+                state['consecutive_failures'] = 0
+            active = [s for _, s in current if s['id'] != plan['id'] and (s['status'] in ACTIVE or alive(s['id']))]
+            if len(active) >= 2 or any(s['repo'] == plan['repo'] for s in active):
+                raise ValueError('global or repo concurrency limit')
+            task.mkdir(exist_ok=True)
+            (task / 'stop').unlink(missing_ok=True)
+            atomic(task / 'plan.json', plan)
+            launch(task, state)
+            print(state['id'])
+    elif args.cmd == '_run':
+        task = tasks / args.id
+        with lock(task / '.driver', True):
+            state = read(task / 'state.json')
+            # systemctl stop signals the whole cgroup. Keep the driver alive long
+            # enough to reap the CLI and persist its redacted result before exit.
+            def terminate(signum, frame):
+                if time.time() < state['deadline_at']:
+                    (task / 'stop').touch()
+            signal.signal(signal.SIGTERM, terminate)
+            try:
+                worker(task, state)
+            except Exception as exc:
+                # Never put raw subprocess output/exception data in notifications.
+                if (task / 'stop').exists():
+                    save(task, state, 'stopped', 'stop requested')
+                elif time.time() >= state['deadline_at']:
+                    save(task, state, 'deadline', 'deadline reached')
+                else:
+                    save(task, state, 'failed', 'driver error: ' + type(exc).__name__)
+                return 1
+    elif args.cmd == 'stop':
+        with lock(tasks / '.admission'):
+            task = tasks / args.id
+            state = read(task / 'state.json')
+            (task / 'stop').touch()
+            systemctl('stop', unit(args.id))
+            if alive(args.id):
+                raise ValueError('service did not stop')
+            state = read(task / 'state.json')
+            if state['status'] in ACTIVE:
+                save(task, state, 'stopped', 'stop requested; cgroup stopped')
+    elif args.cmd == 'alerts':
+        with lock(tasks / '.alerts'):
+            for task, state in states():
+                event = state['status']
+                if event in ACTIVE and time.time() - state['updated_at'] > 30 and not alive(state['id']):
+                    event = 'driver_lost'
+                if event not in EVENTS | {'driver_lost'}:
+                    continue
+                marker = [event, state['updated_at']]
+                notified = task / 'alert.json'
+                if notified.exists() and read(notified) == marker:
+                    continue
+                print('agent-job ' + state['id'] + ': ' + event)
+                atomic(notified, marker)
+    else:
+        values = [s for _, s in states() if not getattr(args, 'id', None) or s['id'] == args.id]
+        if getattr(args, 'json', False):
+            print(json.dumps(values, ensure_ascii=False))
+        else:
+            for state in values:
+                print(state['id'], state['status'], 'stage=' + str(state['stage']), 'launches=' + str(state['launches']), clean(state['summary']))
+    return 0
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except (ValueError, OSError, KeyError, TypeError):
+        sys.exit('agent-job: invalid plan/state, unavailable service, or concurrency limit')

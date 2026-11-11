@@ -44,4 +44,7 @@ firewall_egress_allowed_networks: []
 firewall_egress_allowed_tcp:
   - address: 192.168.10.11/32
     port: 2049
+  # ADR-0015: dsh inference only.
+  - address: 192.168.10.51/32
+    port: 8000
 firewall_dnat_guard: false

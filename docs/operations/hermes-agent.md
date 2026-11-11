@@ -64,6 +64,10 @@ Hermesは一度きりの案内を出すと`config.yaml`の`onboarding.seen`へ�
 唯一のコピーや機密は置かない。Runner の LAN 遮断には pve1:2049/tcp の例外が一つ加わる
 （[ADR-0014](../adr/0014-hermes-share-nfs.md)）。先に ai export を3 clientの `/32` へ絞る。
 
+コーディングCLIの追加では、DGX `.51:8000/tcp` をさらに例外とし、Claude Code/Codexによる
+承認済みrepoの非機密コードの外部推論送信を認める（[ADR-0015](../adr/0015-hermes-coding-agents.md)、
+実機は未検証）。資格情報の明示的読み取り・送信や任意のファイルuploadはこの許可に含めない。
+
 ### サービスの資源上限
 
 2026-10-17のユーザー決定（WS14）でAgent VMを**12 vCPU / 24 GiB**とする。swapはない前提で設計する。
@@ -870,3 +874,269 @@ Runner の実体は `/srv/agent-work/share`。inbox/outbox は約束で、権限
 どちらもfailed=0。新skillの配布でHermesとCDP tunnelを再作成し、Hermesはrunningを確認した。
 運用者がWindows・AndroidでSMB共有を利用し、Hermesのoutboxへのdirectory作成と
 `10002:10004`・`2775`の継承を確認した。詳細と残る確認事項は[共有運用](hermes-share.md)。
+
+## Runner のコーディング CLI（issue #207）
+
+[ADR-0015](../adr/0015-hermes-coding-agents.md) の PR ①。
+実機での導入・ログイン・推論実行・再 apply の changed=0 は未検証。
+反映は本人が `make ansible-apply-agent` で行う。skill/config の変更は Hermes と
+CDP tunnel を再作成するので会話中を避ける。GitHub 公開処理は PR ② 完了後に開始する。
+
+### 導入と設定の所有者
+
+`roles/runner/files/coding-agents/` の package.json と package-lock.json を
+root 所有の `/opt/coding-agents` に置き、成功時の lockfile と SHA-256 を比較して、
+変更時だけ `npm ci` を実行する。失敗した install は成功記録を更新せず、次回に再試行する。
+`/usr/local/bin/{claude,codex,dsh}` はその `.bin` への symlink。
+hermes-runner に導入先への書き込み権限は与えない。
+
+2026-11-12 の npm registry latest を調べ、次へ固定した。
+
+| package | 固定版 |
+| --- | --- |
+| @anthropic-ai/claude-code | 2.1.322 |
+| @openai/codex | 0.167.1 |
+| @deepseek-ai/dsh | 0.2.2-rc.1 |
+
+gh は [Debian 13 の 2.46.0-3](https://packages.debian.org/trixie/gh) を apt で入れる。
+必要な `pr create --base --head --body-file --repo` は
+[その版のソース](https://github.com/cli/cli/blob/v2.46.0/pkg/cmd/pr/create/create.go) にあり、
+外部 apt repository は不要。bubblewrap と socat も Debian apt 管理とし、OS の更新経路を使う。
+
+[dsh rc.1 の changelog](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.2-rc.1)
+は 0.2.1-rc.5 以降をまとめている。
+[旧 rc.5](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-rc.5) は thinking 表示改善が中心。
+rc.1 は Node >=24.9、Cordis Core 4.1・Loader/Include 1.1、pi-ai 1.3 へ更新し、
+PTC tool 実行の分割、tools.mode/DSH_TOOLS_MODE の移行、Node PTC の SSH protocol 2→3、
+plugin の tools.resolve/executable・prompt assembly、SDK・Session API などに互換性変更がある。
+また read-before-write/external-change 検査が既定で無効になり、Web Fetch は private address も
+扱えるため、Runner の firewall 制限を維持する。
+今回は独自 plugin/PTC helper を使わず、採用版の home patch・headless を確認できたこと、
+pi-ai・model 切替・approval 保存などの修正を理由に rc.1 を選んだ。preview の互換性保証はない。
+
+自動更新と設定の管理は次の契約とする。
+
+- Claude は root 管理の `/etc/claude-code/managed-settings.json` の
+  `env.DISABLE_AUTOUPDATER="1"` で停止する。
+  [公式の managed settings](https://code.claude.com/docs/en/managed-settings) と
+  [自動更新停止](https://code.claude.com/docs/en/setup#disable-auto-updates) の仕組みを使う。
+  CLI が管理者設定を書き戻す経路ではなく、本人の `~/.claude` 設定・認証には触れない。
+- Codex の `~/.codex/config.toml` は model=`gpt-6.1-sol`、effort=`medium`、
+  `check_for_update_on_startup=false`。model 未指定で起動時の確認画面に止まる問題を避ける。
+  [設定リファレンス](https://learn.chatgpt.com/docs/config-file/config-reference) に従う。
+  [採用版の config writer](https://github.com/openai/codex/blob/rust-v0.167.1/codex-rs/core/src/config/edit.rs)
+  はモデル等を保存できるため、対話操作で変えた値は次の apply で戻る。
+- dsh の `~/.dsh/cordis.patch.yml` は作業端末と同じ DGX provider・ダミー Authorization を使う。
+  glm-5.3-flash、context 1048576、output 65536、developer role 無効、max_tokens、
+  bash timeout 600000ms。DeepSeek の API/account/web search と session telemetry を止める。
+  desktop の telemetry/analytics は headless に存在しないため、その2 entryのpatchは含めない。
+  [採用版 profile-boot](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/apps/cli/src/profile-boot.ts)
+  は home patch を全 profile に重ね、通常起動では別の profile root config を書く。
+  設定編集/plugin 操作には永続化経路があるので、ローカル設定変更も apply で戻す。
+  CLI/headless に自動本体更新の経路・停止スイッチは確認されず、Desktop updater は使わない。
+  plugin の追加・更新を worker に行わせず、必要なら repo の固定依存として見直す。
+
+`.codex` と `.dsh` は hermes-runner 所有0700、設定は0600。
+ディレクトリを再帰変更せず、`.claude/.credentials.json` と `.codex/auth.json` は
+読み取り・配置・削除・属性変更の対象にしない。ログイン後も token refresh 用の書き込みを残す。
+通常の headless 実行での設定の不変性、認証更新との併用、2回目 apply の changed=0 は実機で未検証。
+対話設定の変更や Hermes の skill 編集があれば、その復元分は changed になる。
+
+### 初回ログイン（本人が行う）
+
+管理端末から deploy で Runner に入り、実行ユーザーへ切り替える。
+以下は反映後の手順であり、今回の実装作業から本番接続はしていない。
+
+```sh
+ssh deploy@192.168.10.105
+sudo -iu hermes-runner
+claude auth login
+codex login --device-auth
+```
+
+Claude は表示された URL を本人のブラウザで開く。サブスクリプションの Claude アカウントを選び、
+Console/API 課金に切り替えない。Codex は本人の ChatGPT アカウントで device code を認証する。
+必要なら先に ChatGPT の Security 設定で device code を有効化する。
+URL/code/token を Hermes の会話・ログや repo に貼らず、CLI の保存に任せる。
+Claude の認証は `~/.claude/.credentials.json`、Codex は `~/.codex/auth.json`。
+認証ファイルを cat して確認しない。API キーや別の認証環境変数を注入しない。
+
+### 失効と再構築
+
+漏えいが疑われる場合は進行中の worker と Hermes の新規起動を止め、本人が対応する。
+Claude は Claude の **Settings で該当サインインを削除してから**、同じユーザーで
+`claude auth logout`。Codex は同じユーザーで `codex logout`。
+成功表示やローカルのファイル削除だけでサーバー側の失効成功を断定しない。
+Codex CLI は ChatGPT Active sessions の対象外なので、Web の全端末ログアウトを代用にしない。
+失効を確認できない場合はアカウント側のサポート/セキュリティ手順で確認し、未検証と記録する。
+
+home は Runner-work のバックアップ対象外。資格情報を `/srv/agent-work`、share、Agent の環境へ
+コピーしない。Runner 再構築後は本人が再ログインする。
+受入時は backup tar のファイル名一覧で認証情報が含まれないことを確認し、内容は表示しない。
+
+### skill と作業の流れ
+
+repo の skills 直下に `runner-coding`（使い分け）、`runner-claude`、`runner-codex`、
+`runner-dsh`、`runner-publish` の5本を置く。
+[Hermes c7da41dd の loader](https://github.com/NousResearch/hermes-agent/blob/c7da41dd522dc19cc08bbfcfa69d4b078224b45d/tools/skills_tool.py)
+で YAML frontmatter の name/description、name 64文字・description 1024文字の上限、
+カテゴリが配置パスから決まること、同じtierの名前衝突が拒否されることを確認した。
+直下配置なので category はなし。固有名を使い、旧同梱 claude-code/codex は
+`skills.disabled` で一覧/自動選択から外す（ファイル削除やアクセス制御ではない）。
+直接skill_viewで読める経路は残るので、使い分けskillでも旧2本を使わないよう指示する。
+
+既存 `Seed the shipped skills when absent` は force=false のまま。
+今回の5本だけ別の copy task（force=true）で同期する。
+**Hermes がこの5本を書き換えても、次の apply で repo の内容に戻る。**
+hermes-share と weekly-review の既存編集は上書きしない。
+
+作業は Runner の `/srv/agent-work/repos/<owner>/<repo>` で `agent/<topic>` branch を作って行う。
+3 CLI は PTY を使わず `terminal(background=true, notify=true)`、
+`timeout --signal=TERM --kill-after=30s 45m`、完了は `process_manage` と JSON/最終回答で確かめる。
+SSH foreground は `bash -c`（非login）、remote background は `nohup bash -lc`（login）。
+[SSH backend](https://github.com/NousResearch/hermes-agent/blob/c7da41dd522dc19cc08bbfcfa69d4b078224b45d/tools/environments/ssh.py)
+と process_registry の両方を確認した。Debian の既定 PATH にある `/usr/local/bin` を使い、
+`.bashrc` に依存させない。実セッションでのPATH発見は反映後に確認する。
+
+Claude の `--permission-mode bypassPermissions` は
+[CLI reference](https://code.claude.com/docs/en/cli-reference) で
+`--dangerously-skip-permissions` と等価。
+[公式 devcontainer 手順](https://code.claude.com/docs/en/devcontainer) は非rootユーザーでの使用を示す。
+Runner の非rootで使い、VMを隔離境界とする。`--bare` は使わない。
+Codex は workspace-write、必要時だけ network_access=true。sandbox が不成立なら原因を報告し、
+Runner 側の制限を直すか別CLIを選ぶ。danger-full-access へ自動変更しない。
+
+smart_policy は通常のデータ処理規則だけでは外部推論送信により ESCALATE され得るため、
+対象repo内で固定CLIを起動し非機密コードを送る場合だけ狭く許可した。
+資格情報の明示的読み取り・送信、無関係なupload、インターネットコードの取得・実行は
+ESCALATEを維持する。実際の判定・悪意あるpromptへの耐性は未検証。
+CLIには変更とテストまで、Hermesが確認後に commit・push・gh pr create。
+GitHub認証は **PR ② で用意する credential helper を使う**。
+main へのpush・mergeは禁止。本人への報告は使ったCLI・結果・テスト・残件を短くまとめる。
+
+### 版の更新と反映前後の確認
+
+package.json の3依存を exact version へ更新し、そのディレクトリで
+`npm install --package-lock-only --no-audit --no-fund` を実行して lockfile を生成する。
+差分の版・resolved・integrity・install scripts と changelog をレビューし、
+一時ディレクトリで `npm ci` を検証してから、本人が `make ansible-apply-agent` を行う。
+CLI自身の update/install コマンドは使わない。rollbackも以前のmanifest/lockへ戻してapplyする。
+Nodeの最低版と設定schema・skillのフラグも更新ごとに確認する。
+
+反映前にroot管理の導入先、既存ログインへの影響、再作成のタイミング、DGXの稼働endpointと
+モデル容量、送るrepoの機密性を確認する。適用後の受入は次のとおり（いずれも実機では未検証）。
+
+- Hermes の実 SSH session で `command -v claude codex dsh gh`、版、導入先の書き込み不可を確認。
+- 初回ログイン後に小さな試験用 repo で3 CLIの変更・テスト・終了通知・構造化結果を確認。
+- Codex/dsh の sandbox、dsh のbwrap選択、GLM tool calling、DGXの競合を確認。
+- RunnerからDGX TCP/8000だけが通り、同hostの他port・他LAN宛は拒否されることを確認。
+- 通常実行後の設定と認証維持、連続2回目 apply の changed=0、backupのhome除外を確認。
+- smart approvalで通常CLI起動を許可し、資格情報読み取り/送信をESCALATEするか確認。
+
+PR ② では App 鍵の配布、gh-broker、短命tokenラッパー、Git/ghの認証、repo登録スクリプトと
+main rulesetを用意する。その後、branch push/PR成功、main push/merge/workflow push拒否を受け入れる。
+
+## 長時間作業: agent-job（PR ①.5）
+
+長時間・放置する作業は `runner-agent-job` skill を使う。計画と状態の正は Runner、
+Hermes は計画して起動したあと短いターンに戻る。Webapp を閉じても段階は driver が進める。
+以下は Runner の hermes-runner で使うコマンド。**実機は未検証**。
+
+```sh
+agent-job start /srv/agent-work/plans/task-01.json
+agent-job status task-01 --json
+agent-job list
+agent-job stop task-01
+agent-job resume task-01
+# 本人が原因を確認し、追加の時間・予算を承認した場合
+agent-job resume task-01 --deadline-hours 6 --max-launches 60 --max-consecutive-failures 5
+```
+
+計画例と必須項目は [runner-agent-job skill](../../files/services/agent/hermes/skills/runner-agent-job/SKILL.md)。
+対象は `/srv/agent-work/repos/<owner>/<repo>` の clean な checkout。初回は base から新しい
+`agent/` branch を作る。id の再利用、既存 branch への初回起動、同じrepoでの二重起動は拒否する。
+外部の直接CLIも同じcheckoutで走らせない。排他の対象はこのdriver経由のjobである。
+
+| 制限 | 初回 | 再開 |
+| --- | --- | --- |
+| 全体の期限 | 既定・最大6時間 | `--deadline-hours` 指定時点から最大6時間 |
+| CLI起動 | 既定・最大30回 | `--max-launches` で累積上限を増やす |
+| 連続失敗 | 既定・最大3回 | 再開で回数をリセット、上限は明示した場合に増やす |
+| 1段階のtimeout | 既定45分・最大120分 | 既存計画を使う |
+| 同時実行 | 同じrepoは1、全体2 | 同じ |
+| メモリ | serviceごと6GiB（Runner 15GiB・swapなしで、2件合計12GiB） | 同じ |
+
+`continue` と、正常終了したが状態行のない出力は、同じ段階・CLI session へ「続けて」を送る。
+終了コード非0・timeout・不正JSON等は失敗として記録し、session ID が得られた場合はresumeする。
+CLIがsessionを作る前に失敗した場合だけ、次回も新規起動になる。成功応答で連続失敗回数を戻す。
+`blocked` は理由を state.json に残す。受入条件の自動実行判定はCLIに依存するため、
+`done` の表示だけで本人への完了報告を済ませない。
+
+`/srv/agent-work/tasks/<id>/` には plan.json、atomic更新のstate.json、
+runs/<累積起動番号>/stdout・stderr・result.json・exit-code がある。
+state.json の stage は0始まり、sessionsは段階ごと、cli_sessionsは各CLIの直近のID。
+launches、consecutive_failures、deadline_at（Unix時刻）、summaryを確認する。
+CLI出力は既知のcredential文字列をマスクする。ログ・計画は0700のtask配下に置き、公開しない。
+マスクは完全な秘密検出ではない。資格情報を読む依頼は禁止し、公開前に差分を点検する。
+資格情報らしいファイル名が変更されると checkpoint を作らず blocked にする。
+
+| 状態 | 対処 |
+| --- | --- |
+| queued / running | 起動待ち / 実行中。状態と直近runを確認 |
+| done | 公開無効の計画を完了。差分・テスト・ログをレビュー |
+| ready_to_publish | 段階は完了、PR ② のhelper待ち。導入後にresume |
+| published | draft PR作成済み。本人がレビューしmergeを判断 |
+| blocked / failed | 理由とrun結果を確認し、必要な修復後にresume |
+| stopped | 停止済み。再開前に部分変更を確認 |
+| deadline | 期限到達。本人の判断で時間・予算を追加してresume |
+
+`start` は `systemd-run --user` の起動後すぐ戻る。linger と `user@<uid>.service` をAnsibleで用意する。
+`systemctl --user status agent-job-task-01.service`、`journalctl --user -u agent-job-task-01.service`
+も使える。`stop` は停止フラグを置いてserviceのcgroupを停止する（15秒後に強制終了）。
+Hermes会話の `/stop` だけではRunner jobは止まらない。ホスト再起動後にjobは自動再開しない。
+状態がrunningのままserviceがない場合は、通知後、人が差分を確認してresumeする。
+古いtaskを消す前に必要な結果を保存する。自動削除は設けていない。
+
+見張りはAgentコンテナの `$HERMES_HOME/scripts/runner-agent-job-alerts.py`。
+weekly-reviewと同じcron list/createの経路で、名前 `runner-agent-job-alerts`、`*/10 * * * *`、
+`--no-agent --deliver discord:<home_channel>` を登録する。既存同名jobは保持するので、設定を
+変える場合は登録内容も本人が確認する。cron一覧取得に失敗したapplyでは登録を進めない。
+固定版のベースimageにはopenssh-clientがあり、terminalと同じ鍵・known_hosts・ユーザーを使う。
+no_agentはLLMを呼ばずstdoutをそのまま配送する。空stdoutは無通知。
+通知対象は完了・公開待ち・公開済み・blocked・失敗・停止・期限切れ・driver消失。
+明示的なstopだけでなく、Runner再起動時のSIGTERMによるstoppedも一度だけ通知する。
+通知文はIDと状態だけなので、Webappで詳細を調べる。SSH失敗は復旧するまで1回だけ通知する。
+通知済み記録後の配送失敗には自動再送がないため、状態確認も併用する。
+
+PR ② のhelper契約は `/usr/local/libexec/agent-job-github-credential`（root所有・group/other書込不可）。
+Git credential protocolで短命App tokenを返し、CLIの環境には渡さない。
+公開時だけdriverがhelperを使い、対象owner/repoと一致するGitHub HTTPS originへ
+`agent/...` をpushし、`gh pr create --draft --base <base>` を実行する。
+失敗後はpushまたはPRが既に作られていないかを本人が確認してから再開する。
+公開の冪等な復旧とhelper実装の統合試験はPR ② で行う（現時点では未検証）。
+
+apply前には `make agent-job-fixture` と既存Runner・Agent fixtureを実行し、
+Dockerを使う `make ansible-lint-agent ansible-check-agent shellcheck` は管理端末で行う。
+apply後の試験用repoで、user manager・MemoryMax・子孫を含むstop・3 CLIの認証とresume・
+DGX競合・gateway再起動中の継続・空出力の無通知・SSH障害の抑制と復旧・Discord配送を確かめる。
+これら実機受け入れとPR ②の公開試験は **未検証**。
+
+### 固定版CLIのローカル確認（2026-11-12）
+
+PR ①と同じ package-lock.json を scratchpad にコピーして `npm ci` した。
+Claude Code 2.1.322、Codex 0.167.1、dsh 0.2.2-rc.1 の実体でhelpを確認した。
+Node 24.20.0と資格情報のない一時HOMEで、存在しないsessionをresumeするダミー実行も行い、
+3 CLIともsession不存在のエラーになることを確認した。実際の認証情報・本番ホストは使っていない。
+
+| CLI | 初回出力とresumeの確認 |
+| --- | --- |
+| Claude | `-p --output-format json` のresult/session_id/is_errorを読む。`-p --resume <id> --output-format json` はhelpと不存在sessionで確認。成功JSONの解析はfixtureで検証、認証済み成功は未検証 |
+| Codex | JSONLのthread.started.thread_id、item.completedのagent_message、turn.completed/errorを読む。`exec resume <id> --json` はhelpと不存在sessionで確認。resumeに`--sandbox`はないためglobal `-c sandbox_mode="workspace-write"` と network_access、`-a never` を共通で渡す。成功JSONLはfixtureで検証、認証済み成功は未検証 |
+| dsh | 固定npmパッケージのjson-stream実装でsession.sessionIdとfinal.sessionId/text/reason.kindを確認。初回はsession-idなし、再開時のみ`--session-id`。headlessに`--model`はなく、任意modelは`--patch`でlocal-glmのagent-default-modelを指定。helpと不存在sessionのJSONL errorを実行確認。成功・resumeの遷移はfixtureで検証、DGX成功実行は未検証 |
+
+出力形式の変更はdriverの更新が必要。CLIの版を変える際はhelpと実出力を再確認し、
+fixtureの成功・失敗・resumeを更新してから反映する。
+
+ローカルの新fixture 24件と既存Runner・Agent系fixture、`git diff --check` は成功した。
+実行環境はPython 3.12.3。driverはPython 3.13標準ライブラリで使えるAPIに限定しているが、
+RunnerのPython 3.13上での実行は **未検証**。Dockerを使うmakeはこの作業では実行していない。

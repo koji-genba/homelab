@@ -452,3 +452,7 @@ secrets-encrypt-pve1:
 	test ! -e files/infrastructure/secrets/pve1/runtime.sops.yaml || { echo "refusing to overwrite pve1 bundle" >&2; exit 1; }
 	$(TOOLBOX_RUN) sops encrypt --age "$(AGE_RECIPIENT)" --output files/infrastructure/secrets/pve1/runtime.sops.yaml files/infrastructure/secrets/pve1/runtime.yaml
 	chmod 0600 files/infrastructure/secrets/pve1/runtime.sops.yaml
+
+.PHONY: agent-job-fixture
+agent-job-fixture:
+	python3 scripts/tests/agent-job-fixture.py

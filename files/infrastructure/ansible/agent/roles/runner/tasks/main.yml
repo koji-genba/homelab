@@ -10,8 +10,14 @@
 - name: Configure the runner runtime
   ansible.builtin.import_tasks: runtime.yml
 
+- name: Configure the pinned coding CLIs
+  ansible.builtin.import_tasks: coding_agents.yml
+
 - name: Configure the runner work disk
   ansible.builtin.import_tasks: storage.yml
+
+- name: Configure persistent coding jobs
+  ansible.builtin.import_tasks: agent_job.yml
 
 - name: Configure the Hermes exchange mount
   ansible.builtin.import_tasks: share.yml

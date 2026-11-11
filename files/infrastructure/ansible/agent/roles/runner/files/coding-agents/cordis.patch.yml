@@ -1,0 +1,44 @@
+# Managed by Ansible; local settings changes are reverted on apply.
+- id: llm-pi-ai
+  config:
+    providers:
+      local-glm:
+        displayName: Local GLM (DGX)
+        api: openai-completions
+        baseURL: http://192.168.10.51:8000/v1
+        headers:
+          Authorization: Bearer local-dummy
+        compat:
+          supportsDeveloperRole: false
+          maxTokensField: max_tokens
+        models:
+          - id: glm-5.3-flash
+            contextWindow: 1048576
+            maxTokens: 65536
+            input: [text, image]
+
+- id: agent-default-model
+  config:
+    provider: local-glm
+    model: glm-5.3-flash
+
+- id: llm-deepseek
+  disabled: true
+- id: llm-deepseek-account
+  disabled: true
+- id: deepseek-account
+  disabled: true
+- id: web-search-deepseek
+  disabled: true
+- id: web-deepseek-api
+  disabled: true
+
+- id: session-telemetry-otel
+  config:
+    mode: DISABLED
+# Desktop product telemetry/analytics are not mounted by the headless profile.
+
+# bash ツールの 1 コマンドの既定の待ち時間（既定は 60 秒）。超えたらバックグラウンドの job に移る
+- id: bash-sandbox
+  config:
+    timeoutMs: 600000

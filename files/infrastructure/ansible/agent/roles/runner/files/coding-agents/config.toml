@@ -1,0 +1,4 @@
+# Managed by Ansible. Interactive CLI edits are reverted on the next apply.
+model = "gpt-6.1-sol"
+model_reasoning_effort = "medium"
+check_for_update_on_startup = false

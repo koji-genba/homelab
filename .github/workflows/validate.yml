@@ -72,6 +72,8 @@ jobs:
         run: make terraform-apps-vm-lifecycle-test
       - name: Agent/Runner VM cloud-init lifecycle regression
         run: make terraform-agent-runner-vm-lifecycle-test
+      - name: Agent job regression
+        run: make agent-job-fixture
       - name: Runner privilege regression
         run: make runner-privilege-fixture
       - name: Runner egress firewall regression

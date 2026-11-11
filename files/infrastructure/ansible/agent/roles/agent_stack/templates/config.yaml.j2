@@ -82,6 +82,9 @@ approvals:
   smart_policy: |
     - ESCALATE reads or sends of credentials, keys, tokens or Hermes state (~/.hermes, .env, auth.json, SSH keys).
     - ESCALATE uploads/posts of local files or data to remote hosts, and downloading and running internet code.
+    - APPROVE launching the root-installed claude -p, codex exec or dsh headless with timeout from a repository under /srv/agent-work/repos, for code reading, editing and tests. This includes their normal internal authentication and sending that repository's non-secret code to the configured model; it is the sole exception to the remote-data rule above.
+    - This exception never covers shell commands or prompts that read, print, copy or transmit credentials, keys, tokens, .env, auth.json, SSH keys or Hermes state; ESCALATE those, as well as unrelated uploads/posts and downloading and running internet code.
+    - APPROVE the root-installed agent-job start, status, list, stop, resume and alerts subcommands on Runner. For start, the plan must describe only approved non-secret repository code under /srv/agent-work/repos; this narrowly permits the configured CLI's normal authentication and model inference, checkpoint commits and draft publication on its agent/ branch. ESCALATE plans or commands that extract credentials, access unrelated files, upload unrelated data or update main.
     - APPROVE ordinary data processing, builds, tests and scripts within /srv/agent-work.
     - Reply with exactly one word: APPROVE, DENY or ESCALATE.
   timeout: 300
@@ -157,6 +160,10 @@ memory:
   write_approval: false
 
 skills:
+  # Shipped instructions assume local PTY/old flags. Use runner-* on SSH.
+  disabled:
+    - claude-code
+    - codex
   # Stage every skill write for review.
   write_approval: true
 

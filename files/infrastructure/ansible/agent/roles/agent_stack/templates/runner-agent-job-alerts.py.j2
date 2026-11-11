@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+"""Hermes no_agent cron: stdout is delivered verbatim; silence means no alert."""
+import fcntl
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+
+home = Path(os.environ.get('HERMES_HOME', '/opt/data'))
+marker = home / 'runner-agent-job-ssh-failed'
+with (home / 'runner-agent-job-watch.lock').open('a') as guard:
+    fcntl.flock(guard, fcntl.LOCK_EX)
+    try:
+        result = subprocess.run([
+            'ssh', '-T', '-i', '/run/agent-ssh/id_ed25519',
+            '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes',
+            '-o', 'StrictHostKeyChecking=yes',
+            '-o', 'UserKnownHostsFile=/opt/data/.ssh/known_hosts',
+            '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=10',
+            '-o', 'ServerAliveCountMax=2',
+            {{ (agent_stack_runner_user ~ '@' ~ agent_stack_runner_host) | to_json }},
+            '/usr/local/bin/agent-job alerts'],
+            capture_output=True, text=True, timeout=60)
+        failed = result.returncode != 0
+    except (OSError, subprocess.TimeoutExpired):
+        failed = True
+    if failed:
+        if not marker.exists():
+            fd, tmp = tempfile.mkstemp(dir=home, prefix='.runner-watch-')
+            os.close(fd)
+            os.replace(tmp, marker)
+            print('agent-job watchdog: Runner SSH failed; inspect connectivity and user service')
+    else:
+        marker.unlink(missing_ok=True)
+        print(result.stdout, end='')

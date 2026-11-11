@@ -1,0 +1,40 @@
+---
+- name: Install the systemd user session packages
+  ansible.builtin.apt:
+    name:
+      - dbus-user-session
+      - libpam-systemd
+    state: present
+
+- name: Enable persistent runner user services
+  ansible.builtin.command:
+    argv: [loginctl, enable-linger, "{{ runner_user }}"]
+    creates: "/var/lib/systemd/linger/{{ runner_user }}"
+
+- name: Read the runner UID for its user manager
+  ansible.builtin.command:
+    argv: [id, -u, "{{ runner_user }}"]
+  register: runner_job_uid
+  changed_when: false
+  check_mode: false
+
+- name: Start the persistent runner user manager
+  ansible.builtin.systemd_service:
+    name: "user@{{ runner_job_uid.stdout }}.service"
+    state: started
+
+- name: Install the root-owned long running job driver
+  ansible.builtin.copy:
+    src: agent-job
+    dest: /usr/local/bin/agent-job
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Create the private runner task store
+  ansible.builtin.file:
+    path: /srv/agent-work/tasks
+    state: directory
+    owner: "{{ runner_user }}"
+    group: "{{ runner_user }}"
+    mode: '0700'

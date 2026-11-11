@@ -38,6 +38,14 @@ agent_stack_models_dir: "{{ agent_data_mount | default('/srv/agent') }}/models"
 agent_stack_repo_services_dir: "{{ role_path }}/../../../../../services/agent"
 agent_stack_compose_src: "{{ agent_stack_repo_services_dir }}/stack/compose.yaml"
 agent_stack_skills_src: "{{ agent_stack_repo_services_dir }}/hermes/skills"
+# Only these skills are authoritative on every apply; other skills stay seeds.
+agent_stack_managed_skills:
+  - runner-coding
+  - runner-claude
+  - runner-codex
+  - runner-dsh
+  - runner-publish
+  - runner-agent-job
 
 # --- Runtime inputs ----------------------------------------------------------
 agent_stack_timezone: "{{ agent_system_timezone | default('Asia/Tokyo') }}"
