@@ -38,6 +38,10 @@
           {{ hostvars[groups['agent'][0]]['agent_runner_ssh_public_key'] | default('') }}
         runner_cdp_ssh_public_key: >-
           {{ hostvars[groups['agent'][0]]['agent_cdp_tunnel_ssh_public_key'] | default('') }}
+    - name: Adopt the optional App credentials decrypted on the controller
+      ansible.builtin.set_fact:
+        runner_github_app: "{{ (hostvars[groups['agent'][0]]['agent_stack_secrets'] | default({})).get('github_app', {}) or {} }}"
+      no_log: true
   roles:
     - common
     - firewall

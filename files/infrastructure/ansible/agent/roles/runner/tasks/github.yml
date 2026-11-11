@@ -1,0 +1,148 @@
+---
+- name: Determine whether the optional GitHub App is configured
+  ansible.builtin.set_fact:
+    runner_github_enabled: >-
+      {{ runner_github_app.app_id | default('', true) | string | length > 0
+         and runner_github_app.installation_id | default('', true) | string | length > 0
+         and runner_github_app.private_key | default('', true) | length > 0 }}
+  no_log: true
+
+- name: Configure the GitHub App broker when credentials are present
+  when: runner_github_enabled | bool
+  block:
+    - name: Validate GitHub App identifiers and private key format
+      ansible.builtin.assert:
+        that:
+          - runner_github_app.app_id | string is match('^[1-9][0-9]*$')
+          - runner_github_app.installation_id | string is match('^[1-9][0-9]*$')
+          - "'PRIVATE KEY-----' in runner_github_app.private_key"
+      no_log: true
+
+    - name: Install the broker runtime packages
+      ansible.builtin.apt:
+        name: [sudo, openssl]
+        state: present
+
+    - name: Create the non-login GitHub broker account
+      ansible.builtin.user:
+        name: gh-broker
+        system: true
+        home: /var/lib/gh-broker
+        create_home: false
+        shell: /usr/sbin/nologin
+        password_lock: true
+        groups: []
+        append: false
+
+    - name: Create the private broker cache
+      ansible.builtin.file:
+        path: /var/lib/gh-broker
+        state: directory
+        owner: gh-broker
+        group: gh-broker
+        mode: '0700'
+
+    - name: Create root-owned broker installation directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - /etc/homelab
+        - /etc/homelab/secrets
+        - /usr/local/libexec
+
+    - name: Install the GitHub App private key
+      ansible.builtin.copy:
+        dest: /etc/homelab/secrets/github-app.pem
+        content: "{{ runner_github_app.private_key }}"
+        owner: gh-broker
+        group: gh-broker
+        mode: '0400'
+      no_log: true
+
+    - name: Install the GitHub App broker configuration
+      ansible.builtin.copy:
+        dest: /etc/homelab/secrets/github-app.json
+        content: >-
+          {{ {'app_id': runner_github_app.app_id | string,
+              'installation_id': runner_github_app.installation_id | string} | to_json }}
+        owner: gh-broker
+        group: gh-broker
+        mode: '0400'
+      no_log: true
+
+    - name: Install root-owned GitHub broker programs
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - {src: agent-job-github-token, dest: /usr/local/libexec/agent-job-github-token}
+        - {src: agent-job-github-credential, dest: /usr/local/libexec/agent-job-github-credential}
+        - {src: gh-agent, dest: /usr/local/bin/gh-agent}
+
+    - name: Permit only the broker token command as gh-broker
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/hermes-runner-github
+        content: "{{ runner_user }} ALL=(gh-broker) NOPASSWD: /usr/local/libexec/agent-job-github-token\n"
+        owner: root
+        group: root
+        mode: '0440'
+        validate: /usr/sbin/visudo -cf %s
+
+    - name: Validate the complete sudoers configuration
+      ansible.builtin.command: /usr/sbin/visudo -c
+      changed_when: false
+
+# Initial empty bundles skip provisioning. Removing fields later also disables
+# previously installed credentials; do not leave a working broker behind.
+- name: Disable GitHub publication when the bundle is incomplete
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/sudoers.d/hermes-runner-github
+    - /usr/local/libexec/agent-job-github-credential
+    - /usr/local/libexec/agent-job-github-token
+    - /usr/local/bin/gh-agent
+    - /etc/homelab/secrets/github-app.pem
+    - /etc/homelab/secrets/github-app.json
+    - /var/lib/gh-broker
+  when: not (runner_github_enabled | bool)
+
+- name: Validate the optional public App bot identity
+  ansible.builtin.assert:
+    that:
+      - runner_github_app_slug == '' or runner_github_app_slug is match('^[a-z0-9][a-z0-9-]*$')
+      - runner_github_bot_user_id == '' or runner_github_bot_user_id is match('^[1-9][0-9]*$')
+      - (runner_github_app_slug == '') == (runner_github_bot_user_id == '')
+
+- name: Create runner Git configuration directories
+  ansible.builtin.file:
+    path: "/home/{{ runner_user }}/{{ item }}"
+    state: directory
+    owner: "{{ runner_user }}"
+    group: "{{ runner_user }}"
+    mode: '0700'
+  loop: [.config, .config/git]
+
+- name: Manage runner Git configuration
+  ansible.builtin.template:
+    src: runner.gitconfig.j2
+    dest: "/home/{{ runner_user }}/.gitconfig"
+    owner: "{{ runner_user }}"
+    group: "{{ runner_user }}"
+    mode: '0644'
+
+- name: Ignore common generated files in all runner repositories
+  ansible.builtin.copy:
+    src: runner.gitignore
+    dest: "/home/{{ runner_user }}/.config/git/ignore"
+    owner: "{{ runner_user }}"
+    group: "{{ runner_user }}"
+    mode: '0644'

@@ -1,0 +1,95 @@
+#!/usr/bin/python3 -I
+"""Restricted draft PR commands; main protection is enforced by GitHub rulesets."""
+import json
+import os
+import re
+import subprocess
+import sys
+
+HELPER = '/usr/local/libexec/agent-job-github-credential'
+GH = '/usr/bin/gh'
+
+
+def arguments(args):
+    if len(args) < 2 or args[0] != 'pr' or args[1] not in ('create', 'view', 'list', 'edit'):
+        raise ValueError('only draft PR create/edit and PR view/list allowed')
+    command = args[1]
+    values = {
+        'create': {'--title', '--body', '--body-file', '--base', '--head'},
+        'edit': {'--title', '--body', '--body-file'},
+        'view': {'--json', '--jq'},
+        'list': {'--json', '--jq', '--state', '--head', '--base', '--limit'},
+    }[command]
+    selector = None
+    options = {}
+    index = 2
+    if command in ('view', 'edit') and index < len(args) and not args[index].startswith('-'):
+        selector = args[index]
+        if not re.fullmatch(r'[1-9][0-9]*', selector):
+            raise ValueError('numeric PR required')
+        index += 1
+    if command == 'edit' and selector is None:
+        raise ValueError('numeric PR required')
+    while index < len(args):
+        key = args[index]
+        if key in options:
+            raise ValueError('duplicate option')
+        if key == '--draft' and command == 'create':
+            options[key] = True
+            index += 1
+        elif key in values and index + 1 < len(args):
+            options[key] = args[index + 1]
+            index += 2
+        else:
+            raise ValueError('unsupported option')
+    if command == 'create':
+        base = options.get('--base', '')
+        head = options.get('--head', '')
+        if not options.get('--draft') or not head.startswith('agent/') or base == head:
+            raise ValueError('draft, distinct base and agent/ head required')
+        for ref in (base, head):
+            # Check literal branch refs without expanding checkout shorthand such as @{-1}.
+            if not ref or ref.startswith('-') or subprocess.run(
+                    ['/usr/bin/git', 'check-ref-format', 'refs/heads/' + ref],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode:
+                raise ValueError('invalid branch ref')
+    return command, selector
+
+
+def run(target, args):
+    command, selector = arguments(args)
+    if not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?/[A-Za-z0-9_.-]{1,100}', target):
+        raise ValueError('invalid repository')
+    owner, repo = target.split('/')
+    if '--' in owner or repo in ('.', '..') or repo.endswith('.git'):
+        raise ValueError('invalid repository')
+    environment = {k: v for k, v in os.environ.items() if not k.startswith(('GH_', 'GITHUB_'))}
+    result = subprocess.run([HELPER, 'get'], input='protocol=https\nhost=github.com\npath=' + target + '\n\n',
+                            capture_output=True, text=True, check=True, timeout=60, env=environment)
+    fields = dict(line.split('=', 1) for line in result.stdout.splitlines() if '=' in line)
+    token = fields.get('password', '')
+    if not re.fullmatch(r'[A-Za-z0-9_]+', token):
+        raise ValueError('credential unavailable')
+    environment.update(GH_TOKEN=token, GH_HOST='github.com', GH_PROMPT_DISABLED='1')
+    base = [GH, '--repo', target]
+    if command == 'edit':
+        # Recheck on each edit. The wrapper never calls ready/merge or the API subcommand.
+        result = subprocess.run(base + ['pr', 'view', selector, '--json', 'isDraft'],
+                                capture_output=True, text=True, check=True, timeout=30, env=environment)
+        if json.loads(result.stdout).get('isDraft') is not True:
+            raise ValueError('only draft PR may be edited')
+    return subprocess.run(base + args, env=environment).returncode
+
+
+def main():
+    try:
+        if len(sys.argv) < 4:
+            raise ValueError('usage: gh-agent owner/repo pr create|view|list|edit ...')
+        return run(sys.argv[1], sys.argv[2:])
+    except Exception:
+        print('gh-agent: command refused or GitHub unavailable', file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

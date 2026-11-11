@@ -74,6 +74,8 @@ jobs:
         run: make terraform-agent-runner-vm-lifecycle-test
       - name: Agent job regression
         run: make agent-job-fixture
+      - name: Runner GitHub App offline fixture
+        run: make runner-github-fixture
       - name: Runner privilege regression
         run: make runner-privilege-fixture
       - name: Runner egress firewall regression

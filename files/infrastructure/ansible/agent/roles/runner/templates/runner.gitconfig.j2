@@ -1,0 +1,13 @@
+# Managed by Ansible. Never store a token here.
+[user]
+    name = {{ (runner_github_app_slug ~ '[bot]') if runner_github_app_slug else 'Agent Job Bot' }}
+    email = {{ (runner_github_bot_user_id ~ '+' ~ runner_github_app_slug ~ '[bot]@users.noreply.github.com') if runner_github_app_slug else 'agent-job@localhost' }}
+[credential]
+    useHttpPath = true
+[credential "https://github.com"]
+    helper =
+{% if runner_github_enabled %}
+    helper = /usr/local/libexec/agent-job-github-credential
+{% endif %}
+[core]
+    excludesFile = /home/{{ runner_user }}/.config/git/ignore

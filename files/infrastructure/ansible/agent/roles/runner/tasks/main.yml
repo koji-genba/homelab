@@ -16,6 +16,9 @@
 - name: Configure the runner work disk
   ansible.builtin.import_tasks: storage.yml
 
+- name: Configure GitHub App publication and runner Git defaults
+  ansible.builtin.import_tasks: github.yml
+
 - name: Configure persistent coding jobs
   ansible.builtin.import_tasks: agent_job.yml
 

@@ -7,8 +7,9 @@ platforms: [linux]
 # Runner から公開する
 
 作業場所は `/srv/agent-work/repos/<owner>/<repo>`。新しいrepoの作成・App登録・ruleset設定は本人が行う。
-GitHub認証は **PR ② で用意する credential helper を使う**。
-未導入ならpush/PR作成は止め、ローカルの変更とテスト結果を報告する。
+GitHub認証は `/usr/local/libexec/agent-job-github-credential` を使う。
+helper/鍵が未導入、またはrepoがAppにonboardingされていなければtokenを取れない。
+push/PR作成を止め、ローカルの変更とテスト結果を報告する。
 worker CLIにGitHub credentialの発行・注入を依頼しない。
 
 1. terminalでremoteが対象repoであること、作業treeと現在branchを確認する。
@@ -21,12 +22,17 @@ worker CLIにGitHub credentialの発行・注入を依頼しない。
 4. 対象を明示して `git add -- <変更ファイル>`、`git diff --cached` を確認してcommitする。
    `git add .` は使わない。commitは変更理由がわかる件名とする。
 5. 現在branchが `agent/<topic>` であることを再確認し、
-   `git push --set-upstream origin HEAD:refs/heads/agent/<topic>` でそのbranchだけpushする。
+   `git push origin HEAD:refs/heads/agent/<topic>` でそのbranchだけpushする。
 6. 変更内容・検証・未検証事項を書いたPR本文を一時ファイルに作り、
-   `gh pr create --repo <owner>/<repo> --base main --head agent/<topic> --title '<件名>' --body-file <本文ファイル>`。
+   `gh-agent <owner>/<repo> pr create --draft --base <base> --head agent/<topic> --title '<件名>' --body-file <本文ファイル>`。
+   baseは対象repoのdefault branchなど作業の起点を指定し、headと異なる有効なgit refを使う。
    本文は実際の改行を保存し、シェルへの直接補間を避ける。
 7. PR URL、使ったCLI、テスト結果を本人へ短く報告する。
 
-mainへのpush、force push、PRのmerge、branch保護やworkflowの変更は行わない。
+commit名義はAnsible管理のglobal git設定のApp botを使う。未設定時はAgent Job Bot。
+PR確認は `gh-agent <owner>/<repo> pr view <番号>` / `pr list`、本文修正は
+`gh-agent <owner>/<repo> pr edit <番号> --body-file <本文ファイル>`（draftのみ）。
+mainへのpush、force push、PRのmerge、branch保護の変更は行わない。
+`.github/workflows` を変えたpushはAppの権限で拒否される。その場合は本人に対応を頼む。
 homelabではmainのmergeが本番deployになる。mergeは本人だけが行う。
 権限エラー時は別の個人tokenへ切り替えず停止する。

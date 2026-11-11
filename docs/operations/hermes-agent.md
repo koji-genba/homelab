@@ -1011,7 +1011,7 @@ smart_policy は通常のデータ処理規則だけでは外部推論送信に�
 資格情報の明示的読み取り・送信、無関係なupload、インターネットコードの取得・実行は
 ESCALATEを維持する。実際の判定・悪意あるpromptへの耐性は未検証。
 CLIには変更とテストまで、Hermesが確認後に commit・push・gh pr create。
-GitHub認証は **PR ② で用意する credential helper を使う**。
+GitHub認証は下記「GitHub App による公開」のcredential helperとgh-agentを使う。
 main へのpush・mergeは禁止。本人への報告は使ったCLI・結果・テスト・残件を短くまとめる。
 
 ### 版の更新と反映前後の確認
@@ -1033,8 +1033,7 @@ Nodeの最低版と設定schema・skillのフラグも更新ごとに確認す�
 - 通常実行後の設定と認証維持、連続2回目 apply の changed=0、backupのhome除外を確認。
 - smart approvalで通常CLI起動を許可し、資格情報読み取り/送信をESCALATEするか確認。
 
-PR ② では App 鍵の配布、gh-broker、短命tokenラッパー、Git/ghの認証、repo登録スクリプトと
-main rulesetを用意する。その後、branch push/PR成功、main push/merge/workflow push拒否を受け入れる。
+PR ②のApp設定・鍵登録・repo onboarding・公開受入は下記「GitHub App による公開」に従う。
 
 ## 長時間作業: agent-job（PR ①.5）
 
@@ -1084,7 +1083,7 @@ CLI出力は既知のcredential文字列をマスクする。ログ・計画は0
 | --- | --- |
 | queued / running | 起動待ち / 実行中。状態と直近runを確認 |
 | done | 公開無効の計画を完了。差分・テスト・ログをレビュー |
-| ready_to_publish | 段階は完了、PR ② のhelper待ち。導入後にresume |
+| ready_to_publish | 段階は完了、App鍵/helper未導入。登録・導入後にresume |
 | published | draft PR作成済み。本人がレビューしmergeを判断 |
 | blocked / failed | 理由とrun結果を確認し、必要な修復後にresume |
 | stopped | 停止済み。再開前に部分変更を確認 |
@@ -1111,9 +1110,9 @@ no_agentはLLMを呼ばずstdoutをそのまま配送する。空stdoutは無通
 PR ② のhelper契約は `/usr/local/libexec/agent-job-github-credential`（root所有・group/other書込不可）。
 Git credential protocolで短命App tokenを返し、CLIの環境には渡さない。
 公開時だけdriverがhelperを使い、対象owner/repoと一致するGitHub HTTPS originへ
-`agent/...` をpushし、`gh pr create --draft --base <base>` を実行する。
+`agent/...` をpushし、`gh-agent <owner/repo> pr create --draft --base <planのbase>` を実行する。
 失敗後はpushまたはPRが既に作られていないかを本人が確認してから再開する。
-公開の冪等な復旧とhelper実装の統合試験はPR ② で行う（現時点では未検証）。
+公開失敗後の自動復旧は冪等ではない。helper/wrapperのローカル統合はfixtureで検証し、実GitHub受入は別途行う。
 
 apply前には `make agent-job-fixture` と既存Runner・Agent fixtureを実行し、
 Dockerを使う `make ansible-lint-agent ansible-check-agent shellcheck` は管理端末で行う。
@@ -1140,3 +1139,161 @@ fixtureの成功・失敗・resumeを更新してから反映する。
 ローカルの新fixture 24件と既存Runner・Agent系fixture、`git diff --check` は成功した。
 実行環境はPython 3.12.3。driverはPython 3.13標準ライブラリで使えるAPIに限定しているが、
 RunnerのPython 3.13上での実行は **未検証**。Dockerを使うmakeはこの作業では実行していない。
+
+## GitHub App による公開（PR ②）
+
+以下のGitHub設定変更・SOPS編集・applyは**本人が管理端末で行う**。
+Runnerへ個人PATや本人のghログインを渡さない。既存bundleはこの実装作業では変更していない。
+
+### 1. App の作成とインストール
+
+1. GitHubの本人アイコン → Settings → Developer settings → GitHub Apps → New GitHub App。
+   名前（以後slug）と本人管理のHomepage URLを入力する。OAuthのcallbackは使わず、
+   WebhookのActiveをoffにする。
+2. Repository permissionsを **Contents: Read and write、Pull requests: Read and write、
+   Metadata: Read-only** にする。Workflows・Administration・Actions・SecretsはNo access。
+   Organization/Account permissionsも追加しない。
+3. Where can this GitHub App be installed? は **Only on this account** を選び、作成する。
+   GeneralでApp IDを控え、Private keys → Generate a private keyでPEMを生成する。
+   ダウンロードした鍵は暗号化された管理端末上で0600にし、会話・ログへ貼らない。
+4. Install Appから本人アカウントへ **Only select repositories** でインストールする。
+   最初は試験repoだけを選ぶ。Settings → Applications → Installed GitHub Apps → Configureの
+   URLにあるinstallation IDを控える。All repositoriesを選ばない。
+   初回に選んだrepoにも、利用開始前に次のonboardingでmain保護を付ける。
+
+[App登録の公式手順](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app)
+と[installation tokenの限定](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app)
+を参照する。
+
+### 2. SOPS への登録と公開 bot 名義
+
+[secrets READMEの既存bundle編集](../../files/infrastructure/secrets/README.md#既存bundleの編集)
+にあるpinned toolboxと`sops_toolbox`関数を使用する。既存bundleをexampleで置き換えない。
+今回のtoolbox SOPS 3.10.2では既存の `sops set` でJSON値を渡す。
+次は本人が行う例。`set -x`を無効にし、鍵の内容を表示しない。
+
+```sh
+# APP_ID / INSTALLATION_ID は画面で控えた数値、PEM_FILE は安全な保存先の絶対path。
+# 値やPEMをshellのコマンド本文へ直接書かない。
+export APP_ID INSTALLATION_ID PEM_FILE
+github_app_json=$(python3 - <<'PY'
+import json, os, pathlib
+print(json.dumps({"app_id": os.environ["APP_ID"],
+                  "installation_id": os.environ["INSTALLATION_ID"],
+                  "private_key": pathlib.Path(os.environ["PEM_FILE"]).read_text()}))
+PY
+)
+sops_toolbox set files/infrastructure/secrets/agent/runtime.sops.yaml '["github_app"]' "$github_app_json"
+unset github_app_json
+chmod 0600 files/infrastructure/secrets/agent/runtime.sops.yaml
+AGE_IDENTITY_FILE="$AGE_IDENTITY_FILE" make secrets-decrypt-check-agent
+make secrets-scan
+```
+
+既存READMEと同じく `sops set` のJSON引数は短時間process listに現れる。共有端末・収録中は行わない。
+初回bundle作成だけならexampleの3項目を埋め、既存の `make secrets-encrypt-agent` を使う。
+既存bundleを上書きするために削除しない。平文の一時copyは残さず、安全な鍵の復旧copyは保管する。
+
+slugとbot user IDは秘密ではない。本人のghで次を実行する。
+
+```sh
+gh api '/users/<slug>[bot]' --jq '{login, id}'
+```
+
+`files/infrastructure/ansible/agent/group_vars/runner.yml` の `runner_github_app_slug` と
+`runner_github_bot_user_id` を**両方**埋める。commit名は`<slug>[bot]`、emailは
+`<id>+<slug>[bot]@users.noreply.github.com`。未設定なら従来のAgent Job Botを使う。
+PR作成者はcommit名義とは別にApp tokenで決まる。
+
+bundleはcontrollerだけで復号し、Runner playへno_logのfactで渡す。
+`/etc/homelab/secrets/github-app.pem` と `github-app.json` はgh-broker所有0400。
+非ログインのgh-brokerだけが鍵を読み、root所有brokerがrepo限定の短命tokenを作る。
+cacheは`/var/lib/gh-broker`（0700）のrepo別0600ファイル。残り5分未満なら更新する。
+Agentコンテナのenv、share、runner-workには鍵を配らない。age鍵もVMへ配らない。
+
+### 3. repo の onboarding と反映
+
+本人の作業端末で `gh auth status --hostname github.com` を確認する。
+repo管理・installation追加ができる本人の認証が必要（App tokenは使わない）。
+新規repoは本人が作る。スクリプトはrepoを作成しない。
+
+```sh
+export GITHUB_APP_INSTALLATION_ID='<installation ID>'
+scripts/github-agent-repo-onboard.sh owner/repo --dry-run
+scripts/github-agent-repo-onboard.sh owner/repo
+scripts/github-agent-repo-check.sh owner/repo
+# IDは第2引数、または --installation-id でも指定できる。
+```
+
+`--dry-run`はAPIを呼ばず予定を表示する。checkは読み取りだけでruleset全文とinstalledを表示し、
+未登録なら非0で終了する。onboardは同名rulesetを作成/更新し、次に
+`PUT /user/installations/{installation_id}/repositories/{repo_id}` で追加する。
+重複した同名rulesetは停止して本人へ整理を求める。途中失敗ならcheckで確認して再実行する。
+この順序でも、既にAppへ追加済みのrepoの保護はretroactiveにはならない。
+
+main保護は `agent-main-protection` 1本。active、対象`refs/heads/main`、update・deletion・
+non_fast_forward、bypassはRepository admin（RepositoryRole ID 5）のalwaysのみ。
+Appはbypassへ入れず、必須レビューのrulesetは追加しない。
+表示された設定を本人が確認する。既存の他rulesetはスクリプトで削除しない。
+[Rulesets API](https://docs.github.com/en/rest/repos/rules) と
+[installationへの追加API](https://docs.github.com/en/rest/apps/installations#add-a-repository-to-an-app-installation)
+を参照する。
+
+必要なlintを実行し、本人が明示的に承認してから既存手順で `make ansible-apply-agent` を行う。
+Agent playでcontroller復号したfactをRunner playが使うため、初回は`--limit runner`で省略しない。
+3項目が未登録/空ならGitHub構成は導入せずjobは`ready_to_publish`。
+後から項目を消してapplyした場合は鍵・設定・helper・sudoers・cacheを削除して公開を無効化する。
+公開bot名義とglobal ignoreは鍵未登録でも管理する。
+
+### 4. 公開と受け入れ
+
+手動の短い作業は `runner-publish`、長時間は `runner-agent-job` skillに従う。
+作業branchは`agent/<topic>`、`git push origin HEAD:refs/heads/agent/<topic>`、
+`gh-agent owner/repo pr create --draft --base <base> --head agent/<topic> --title ... --body-file ...` の順。
+`gh-agent`はpr create/view/list/editだけで、createはdraft必須、editは番号指定かつdraftを再確認する。
+引数は長い形式を使う。baseは対象repo・planに合わせて指定し、有効なgit refでheadと異なることが必要。
+main以外のdefault branchも利用できる。editはtitle/body/body-fileのみ。merge/ready/apiや別repoへの引数は拒否する。
+Git helperはHTTPS github.comとowner/repo pathだけに応え、store/eraseは保存しない。
+workerにtokenを発行・表示させない。CLI sandbox/skillは同一UIDの資格情報を隔離する境界ではない。
+
+`agent-job`はチェックポイントにglobal bot名義を使い、公開時にhelper所有権とorigin/push URLを照合し、
+上記wrapperでdraftを作る。失敗後はremoteと既存PRを確認してからresumeする。
+公開復旧は自動で冪等化していない。push成功後のPR作成失敗や応答断では既存PRを本人が確認する。
+`.github/workflows`の変更を含むpushはAppの権限で拒否されるので、本人に対応を頼む。
+main更新・mergeも本人だけが行う。
+
+`~/.config/git/ignore`はpyc、node_modules、.venv、各種cache、dist、buildを除外する。
+追跡済みの生成物はignoreでは消えないので、既存checkpointに入ったものは別途レビューする。
+
+反映後、**試験repoで本人の承認のもと**次を確認する（このPRの実装作業では未検証）。
+
+- App名義の作業branch pushとdraft PR作成、draft編集・一覧・確認。
+- Appによるmain push、PR merge、workflow変更pushの拒否。mainは保護を確認してから試験する。
+- 未onboard repo/不一致ownerでtoken取得失敗、短命tokenや鍵がログ・backupに入らないこと。
+- `sudo -l -U hermes-runner`がbroker1コマンドのみ、sudo/docker group無し。
+  brokerの鍵/config 0400、cache 0600、helper/programがroot所有でgroup/other書込不可。
+- controller以外で復号しないこと、連続2回目applyのchanged=0、鍵未登録時の公開待ち。
+
+ローカルは `make runner-github-fixture agent-job-fixture runner-privilege-fixture
+agent-runner-scope-fixture runner-firewall-fixture` と `git diff --check`。
+Dockerの `make ansible-lint-agent ansible-check-agent shellcheck` は本人の端末で実施する。
+2026-11-12のPR①受入はissue #207のコメントを正とし、過去節の「実機未検証」は採用時点の記録。
+PR②の実機公開試験は別途必要である。
+
+### 5. 失効・漏えい時
+
+漏えいを疑ったら新規jobを止め、本人がGitHub AppのGeneral → Private keysで該当鍵を削除（revoke）する。
+Settings → Applications → Installed GitHub Apps → ConfigureからinstallationをSuspendまたはUninstallし、
+発行済みtokenによるアクセスも止める。鍵revokeだけで既存tokenの即時失効を仮定しない。
+installationのSuspend解除/再インストールは原因を取り除いてから行う。
+必要なら漏れたinstallation token自体もGitHubのtoken revoke APIで失効させる。
+
+新しい鍵を生成してSOPSを更新し、本人承認のapplyで差し替える。brokerは鍵/configの変更時に旧cacheを
+再利用しない。完全停止ならbundleのgithub_appを空にしてapplyする。
+PEM・config・cacheはrunner-work backupに含まれないのでRunner再構築時はSOPSから再配置する。
+秘密を表示せず、監査ログ・branch/PR差分と公開されたコードを確認する。
+
+**App鍵が漏れるとインストール先の全repoへ、App権限内でpushでき、tokenを再発行され続ける。**
+repo限定tokenが漏れた場合はそのrepoに限定され、通常1時間で失効する。
+mainは設定したrulesetで守られるが、他branch・PR・コードの改変や読み取りは可能。
+本人管理のworkflowが作業branchのコードを本番へ反映しないこともonboarding前に確認する。

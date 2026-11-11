@@ -324,8 +324,15 @@ def worker(task, state):
                     paths = [path for path in paths if Path(path).name not in {'.env.example', '.env.sample'}]
                     if any(re.search(r'(^|/)(\.env(?:\..*)?|auth\.json|credentials(?:\.json)?|id_(?:rsa|ed25519)|.*\.(?:pem|key))$', path, re.I) for path in paths if path):
                         return save(task, state, 'blocked', 'credential-like path changed; human review required')
+                    # Only the Ansible-managed global identity, never repository overrides.
+                    def identity(key, fallback):
+                        result = subprocess.run(['git', 'config', '--global', '--get', key],
+                                                capture_output=True, text=True, env=env())
+                        return result.stdout.strip() or fallback
+                    bot_name = identity('user.name', 'Agent Job Bot')
+                    bot_email = identity('user.email', 'agent-job@localhost')
                     git(repo, 'add', '--all')
-                    git(repo, '-c', 'user.name=Agent Job Bot', '-c', 'user.email=agent-job@localhost', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'agent-job(' + plan['id'] + '): ' + stage['name'])
+                    git(repo, '-c', 'user.name=' + bot_name, '-c', 'user.email=' + bot_email, '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'agent-job(' + plan['id'] + '): ' + stage['name'])
                     state['stage'] += 1
                     state['stage_launches'] = 0
                     save(task, state)
@@ -355,12 +362,13 @@ def worker(task, state):
         fields = dict(line.split('=', 1) for line in credential.stdout.splitlines() if '=' in line)
         if credential.returncode or not fields.get('password'):
             raise ValueError('credential helper failed')
-        publish_env = env() | {'GH_TOKEN': fields['password'], 'GIT_TERMINAL_PROMPT': '0'}
+        publish_env = env() | {'GIT_TERMINAL_PROMPT': '0'}
+        del fields, credential
         body = task / 'pr-body.md'
         body.write_text(plan['publish']['body'])
         commands = [
-            ['git', '-c', 'core.hooksPath=/dev/null', '-c', 'credential.helper=', '-c', 'credential.helper=' + str(HELPER), 'push', '--set-upstream', 'origin', 'HEAD:refs/heads/' + plan['branch']],
-            ['gh', 'pr', 'create', '--draft', '--repo', relative.as_posix(), '--base', plan['base'], '--head', plan['branch'], '--title', plan['publish']['title'], '--body-file', str(body)],
+            ['git', '-c', 'core.hooksPath=/dev/null', '-c', 'credential.helper=', '-c', 'credential.helper=' + str(HELPER), '-c', 'credential.useHttpPath=true', 'push', '--set-upstream', 'origin', 'HEAD:refs/heads/' + plan['branch']],
+            ['/usr/local/bin/gh-agent', relative.as_posix(), 'pr', 'create', '--draft', '--base', plan['base'], '--head', plan['branch'], '--title', plan['publish']['title'], '--body-file', str(body)],
         ]
         for argv in commands:
             if (task / 'stop').exists():

@@ -1,6 +1,7 @@
 ---
-# The Hermes execution account. It must never hold sudo or the docker group:
+# The Hermes execution account. It must never hold the sudo or docker group:
 # both are root-equivalent and would defeat the Runner isolation (PRD 4.2).
+# github.yml grants only the fixed token command as the non-login gh-broker.
 # The common role also enforces DisableForwarding in a Match User block;
 # ordinary shell/exec sessions remain available for the terminal backend.
 - name: Ensure the runner execution account exists without privileged groups

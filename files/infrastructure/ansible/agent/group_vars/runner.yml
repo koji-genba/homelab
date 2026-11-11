@@ -17,7 +17,7 @@ runner_share_options: hard,_netdev,nofail,nfsvers=4.1,noatime,rsize=1048576,wsiz
 runner_share_marker: .homelab-export
 runner_share_marker_value: hermes
 
-# Unprivileged execution account (no sudo, no docker group) and the dedicated
+# Unprivileged execution account (no sudo/docker group; broker command only) and the dedicated
 # CDP tunnel account (forwarding-only, no shell).
 runner_user: hermes-runner
 cdp_user: hermes-cdp
@@ -65,3 +65,7 @@ firewall_egress_allowed_tcp:
     port: 8000
 # The Runner never runs Docker, so the DNAT guard is unnecessary here.
 firewall_dnat_guard: false
+
+# Public App identity. Fill both after creating the App; empty uses Agent Job Bot.
+runner_github_app_slug: koji-genba-hermes-agent
+runner_github_bot_user_id: '355445947'
