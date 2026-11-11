@@ -33,9 +33,17 @@ def api(path, method='GET', body=None, pages=False):
     return json.loads(result.stdout) if result.stdout.strip() else None
 
 
-def desired():
+# Verified via unauthenticated GET https://api.github.com/apps/github-actions
+# (2026-11-12): id=15368, slug=github-actions. This is the App ID, not bot user ID.
+GITHUB_ACTIONS_APP_ID = 15368
+
+
+def desired(allow_actions_bypass=False):
+    bypass = [{'actor_id': 5, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always'}]
+    if allow_actions_bypass:
+        bypass.append({'actor_id': GITHUB_ACTIONS_APP_ID, 'actor_type': 'Integration', 'bypass_mode': 'always'})
     return {'name': 'agent-main-protection', 'target': 'branch', 'enforcement': 'active',
-            'bypass_actors': [{'actor_id': 5, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always'}],
+            'bypass_actors': bypass,
             'conditions': {'ref_name': {'include': ['refs/heads/main'], 'exclude': []}},
             'rules': [{'type': 'update', 'parameters': {'update_allows_fetch_and_merge': False}},
                       {'type': 'deletion'}, {'type': 'non_fast_forward'}]}
@@ -80,8 +88,12 @@ def main():
     parser.add_argument('installation', nargs='?', help='installation ID for the manual setup link only')
     parser.add_argument('--installation-id', default=os.environ.get('GITHUB_APP_INSTALLATION_ID', '180956595'),
                         help='installation ID for the manual setup link only')
+    parser.add_argument('--allow-actions-bypass', action='store_true',
+                        help='onboard only: allow GitHub Actions to bypass main protection (all repository workflows)')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
+    if args.mode == 'check' and args.allow_actions_bypass:
+        parser.error('--allow-actions-bypass is only supported for onboard')
     target = args.repository
     if not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?/[A-Za-z0-9_.-]{1,100}', target):
         parser.error('invalid owner/repo')
@@ -96,7 +108,7 @@ def main():
         print('GET /repos/' + target + '/rulesets')
         if args.mode == 'onboard':
             print('Create or update /repos/' + target + '/rulesets (protect main BEFORE adding repo):')
-            print(json.dumps(desired(), indent=2))
+            print(json.dumps(desired(args.allow_actions_bypass), indent=2))
             installation_guidance(target, identifier)
         return 0
     if args.mode == 'onboard':
@@ -109,7 +121,7 @@ def main():
         if len(found) > 1:
             raise ValueError('duplicate agent-main-protection rulesets; resolve manually')
         endpoint = '/repos/' + target + '/rulesets'
-        wanted = desired()
+        wanted = desired(args.allow_actions_bypass)
         if found:
             endpoint += '/' + str(found[0]['id'])
             current = api(endpoint)

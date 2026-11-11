@@ -246,6 +246,41 @@ class GitHub(unittest.TestCase):
                  patch('sys.stdout', io.StringIO()):
                 self.assertEqual(operator.main(), 0)
 
+    def test_operator_actions_bypass_opt_in_and_updates(self):
+        admin = {'actor_id': 5, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always'}
+        actions = {'actor_id': 15368, 'actor_type': 'Integration', 'bypass_mode': 'always'}
+        self.assertEqual(operator.desired()['bypass_actors'], [admin])
+        self.assertEqual(operator.desired(True)['bypass_actors'], [admin, actions])
+        rules, current, writes = [], {}, []
+        def api(path, method='GET', body=None, pages=False):
+            if path == '/repos/owner/repo' and method == 'GET':
+                return {'permissions': {'admin': True}, 'owner': {'login': 'owner'}}
+            if path == '/repos/owner/repo/rulesets?includes_parents=false&per_page=100' and method == 'GET':
+                return [rules]
+            if path == '/repos/owner/repo/rulesets' and method == 'POST':
+                rules.append({'name': 'agent-main-protection', 'id': 1})
+            elif path != '/repos/owner/repo/rulesets/1':
+                raise AssertionError((method, path))
+            if method in ('POST', 'PUT'):
+                writes.append(json.loads(json.dumps(body)))
+                current.clear()
+                current.update(body)
+            return current
+        for allow in (False, True, True, False):
+            args = ['repo', 'onboard', 'owner/repo'] + (['--allow-actions-bypass'] if allow else [])
+            with patch.object(operator, 'api', api), patch('sys.stdout', io.StringIO()), \
+                 patch.object(sys, 'argv', args):
+                self.assertEqual(operator.main(), 0)
+            self.assertEqual(current['bypass_actors'], [admin, actions] if allow else [admin])
+            self.assertEqual(current['rules'], operator.desired()['rules'])
+        self.assertEqual(len(writes), 3, 'same flag is idempotent; opt-in and opt-out update existing ruleset')
+        with patch.object(operator, 'api', side_effect=AssertionError('API forbidden')), \
+             patch.object(sys, 'argv', ['repo', 'onboard', 'owner/repo', '--allow-actions-bypass', '--dry-run']), \
+             patch('sys.stdout', io.StringIO()) as output:
+            self.assertEqual(operator.main(), 0)
+        self.assertIn('"actor_id": 15368', output.getvalue())
+        self.assertNotIn('5715751', output.getvalue(), 'Hermes App never receives bypass')
+
     def test_operator_check_reads_only_rulesets_without_installation_id(self):
         endpoint = '/repos/owner/repo/rulesets'
         for exists in (True, False):

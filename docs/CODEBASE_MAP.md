@@ -518,7 +518,9 @@ The only hermes-runner sudo exception runs that command as gh-broker (no sudo/do
 PR create/edit and PR view/list. Runner global Git config carries the public App bot identity and
 global ignore. Without credentials jobs remain ready_to_publish; removing fields disables publication.
 Operator scripts `scripts/github-agent-repo-{onboard,check}.sh` share `github-agent-repo.py` and use
-operator gh OAuth auth for rulesets only. Onboard protects main with one admin-only bypass ruleset,
+operator gh OAuth auth for rulesets only. Onboard protects main with one admin-only bypass ruleset
+(`--allow-actions-bypass` optionally adds Integration 15368/always; API acceptance of the built-in App
+requires manual verification, with a separate updater App as the documented alternative),
 then prints instructions for the operator to add the repo via the installation settings UI. Check reads
 only rulesets; neither script calls installation APIs. Neither script is run automatically by Ansible. Offline
 `make runner-github-fixture` runs in CI; live acceptance remains manual. See ADR-0015 and Hermes operations.

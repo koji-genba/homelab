@@ -147,3 +147,13 @@ global ignoreでpyc等をcheckpointに含めない（既に追跡済みの生成
 ローカルfixtureはJWT署名・repo限定要求・cache/期限・protocol・wrapper拒否・公開接続を検証する。
 実際のAppによるbranch push/draft作成とmain push/merge/workflow push拒否、sudoの実効権限、
 連続applyの冪等性は反映後の受入対象。手順は[運用書](../operations/hermes-agent.md#github-app-による公開pr-②)。
+
+
+## 2026-11-12 補足: homelab の毎時 staging 更新と Actions bypass
+
+既定のadmin限定bypassは維持する。`--allow-actions-bypass`を指定したonboardingのみ、
+GitHub Actions（公式公開API確認済みApp ID 15368）のIntegration/alwaysを追加する。
+既存のstaging更新workflowがGITHUB_TOKENでmainへ直接pushするための例外であり、Hermes Appは追加しない。
+個人repoのIntegrationは公式API仕様で除外されていないが、組み込み15368の受理保証はなく422拒否の一次報告もある。
+詳細・公式根拠・拒否時の更新専用App案は[運用書](../operations/hermes-agent.md#homelab-の-github-actions-による-main-更新)に記す。
+updateルールの削除や自動的な保護の緩和は行わない。実GitHub設定・workflow認証は今回変更しない。
