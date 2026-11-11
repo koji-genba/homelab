@@ -61,8 +61,9 @@ secret / AdGuard設定 / `compose.env`の変更を検出すると、cutover有�
 stagingは定期実行の`stashpad-staging-image` workflowが更新する。publicな
 `ghcr.io/koji-genba/stashpad:edge`のmanifest digestを解決し、変更するのは
 `stashpad-staging/compose.yaml`だけである。productionはこのworkflowから編集せず、review済みcommitで
-promotionする。workflowが`main`へpushできるのはrepository permissionとbranch protectionが許可する場合
-だけである。protected branchではscheduleを有効にする前に、review対象update PRを作成する設定にする。
+promotionする。workflowは書込可能なdeploy key（main限定environment `stashpad-staging-bot`のsecret）でSSH
+pushする。main保護のrulesetを付けるときは`--allow-deploy-key-bypass`でDeployKeyだけをbypassに加える。
+手順は[Hermes Agent運用](../../../docs/operations/hermes-agent.md#homelab-の-github-actions-による-main-更新)。
 
 管理用Make wrapperは、version固定toolbox内でTerraform、Ansible、SOPS、age、linterを実行する。
 repositoryをhost UID/GIDとしてmountし、`SSH_AUTH_SOCK`が設定されている場合だけSSH agentを渡す。

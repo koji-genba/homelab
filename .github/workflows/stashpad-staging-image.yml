@@ -7,8 +7,14 @@ on:
 
 # This workflow changes one staging compose file only. Production promotion is
 # always a separate, reviewed commit.
+#
+# GITHUB_TOKEN is read-only. The push to main authenticates with a repository
+# deploy key (write access) kept as an environment secret; the environment only
+# admits runs on main, so no pull request or work branch can read the key. The
+# agent-main-protection ruleset lets deploy keys bypass main protection.
+# Setup and incident handling: docs/operations/hermes-agent.md
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: stashpad-staging-image
@@ -17,12 +23,42 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-24.04
+    environment: stashpad-staging-bot
     steps:
+      - name: Require the deploy key
+        shell: bash
+        env:
+          DEPLOY_KEY: ${{ secrets.STASHPAD_STAGING_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$DEPLOY_KEY" ]]; then
+            echo "::error title=Deploy key missing::Secret STASHPAD_STAGING_DEPLOY_KEY is empty or unset in environment stashpad-staging-bot. Run scripts/stashpad-staging-deploy-key-setup.sh (see docs/operations/hermes-agent.md)."
+            exit 1
+          fi
+
       - name: Check out main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
+          # With ssh-key, checkout fetches from git@github.com:<owner>/<repo>.git
+          # and, while persist-credentials is true (the default), writes
+          # core.sshCommand so the later git push uses the key. Setting it to
+          # false would remove the key and make the push fail.
+          ssh-key: ${{ secrets.STASHPAD_STAGING_DEPLOY_KEY }}
+          persist-credentials: true
+
+      - name: Verify the deploy key can write
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Contacts receive-pack without changing any ref, so a manual run
+          # proves SSH access and write permission even when the digest is
+          # unchanged. The main ruleset bypass is only exercised by a real push.
+          if ! git push --dry-run origin HEAD:main; then
+            echo "::error title=Deploy key cannot push::The deploy key was rejected or is read-only. Check the stashpad-staging-bot deploy key (Allow write access) and re-run scripts/stashpad-staging-deploy-key-setup.sh."
+            exit 1
+          fi
 
       - name: Resolve the public edge manifest digest
         id: manifest

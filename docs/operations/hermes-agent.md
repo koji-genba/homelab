@@ -1288,28 +1288,68 @@ private repoにも入れるかを本人が判断する。最後の選択ではAp
 
 #### homelab の GitHub Actions による main 更新
 
-**homelabは、下記の別PRによる移行とonboardingが完了するまでAppのインストール先から外しておく。**
-現在の `.github/workflows/stashpad-staging-image.yml` は毎時、`GITHUB_TOKEN`でstagingのdigestを
-mainへ直接pushする。adminだけのupdate制限ではこのpushも拒否される。
+**homelabは、下記の手順がすべて済むまでAppのインストール先から外しておく。**
+`.github/workflows/stashpad-staging-image.yml` は毎時、stagingのdigestをmainへ直接pushする。
+従来は`GITHUB_TOKEN`でpushしていたが、adminだけのupdate制限ではこのpushも拒否される。
 本人がhomelabへIntegration 15368をbypassに指定してPOSTした実機結果は422
 「Actor GitHub Actions integration must be part of the ruleset source or owner organization」。
 **個人のrepoでは組み込みGitHub Actionsをbypassにできない。** 旧Actions bypassオプションは削除した。
 
-別PRで、このworkflowのpush認証をrepo専用の書込可能deploy keyへ変更する。
-秘密鍵は**Actions secretとして、利用branchをmainだけに限定したenvironment**に保存し、
-そのenvironmentを使うmain上のjobだけに渡す。Hermes App・Runnerには配らない。
-workflow変更、鍵の生成/登録、environment/secret設定は今回行わない。
-本人が移行を確認した後、次の順に進める。
+このworkflowのpush認証は、repo専用の書込可能deploy keyへ変更した（2026-11-12）。
 
-```sh
-scripts/github-agent-repo-onboard.sh koji-genba/homelab --allow-deploy-key-bypass --dry-run
-# workflowとActions側の鍵/environmentの移行後、本人が設定変更を承認して実行する。
-scripts/github-agent-repo-onboard.sh koji-genba/homelab --allow-deploy-key-bypass
-scripts/github-agent-repo-check.sh koji-genba/homelab --allow-deploy-key-bypass
-# ruleset確認・deploy keyによる毎時push確認後、画面でAppのインストール先へ戻す。
-```
+- jobは environment `stashpad-staging-bot` を使う。environmentは本人が**mainだけ**に限定して作る
+  （Deployment branches and tags → Selected branches `main`）。
+- 秘密鍵はこのenvironmentのActions secret `STASHPAD_STAGING_DEPLOY_KEY`、公開鍵はtitle
+  `stashpad-staging-bot`・`read_only: false`のdeploy key。作成は下の
+  `scripts/stashpad-staging-deploy-key-setup.sh` が行う。
+- `actions/checkout`（`3d3c42e5…`、v7.0.1）に`ssh-key`を渡す。このときoriginは
+  `git@github.com:koji-genba/homelab.git`になり、`persist-credentials`（既定true）が鍵を
+  `core.sshCommand`に設定して、後続の`git push origin HEAD:main`がそれを使う。鍵ファイルと設定はjob終了時に
+  消える。`persist-credentials: false`にすると鍵が消えてpushできないので、workflowでtrueを明示した。
+  根拠は同SHAの`action.yml`・`src/url-helper.ts`（`getFetchUrl`）・`src/git-auth-helper.ts`（`configureSsh`）。
+- `permissions`は`contents: read`に下げた。`GITHUB_TOKEN`ではmainへ書けない。
+- commit名義はgithub-actions[bot]のまま。1ファイルだけをcommitする安全確認は従来どおり。
+- secretが空・未設定なら、最初のstepが`Deploy key missing`で失敗する（environmentが無い場合も同じ。
+  GitHubはworkflowが参照した未作成のenvironmentを、保護規則なしで自動作成する。setup scriptが
+  main限定に直す）。続けて`git push --dry-run`で書込権限を確かめる。refは変わらない。
+  dry-runはSSH接続と書込権限の確認で、rulesetのbypassは実際のpushでしか確かめられない。
 
-指定時は `actor_type: DeployKey`、`actor_id: null`、`bypass_mode: always` をadminに追加する。
+##### 本人の手順
+
+1. このPRをmainへマージする。Composeの変更は無いので、Apps VMで再作成されるprojectは無い。
+   setup（手順2）が済むまでの定時実行は`Deploy key missing`で失敗するが、stagingが更新されないだけで害は無い。
+2. 本人の作業端末で、本人のghログインを使ってsetup scriptを流す。`GH_TOKEN`・`GITHUB_TOKEN`が環境に
+   あると止まる。`--dry-run`は読み取りのAPIだけを呼び、予定を表示する（何も作らない）。
+   ```sh
+   scripts/stashpad-staging-deploy-key-setup.sh --dry-run
+   scripts/stashpad-staging-deploy-key-setup.sh
+   ```
+   scriptは、一時ディレクトリでed25519の鍵を作り、environmentをmain限定で作成/更新し、秘密鍵を
+   stdinからsecretへ登録し、その後deploy keyを足す。秘密鍵は登録直後に消し、表示しない。
+   同じtitleのdeploy keyが既にあれば何もせず止まる。途中で失敗したときは、そのまま再実行してよい
+   （secretを先に作るので、書込可能なdeploy keyだけが残ることは無い）。
+3. Actions → Update StashPad staging image → Run workflow（`main`）で1回動かす。
+   - `Verify the deploy key can write`が成功すれば、SSH接続と書込権限は確認できた。
+   - `Update staging only`が`staging already uses …`ならpushしていない。pushしたのは、commit
+     `chore(staging): update StashPad edge image digest`（author github-actions[bot]）がmainに増えた回で、
+     そのときだけ`validate`が1回走る。pushしていない回では、rulesetのbypassは5まで確かめられない。
+4. rulesetを付ける。
+   ```sh
+   scripts/github-agent-repo-onboard.sh koji-genba/homelab --allow-deploy-key-bypass --dry-run
+   scripts/github-agent-repo-onboard.sh koji-genba/homelab --allow-deploy-key-bypass
+   scripts/github-agent-repo-check.sh koji-genba/homelab --allow-deploy-key-bypass
+   ```
+5. 次の定時実行で、digestが変わった回にpushできることを確かめる
+   （`gh run list --workflow stashpad-staging-image.yml`とjobのlog）。digestが変わるのは
+   `ghcr.io/koji-genba/stashpad:edge`が作り直されたときだけで、変わらない回が大半である
+   （2026-11-12の読み取りでは、mainにあるstagingのbot commitは2026-09-23の1件）。待てなければ、
+   stashPad側でedgeを作り直す。`GH013`で拒否されたらdeploy keyのbypassが効いていない。
+   Appはまだ入れていないので、本人がrulesetを一時的に`enforcement: disabled`にして原因を調べる。
+6. 5が通ってから、[Appの設定画面](https://github.com/settings/installations/180956595)の
+   Repository accessでhomelabを足す。
+
+`--allow-deploy-key-bypass`を付けたときだけ、`actor_type: DeployKey`、`actor_id: null`、
+`bypass_mode: always`をadminに追加する。
 [公式REST API仕様](https://docs.github.com/en/rest/repos/rules#create-a-repository-ruleset)では
 DeployKeyのactor_idはnullであり、特定の鍵IDを指定しない。これはrepoのdeploy keyに対する例外で、
 単一workflow/単一鍵だけの例外ではない。書込可能deploy keyの一覧と保管先も本人が管理する。
@@ -1317,10 +1357,81 @@ DeployKeyのactor_idはnullであり、特定の鍵IDを指定しない。これ
 checkは同じオプションを付けて期待する設定を選択するだけで、設定変更は行わない。
 update制限は維持し、workflowの更新専用認証だけを例外とする。
 
+##### 本人のghのscopeと、通らないときの画面手順
+
+本人のghは`repo, workflow, read:org, gist`。公式のREST文書は、environmentの作成/更新・deployment branch
+policy・environment secretの各endpointで、classic OAuth/PATに`repo`を求める。足りる。
+個人のrepoのenvironmentは、repoのownerである本人が設定する。
+deploy keyの追加（`POST /repos/{owner}/{repo}/keys`）のページはclassicのscopeを明記していない。
+`repo`で通る見込みだが、書込は未検証である（2026-11-12に本人のghで`keys`・`environments`・
+`rulesets`・`hooks`のGETが通ることだけ確認した）。scriptが403/404で止まったら、画面で行う。
+
+1. 作業端末で一時ディレクトリ（0700）に鍵を作る。
+   `ssh-keygen -t ed25519 -N '' -C stashpad-staging-bot -f <dir>/key`
+2. Settings → Deploy keys → Add deploy key。Titleは`stashpad-staging-bot`、Keyは`key.pub`の中身、
+   **Allow write access**にチェックする。
+3. Settings → Environments → New environmentで`stashpad-staging-bot`を作る。Deployment branches and tags →
+   Selected branches and tags → Add deployment branch or tag rule → `main`（Ref type: Branch）。
+4. 同じenvironmentのEnvironment secrets → Add environment secret。Nameは`STASHPAD_STAGING_DEPLOY_KEY`、
+   Valueは`<dir>/key`の全文（先頭行と末尾行を含む）。登録後に`<dir>`を`rm -rf`する。
+
+##### main へのpushで動くworkflow
+
+deploy keyによるpushは`GITHUB_TOKEN`によるpushと違い、push契機のworkflowを起動する
+（`GITHUB_TOKEN`が起こしたイベントは`workflow_dispatch`・`repository_dispatch`を除きworkflowを起動しない、
+という公式の仕様による）。従来のbotのcommitは、これらのworkflowを起動しなかった。
+2026-11-12に`.github/workflows/`の全`on:`を確認した結果。stagingのcompose
+（`files/services/compose/stashpad-staging/compose.yaml`）だけを変えるcommitで動くのは`validate`だけである。
+
+| workflow | pushの条件（main） | staging composeのcommitで |
+| --- | --- | --- |
+| `validate.yml` | pathsなし | **動く**。`contents: read`の静的検証が1回。公開・deploy・secret無し |
+| `caddy-image.yml` | `files/services/images/caddy-cloudflare/**`と自身 | 動かない |
+| `toolbox-image.yml` | `files/tools/homelab-toolbox/**`と自身 | 動かない |
+| `sparkdash-image.yml` | `files/services/images/sparkdash/**`と自身 | 動かない |
+| `dagu-hf-image.yml` | `files/services/images/dagu-hf/**`と自身 | 動かない |
+| `hermes-agent-image.yml` | `files/services/images/hermes-agent/**`、自身、`scripts/tests/hermes-{image,remote-media}-fixture.py` | 動かない |
+| `memory-db-image.yml` | `files/services/images/memory-db/**`と自身 | 動かない |
+| `tei-reranker-onnx-image.yml` | `files/services/images/tei-reranker-onnx/**`と自身（composeやAnsibleのpathsはpull_requestだけ） | 動かない |
+| `stashpad-staging-image.yml` | pushでは動かない（`schedule`と`workflow_dispatch`だけ） | 動かない |
+
+判断。imageを公開するworkflowはどれもpathsが合わず、意図しないimage公開は起きない。
+`validate`は毎回の更新（digestが変わった回）に1回増えるだけで、push権限も秘密も持たず、何もpushしないので
+ループにならない。staging更新workflow自身はpush契機を持たない。repoにwebhookは無く（2026-11-12に読み取りで確認）、
+Apps VMへの反映は従来どおり15分のreconcileがstagingのprojectだけを再作成する。
+将来、`files/services/compose/**`を`push.paths`に含むworkflowを足すときは、このpushでも動く点を見直す。
+
+##### deploy keyの扱いと、漏えい時の影響
+
+書込可能なdeploy keyは、homelabの全branch・tagへSSHでpushできる。GitHubは「organizationのadmin相当の
+操作ができる」と説明している。rulesetの`DeployKey` bypass（`--allow-deploy-key-bypass`）はrepoの
+**すべてのdeploy key**に効くため、鍵が漏れると、main・他branch・tagへの直接push、force push、branch削除ができる。
+SSHのpushにはWorkflows権限のような制約が無いものとして扱い、`.github/workflows`の書き換えもできるとみなす
+（未検証）。mainに入ったものはApps VMが15分以内に取り込むので、Composeの変更は本番に反映される。
+鍵の漏えいは、本番反映を任意に起こされるのと同じ重さである。
+
+そのため、次の構成を守る。
+
+- 秘密鍵は、mainだけを許すenvironmentのsecretにだけ置く。PRや作業branchで動くworkflowは受け取れない。
+- Hermes AppとRunnerには鍵を配らない。Appは、Secrets権限が無くsecretを読み書きできない。
+  Administration権限が無くenvironmentやdeploy keyを変えられない。Workflows権限が無く、workflowを書き換えて
+  鍵を取り出せない。rulesetによりmainへpush・mergeできず、draft PRまでしか作れない。
+- 鍵を持つjobは、repo内のscriptや`make`を実行しない（固定のinline処理だけ）。ここへ足す場合は再レビューする。
+- 書込可能なdeploy keyをほかに足さない（bypassが全deploy keyに効くため）。
+  `gh repo deploy-key list --repo koji-genba/homelab`で確認できる。
+
+漏えいを疑ったら、本人が次を行う。
+
+1. deploy keyを削除する（`gh repo deploy-key delete <id> --repo koji-genba/homelab`、またはSettings → Deploy keys）。
+   これでSSH認証は直ちに失敗する。
+2. secretを削除する（`gh secret delete STASHPAD_STAGING_DEPLOY_KEY --env stashpad-staging-bot --repo koji-genba/homelab`）。
+3. 全branchの最近のpush、`.github/workflows`の変更、Actionsの実行履歴を確認する。Apps VMが取り込んだcommitは
+   `/var/lib/homelab/deployments.log`に残る（本番ホストへの接続は本人が判断する）。不審なcommitはrevertのPRで戻す。
+4. 旧keyを消したうえでsetup scriptを再実行して、鍵を作り直す（定期の入れ替えも同じ手順）。
+
 Hermes AppにはWorkflows権限がなく、workflowの追加・書き換えはpushできない。
-現行の書込可能workflowはschedule/手動起動でmainをcheckoutし、固定のinline処理でstagingファイルだけをcommitする。
+workflowはschedule/手動起動でmainをcheckoutし、固定のinline処理でstagingファイルだけをcommitする。
 PRで動く他workflowのcontentsはreadで、Hermes AppにはActions操作権限もない。
-別PRでもdeploy keyをmain限定environmentに隔離し、PRコードや作業branchで鍵を使わせない。
 この構成を守る限り、Hermes AppがActions経由でmainへpushする経路は作れない。
 将来write token/鍵でPRコード・repo内scriptを実行するworkflowを加える際は再レビューする。
 
