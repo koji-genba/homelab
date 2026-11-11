@@ -11,19 +11,20 @@ all_vars = yaml.safe_load((root / "group_vars" / "all.yml").read_text())
 runner_vars = yaml.safe_load((root / "group_vars" / "runner.yml").read_text())
 agent_vars = yaml.safe_load((root / "group_vars" / "agent.yml").read_text())
 
-# PRD 4.2 + ADR-0014: internet and pve1 TCP 2049 only. Other NEW connections
+# PRD 4.2 + ADR-0014/0015: internet, pve1 TCP 2049 and DGX TCP 8000. Other NEW connections
 # to LAN, RFC1918, CGNAT/tailnet and link-local ranges are rejected.
 assert runner_vars["firewall_egress_restrict"] is True
 assert agent_vars["firewall_egress_restrict"] is False
 common_rejected = all_vars["firewall_egress_rejected_networks"]
 for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16"):
     assert network in common_rejected, network
-# No blanket exception: only the dedicated pve1 NFS TCP endpoint is allowed.
+# No blanket exception: only the dedicated NFS and inference TCP endpoints.
 assert runner_vars["firewall_egress_allowed_networks"] == []
 assert runner_vars["firewall_egress_allowed_dns"] == []
 assert all_vars["firewall_egress_allowed_tcp"] == []
 assert runner_vars["firewall_egress_allowed_tcp"] == [
-    {"address": "192.168.10.11/32", "port": 2049}
+    {"address": "192.168.10.11/32", "port": 2049},
+    {"address": "192.168.10.51/32", "port": 8000}
 ]
 
 # Ingress on the Runner is SSH-only. Management sources are the server VLAN,
@@ -91,6 +92,11 @@ def allowed(address, port, protocol="tcp"):
             return False
     return True  # output policy accept
 
+assert allowed("192.168.10.51", 8000)
+assert not allowed("192.168.10.51", 8000, "udp")
+for port in (22, 443, 7999, 8001, 2049):
+    assert not allowed("192.168.10.51", port), port
+assert not allowed("192.168.10.52", 8000)
 assert allowed("192.168.10.11", 2049)
 for port in (22, 53, 111, 443, 2048, 2050, 8006):
     assert not allowed("192.168.10.11", port), port

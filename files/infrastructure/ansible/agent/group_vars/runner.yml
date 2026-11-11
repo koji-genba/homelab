@@ -51,7 +51,7 @@ firewall_ssh_allowed_networks:
   - 192.168.20.0/24
   - 100.64.0.0/10
 firewall_input_allowed_tcp_ports: []
-# Egress: internet plus the NFS TCP exception below (ADR-0014); reject other
+# Egress: internet plus the NFS and DGX TCP exceptions (ADR-0014/0015); reject other
 # new connections to the LAN/CGNAT/link-local ranges (PRD 4.2).
 firewall_egress_restrict: true
 firewall_egress_allowed_dns: []
@@ -60,5 +60,8 @@ firewall_egress_allowed_networks: []
 firewall_egress_allowed_tcp:
   - address: 192.168.10.11/32
     port: 2049
+  # ADR-0015: dsh uses only the DGX OpenAI-compatible inference endpoint.
+  - address: 192.168.10.51/32
+    port: 8000
 # The Runner never runs Docker, so the DNAT guard is unnecessary here.
 firewall_dnat_guard: false

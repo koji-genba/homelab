@@ -1,0 +1,126 @@
+---
+# Install as root, never in the execution user's npm prefix. Record the lock
+# only after npm ci succeeds, so an interrupted/failed install is retried.
+- name: Create the root-managed coding CLI directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - /opt/coding-agents
+    - /var/cache/coding-agents
+    - /etc/claude-code
+
+- name: Install the coding CLI manifest and integrity lock
+  ansible.builtin.copy:
+    src: "coding-agents/{{ item }}"
+    dest: "/opt/coding-agents/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - package.json
+    - package-lock.json
+
+- name: Read the desired coding CLI lock checksum
+  ansible.builtin.stat:
+    path: /opt/coding-agents/package-lock.json
+    checksum_algorithm: sha256
+  register: runner_coding_lock
+
+- name: Read the last successfully installed coding CLI lock checksum
+  ansible.builtin.stat:
+    path: /opt/coding-agents/.installed-package-lock.json
+    checksum_algorithm: sha256
+  register: runner_coding_installed_lock
+
+- name: Install coding CLIs when the integrity lock changes
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/npm
+      - ci
+      - --no-audit
+      - --no-fund
+    chdir: /opt/coding-agents
+  environment:
+    npm_config_cache: /var/cache/coding-agents
+    npm_config_update_notifier: 'false'
+  when: >-
+    runner_coding_lock.stat.checksum | default('desired') !=
+    runner_coding_installed_lock.stat.checksum | default('absent')
+  register: runner_coding_install
+  changed_when: true
+
+- name: Record the successfully installed coding CLI lock
+  ansible.builtin.copy:
+    src: /opt/coding-agents/package-lock.json
+    remote_src: true
+    dest: /opt/coding-agents/.installed-package-lock.json
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - runner_coding_install is changed
+    - not ansible_check_mode
+
+- name: Link the coding CLIs into the system PATH
+  ansible.builtin.file:
+    src: "/opt/coding-agents/node_modules/.bin/{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    state: link
+    owner: root
+    group: root
+    force: true
+  loop:
+    - claude
+    - codex
+    - dsh
+
+- name: Disable Claude Code automatic updates with managed settings
+  ansible.builtin.copy:
+    src: coding-agents/managed-settings.json
+    dest: /etc/claude-code/managed-settings.json
+    owner: root
+    group: root
+    mode: '0644'
+
+# Do not recurse, replace the home, or manage either auth file. CLI token
+# refresh needs user-owned writable directories and its existing credentials.
+- name: Ensure the runner CLI configuration directories exist
+  ansible.builtin.file:
+    path: "/home/{{ runner_user }}/{{ item }}"
+    state: directory
+    owner: "{{ runner_user }}"
+    group: "{{ runner_user }}"
+    mode: '0700'
+  loop:
+    - .codex
+    - .dsh
+
+- name: Install the runner CLI configuration files
+  ansible.builtin.copy:
+    src: "coding-agents/{{ item.src }}"
+    dest: "/home/{{ runner_user }}/{{ item.dest }}"
+    owner: "{{ runner_user }}"
+    group: "{{ runner_user }}"
+    mode: '0600'
+  loop:
+    - src: config.toml
+      dest: .codex/config.toml
+    - src: cordis.patch.yml
+      dest: .dsh/cordis.patch.yml
+
+# ssh.py uses bash -c; remote background jobs additionally use bash -lc.
+# /usr/local/bin is in Debian's default PATH for both, without .bashrc edits.
+- name: Verify coding CLI discovery without a login shell
+  become: true
+  become_user: "{{ runner_user }}"
+  ansible.builtin.command:
+    argv:
+      - /bin/bash
+      - -c
+      - command -v claude && command -v codex && command -v dsh && test ! -w /opt/coding-agents
+  changed_when: false
+  when: not ansible_check_mode

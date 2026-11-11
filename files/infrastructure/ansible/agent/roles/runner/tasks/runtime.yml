@@ -5,6 +5,9 @@
 - name: Install the runner runtime packages
   ansible.builtin.apt:
     name:
+      - bubblewrap
+      - socat
+      - gh
       - build-essential
       - ca-certificates
       - curl
