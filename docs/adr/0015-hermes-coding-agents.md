@@ -176,3 +176,21 @@ App鍵・設定は `/etc/gh-broker/github-app.{pem,json}`（gh-broker所有0400�
 `/etc/homelab/secrets` の属性をbroker taskで変更しない。
 installation tokenはドット・ハイフンを含む形式に対応し、許可文字を `[A-Za-z0-9_.-]`、
 長さを1〜2048文字としてbroker・credential helper・gh-agentで検査する。
+
+
+## 2026-11-12 補足: staging 更新 workflow の deploy key 化（実装）
+
+前節の方針を実装した。`stashpad-staging-image.yml` は `permissions: contents: read` に下げ、
+environment `stashpad-staging-bot`（mainだけを許可）のActions secret `STASHPAD_STAGING_DEPLOY_KEY`
+（書込可能deploy key `stashpad-staging-bot` の秘密鍵）を `actions/checkout` の `ssh-key` に渡して、
+SSHでmainへpushする。commit名義はgithub-actions[bot]のまま。
+鍵・environment・secretは本人が `scripts/stashpad-staging-deploy-key-setup.sh` で作る。
+
+deploy keyのpushは `GITHUB_TOKEN` と違いpush契機のworkflowを起動する。全workflowの `on:` を確認し、
+staging composeだけを変えるcommitで動くのは `validate.yml`（contents: read、公開なし）だけである。
+`DeployKey` bypassはrepoの全deploy keyに効くため、書込可能deploy keyはこの1本だけにする。
+鍵が漏れるとmainへ直接pushでき、15分以内にApps VMへ反映されうる。secretをmain限定environmentに置き、
+Hermes Appに触らせない（Secrets・Administration・Workflows権限なし）ことで抑える。
+手順、漏えい時の対応、scope確認、onboardingの順序は
+[運用書](../operations/hermes-agent.md#homelab-の-github-actions-による-main-更新)。
+実機でのdeploy key作成、bypassの効果、App追加後の動作は **未検証** で、手順3〜6の結果で確認する。

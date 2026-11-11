@@ -73,7 +73,7 @@ graph TB
     Make -->|host git push, toolbox commits only| SB
     Main --> Timer
     CI --> GHCR
-    CI -->|staging digest commit| Main
+    CI -->|"staging digest commit (deploy key, SSH)"| Main
     GHCR --> Compose
     NFS --> Guard --> Compose
     edge --> hp
@@ -105,7 +105,7 @@ homelab/
 │       ├── hermes-agent-image.yml  # build/push ghcr.io/koji-genba/homelab-hermes-agent (Hermes base + Hindsight provider; digest in job summary)
 │       ├── memory-db-image.yml     # build/push ghcr.io/koji-genba/homelab-memory-db (PostgreSQL 17 + pgvector + PGroonga)
 │       ├── tei-reranker-onnx-image.yml # build/parity/publish TEI ORT reranker
-│       └── stashpad-staging-image.yml  # hourly: bump staging digest, commit direct to main
+│       └── stashpad-staging-image.yml  # hourly: bump staging digest, push to main over SSH with a deploy key (environment stashpad-staging-bot, main-only)
 ├── docs/                         # (~126k tokens at the full-map baseline; Japanese except this map)
 │   ├── README.md                 # entry point: current design, operations, decisions, history
 │   ├── CODEBASE_MAP.md            # code navigation (this document)
@@ -294,14 +294,14 @@ sequenceDiagram
     Dev->>CI: PR -> validate.yml (~20 make targets, no live access)
     CI-->>Dev: pass/fail
     Dev->>Main: merge PR
-    Note over CI,Main: stashpad-staging-image (hourly) commits a new staging digest directly to main
+    Note over CI,Main: stashpad-staging-image (hourly) pushes a new staging digest directly to main with a deploy key (bypasses agent-main-protection)
     VM->>Main: fetch, validate affected projects from a git archive of the fetched commit, then fast-forward (ff-only)
     VM->>VM: force-recreate changed projects plus reconcile.pending projects, log deployments.log
     Note over Ops,VM: NOT auto-applied: secrets, compose.env, AdGuard config/filters, nftables, NFS mounts, systemd, new projects
     Ops->>VM: make ansible-apply (toolbox decrypts SOPS, pushes files, re-renders helpers)
 ```
 
-Caddy, toolbox, sparkDash and dagu-hf images publish on main pushes touching their image directory or workflow, or via `workflow_dispatch`; sparkDash and dagu-hf have PR image-build checks. The stashPad staging digest updater runs on a schedule and supports manual dispatch.
+Caddy, toolbox, sparkDash and dagu-hf images publish on main pushes touching their image directory or workflow, or via `workflow_dispatch`; sparkDash and dagu-hf have PR image-build checks. The stashPad staging digest updater runs on a schedule and supports manual dispatch; its deploy-key push (unlike a `GITHUB_TOKEN` push) also starts push-triggered workflows, and for a staging-only commit that is `validate.yml` alone (see the Hermes operations runbook).
 
 Rollout order for **adding a Compose project** is documented in [application lifecycle](operations/application-lifecycle.md#新しいcompose-projectの追加): create the NFS directory/marker first **if NFS is used**, merge, wait for reconcile to advance the checkout, then run `make ansible-apply` to install updated helper lists. Wrong order can block startup/recreation of **all** projects (including reconcile recreations): `homelab-compose-up` checks every mount through the guard before touching any project; it can also fail the digest gate with `missing Compose project`.
 
@@ -524,8 +524,11 @@ Operator scripts `scripts/github-agent-repo-{onboard,check}.sh` share `github-ag
 operator gh OAuth auth for rulesets only. Onboard protects main with one admin-only bypass ruleset
 (`--allow-deploy-key-bypass` optionally adds DeployKey/null/always; built-in Actions bypass was
 rejected on the personal repo). Onboard then prints instructions for the operator to add the repo via
-the installation settings UI. Homelab stays outside the installation until a separate PR migrates
-the hourly staging push to an Actions deploy key in a main-only environment and onboarding completes. Check reads
+the installation settings UI. The hourly staging push now uses a write-enabled deploy key (secret
+`STASHPAD_STAGING_DEPLOY_KEY` in the main-only environment `stashpad-staging-bot`, `GITHUB_TOKEN` read-only), created by the
+operator script `scripts/stashpad-staging-deploy-key-setup.sh` (bash, `--dry-run`, own `gh` login, key never printed). Homelab stays
+outside the installation until that setup, a manual workflow run, onboarding with `--allow-deploy-key-bypass` and a
+scheduled push have been verified (order in the Hermes runbook). Check reads
 only rulesets; neither script calls installation APIs. Neither script is run automatically by Ansible. Offline
 `make runner-github-fixture` runs in CI; live acceptance remains manual. See ADR-0015 and Hermes operations.
 
