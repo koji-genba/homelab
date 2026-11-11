@@ -512,7 +512,10 @@ Live systemd/CLI resume/Discord/publication remain **未検証**; see ADR-0015 a
 
 Runner `roles/runner/tasks/github.yml` distributes optional `github_app` fields from the existing
 controller-decrypted Agent bundle through `site.yml` host facts. Non-login `gh-broker` owns the
-0400 PEM/config and 0700 cache; root-owned `agent-job-github-token` mints repo-scoped tokens.
+0400 PEM/config under `/etc/gh-broker` (gh-broker:gh-broker 0700) and 0700 cache.
+Legacy `/etc/homelab/secrets/github-app.{pem,json}` files are removed on apply; the parent
+secrets directory remains common-role root:root 0700. Disabling removes `/etc/gh-broker` too.
+All three token consumers accept `[A-Za-z0-9_.-]{1,2048}`; root-owned `agent-job-github-token` mints repo-scoped tokens.
 The only hermes-runner sudo exception runs that command as gh-broker (no sudo/docker group).
 `agent-job-github-credential` implements Git get/store/erase; `gh-agent` limits commands to draft
 PR create/edit and PR view/list. Runner global Git config carries the public App bot identity and

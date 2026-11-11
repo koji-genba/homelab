@@ -68,7 +68,7 @@ def run(target, args):
                             capture_output=True, text=True, check=True, timeout=60, env=environment)
     fields = dict(line.split('=', 1) for line in result.stdout.splitlines() if '=' in line)
     token = fields.get('password', '')
-    if not re.fullmatch(r'[A-Za-z0-9_]+', token):
+    if not re.fullmatch(r'[A-Za-z0-9_.-]{1,2048}', token):
         raise ValueError('credential unavailable')
     environment.update(GH_TOKEN=token, GH_HOST='github.com', GH_PROMPT_DISABLED='1')
     base = [GH, '--repo', target]

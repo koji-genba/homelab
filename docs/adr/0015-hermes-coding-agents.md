@@ -166,3 +166,13 @@ Proへ移行するか、main保護が無いリスクを承知して追加する�
 最後の場合は「main更新は本人だけ」の保証はない。agent-sandboxは本人がpublic化してonboarding済み
 （ruleset 27049802）。スクリプトは公開化・課金変更を行わない。
 GitHub応答はupdateのfalse parametersを省略するため比較時に正規化し、応答メタデータは比較から除く。
+
+
+## 2026-11-12 補足: broker専用ディレクトリとtoken形式
+
+App鍵・設定は `/etc/gh-broker/github-app.{pem,json}`（gh-broker所有0400）へ配置し、
+親 `/etc/gh-broker` はgh-broker所有0700とする。旧配置の2ファイルはapply時に削除し、
+無効化時は新ディレクトリも削除する。common roleがroot:root 0700で管理する
+`/etc/homelab/secrets` の属性をbroker taskで変更しない。
+installation tokenはドット・ハイフンを含む形式に対応し、許可文字を `[A-Za-z0-9_.-]`、
+長さを1〜2048文字としてbroker・credential helper・gh-agentで検査する。
