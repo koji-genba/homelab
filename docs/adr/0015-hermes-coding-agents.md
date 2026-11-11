@@ -101,3 +101,68 @@ home credential の境界は変わらず、任意の秘密文字列の完全な�
 
 ローカル fixture で制御フローを検証する。実機の user manager・cgroup・sandbox・サブスクリプション
 認証での成功とresume・Discord配送・GitHub公開は **未検証**。PR ② と実機受け入れ後に利用開始する。
+
+
+## 2026-11-12 補足: GitHub App と main 保護（PR ②）
+
+PR ①/①.5 の採用時記述を保持し、issue #207 の確定設計を具体化する。
+本人のアカウントに private GitHub App を作り、Only on this account、webhook off、
+Contents write・Pull requests write・Metadata read のみ、選択した repo のみにインストールする。
+Workflows・Administration・Actions・Secrets は渡さない。
+Contents write は merge にも使えるので、token 権限だけで main 更新を防げない。
+
+repo ごとに `agent-main-protection` ruleset **1本**を active で作る。
+対象は `refs/heads/main`、update・deletion・non_fast_forward を制限し、
+bypass は Repository admin（RepositoryRole ID 5）の always のみ。App は bypass に入れない。
+必須レビューの ruleset は付けない。本人作成の PR を本人が承認できず詰まるためである。
+調査レポートの2本案より、この確定設計を優先する。
+本人用 onboarding は保護を先に作り、その後本人がApp設定画面のRepository accessで対象repoを追加する。
+ghのOAuth tokenではinstallation APIが使えない実機結果により、スクリプトはrulesetの作成・更新・確認だけを行う。
+GitHub 管理操作はRunnerに渡さない。
+
+App 鍵は既存 Agent SOPS bundle の任意 `github_app`（app_id、installation_id、private_key）へ保存する。
+復号は controller の既存タスクだけ。host facts 経由で Runner play へ渡し、no_log で配置する。
+Runner に初めて置く App 鍵は非ログイン system user `gh-broker` 所有0400、設定も0400。
+Agent のコンテナ環境・share・runner-work バックアップには置かない。
+hermes-runner は sudo/docker group に入れず、sudo は次の1行だけ許す。
+
+```sudoers
+hermes-runner ALL=(gh-broker) NOPASSWD: /usr/local/libexec/agent-job-github-token
+```
+
+root所有のbrokerがowner/repoを検査し、installationのowner一致を確認したうえで、
+`repositories=[repo]` と上記3権限に絞るinstallation tokenを発行する。
+JWT RS256 はPython標準ライブラリとopensslで作る。repoごとに0600でcacheし、残り5分以上なら再利用する。
+helperはgetだけに応え、tokenはGitのpipeまたはgh-agentのGH_TOKENへ短時間渡す。
+root所有gh-agentはdraft作成・確認・一覧・draft本文編集に限る。main保護の強制境界はGitHub rulesetである。
+workerとHermesは同じUIDなので短命tokenの発行能力は共有する。skill/wrapperは任意コマンドの完全な隔離ではない。
+App鍵が漏れるとインストール先全repoの権限内でtokenを再発行できる。
+mainはrulesetで守るが、他branch・コード・PRは改変され得る。鍵revoke、suspend/uninstallで失効する。
+
+未登録・空のbundleではGitHubを導入せず `ready_to_publish` を維持する。
+後から項目を消してapplyした場合は配置済み鍵・helper・sudoers・cacheも削除して無効化する。
+bot slug/user IDは公開変数として管理し、未設定時はAgent Job Botへfallbackする。
+global ignoreでpyc等をcheckpointに含めない（既に追跡済みの生成物は別途取り除く）。
+
+ローカルfixtureはJWT署名・repo限定要求・cache/期限・protocol・wrapper拒否・公開接続を検証する。
+実際のAppによるbranch push/draft作成とmain push/merge/workflow push拒否、sudoの実効権限、
+連続applyの冪等性は反映後の受入対象。手順は[運用書](../operations/hermes-agent.md#github-app-による公開pr-②)。
+
+
+## 2026-11-12 補足: 実機結果と deploy key による毎時 staging 更新
+
+本人の実機でIntegration 15368のbypass登録は422。個人のrepoでは組み込みGitHub Actionsをbypassにできない。
+旧Actions bypassオプションは削除し、`--allow-deploy-key-bypass`を導入する。
+指定時のみDeployKey/alwaysをadminに追加する。actor_idは公式REST APIに従いnullで、特定鍵IDではない。
+update・deletion・non_fast_forwardは維持し、Hermes Appはbypassへ入れない。
+
+homelabはStashPad stagingのworkflowがGITHUB_TOKENでmainに直接pushするため、
+別PRでそのpush認証をdeploy keyへ変える。鍵はActions secretとしてmain限定environmentに保存する。
+workflowの移行と同オプションでのonboardingが済むまでhomelabをAppのインストール先から外しておく。
+今回workflow・GitHub設定は変更しない。詳細と公式根拠は[運用書](../operations/hermes-agent.md#homelab-の-github-actions-による-main-更新)。
+
+GitHub Freeのprivate repoはrulesetで保護できず、実機APIも403。public repoだけをAppへ追加するか、
+Proへ移行するか、main保護が無いリスクを承知して追加するかは本人が判断する。
+最後の場合は「main更新は本人だけ」の保証はない。agent-sandboxは本人がpublic化してonboarding済み
+（ruleset 27049802）。スクリプトは公開化・課金変更を行わない。
+GitHub応答はupdateのfalse parametersを省略するため比較時に正規化し、応答メタデータは比較から除く。

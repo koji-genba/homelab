@@ -26,6 +26,23 @@ guard = next(t for t in user_tasks if t["name"] == "Refuse a privileged runner a
 guard_body = str(guard["ansible.builtin.assert"])
 assert "sudo" in guard_body and "docker" in guard_body
 
+# The sole sudo exception runs the fixed token program as the non-login broker.
+github_tasks = yaml.safe_load((role / "tasks/github.yml").read_text())
+block = next(t["block"] for t in github_tasks if "block" in t)
+sudo = next(t["ansible.builtin.copy"] for t in block
+            if t.get("ansible.builtin.copy", {}).get("dest", "").startswith("/etc/sudoers.d/"))
+assert sudo["content"] == "{{ runner_user }} ALL=(gh-broker) NOPASSWD: /usr/local/libexec/agent-job-github-token\n"
+assert sudo["mode"] == "0440" and sudo["owner"] == "root"
+assert sudo["validate"] == "/usr/sbin/visudo -cf %s"
+assert any(t.get("ansible.builtin.command") == "/usr/sbin/visudo -c" for t in block)
+broker = next(t["ansible.builtin.user"] for t in block if "ansible.builtin.user" in t)
+assert broker["shell"] == "/usr/sbin/nologin" and broker["system"] is True
+assert broker["groups"] == [] and broker["password_lock"] is True
+# No additional sudoers grants in any Runner task file.
+for path in (role / "tasks").glob("*.yml"):
+    text = path.read_text()
+    assert text.count("NOPASSWD:") == (1 if path.name == "github.yml" else 0), path
+
 # The terminal key is restricted to the Agent address and disabled for
 # forwarding/agent/X11 forwarding by default.
 terminal_key = next(t for t in user_tasks if t["name"].startswith("Install the Agent VM SSH key"))

@@ -13,7 +13,19 @@ Apps VM用のsecretは、このdirectoryの`runtime.sops.yaml`としてSOPS/age�
 Agent VMのsecretは`agent/runtime.sops.yaml`として同じSOPS/ageで暗号化し、
 [agent/runtime.yaml.example](agent/runtime.yaml.example)のkey一覧に従う。暗号化・復号確認は
 `make secrets-encrypt-agent` / `make secrets-decrypt-check-agent`を使う。Discordのbot tokenと
-channel ID、監視用webhookが対象で、PostgreSQL passwordとSSH鍵はVM上で生成するためbundleへ
+channel ID、監視用webhook、Webapp認証、任意のGitHub App（`github_app.app_id`、
+`installation_id`、PEM `private_key`）が対象。App鍵はcontroller復号後にRunnerのgh-brokerだけへ
+0400で配布し、Agentコンテナには渡さない。3項目未登録時は公開を無効化する。
+repo追加は本人のgh認証でonboardスクリプトを実行してmainのrulesetを付けた後、
+[App設定画面](https://github.com/settings/installations/180956595)のRepository accessで本人が行う。
+スクリプトはinstallation APIを使わず、checkもrulesetの確認だけを行う。
+GitHub Freeのprivate repoはrulesetで守れない。App対象をpublic repoだけにするか、Proにするか、
+保護できないリスクを承知して追加するかは本人が判断する。個人repoでGitHub Actionsのbypass登録はできない。
+homelabは別PRで毎時staging更新のpushをdeploy key（Actions secret、main限定environment）へ移し、
+`--allow-deploy-key-bypass`でonboardingするまでAppのインストール先から外しておく。
+このdeploy keyはRunner用SOPS bundleへ入れず、Hermes Appと共有しない。
+登録・失効は[Hermes運用](../../../docs/operations/hermes-agent.md#github-app-による公開pr-②)を参照。
+PostgreSQL passwordとSSH鍵はVM上で生成するためbundleへ
 含めない。
 
 ## Tailscale ACL全文の復旧用コピー

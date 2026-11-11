@@ -506,3 +506,26 @@ Hermes home and registers a 10-minute `no_agent` cron to Discord home channel; e
 PR ② credential helper is still absent, so enabled publication stops at `ready_to_publish`.
 `scripts/tests/agent-job-fixture.py` / `make agent-job-fixture` run offline in CI.
 Live systemd/CLI resume/Discord/publication remain **未検証**; see ADR-0015 and Hermes operations.
+
+
+### 2026-11-12 incremental: issue #207 PR ② GitHub publication
+
+Runner `roles/runner/tasks/github.yml` distributes optional `github_app` fields from the existing
+controller-decrypted Agent bundle through `site.yml` host facts. Non-login `gh-broker` owns the
+0400 PEM/config and 0700 cache; root-owned `agent-job-github-token` mints repo-scoped tokens.
+The only hermes-runner sudo exception runs that command as gh-broker (no sudo/docker group).
+`agent-job-github-credential` implements Git get/store/erase; `gh-agent` limits commands to draft
+PR create/edit and PR view/list. Runner global Git config carries the public App bot identity and
+global ignore. Without credentials jobs remain ready_to_publish; removing fields disables publication.
+Operator scripts `scripts/github-agent-repo-{onboard,check}.sh` share `github-agent-repo.py` and use
+operator gh OAuth auth for rulesets only. Onboard protects main with one admin-only bypass ruleset
+(`--allow-deploy-key-bypass` optionally adds DeployKey/null/always; built-in Actions bypass was
+rejected on the personal repo). Onboard then prints instructions for the operator to add the repo via
+the installation settings UI. Homelab stays outside the installation until a separate PR migrates
+the hourly staging push to an Actions deploy key in a main-only environment and onboarding completes. Check reads
+only rulesets; neither script calls installation APIs. Neither script is run automatically by Ansible. Offline
+`make runner-github-fixture` runs in CI; live acceptance remains manual. See ADR-0015 and Hermes operations.
+
+GitHub Free private repositories cannot use ruleset protection; installation policy must account for
+public-only targets, Pro, or an explicitly accepted lack of main protection. Ruleset comparison ignores
+response metadata and normalizes omitted update parameters to false; check reports matches.

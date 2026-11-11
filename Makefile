@@ -456,3 +456,7 @@ secrets-encrypt-pve1:
 .PHONY: agent-job-fixture
 agent-job-fixture:
 	python3 scripts/tests/agent-job-fixture.py
+
+.PHONY: runner-github-fixture
+runner-github-fixture:
+	python3 scripts/tests/runner-github-fixture.py

@@ -65,12 +65,26 @@ agent-job resume feature-01 --deadline-hours 6 --max-launches 60 --max-consecuti
 
 状態・ログの正は `/srv/agent-work/tasks/<id>/` の plan.json、state.json、runs/<n>/。
 done の段階ごとに driver が bot 名義の checkpoint commit を作る。
-公開を有効にしても PR ② の credential helper が無ければ `ready_to_publish` で止まる。
-helper 導入後の再開は draft PR を作る。main への push・merge はしない。
+公開を有効にしてもAppの鍵・credential helperが未導入なら `ready_to_publish` で止まる。
+導入後にresumeすると、対象HTTPS originの `agent/<topic>` へpushし、
+`gh-agent <owner>/<repo> pr create --draft ...` でdraft PRを作る。
+checkpointの名義はAnsible管理のApp bot、未設定時はAgent Job Bot。
+repoのonboardingが必要。mainへのpush・mergeはしない。
+`.github/workflows` を変更したpushが拒否されたら、本人に対応を頼む。
+公開失敗後はremote branchと既存PRを確認してから再開し、重複PRを作らない。
 
 完了後は Hermes 自身で `git diff <base>...<branch>` と commit 一覧、テスト結果、
 各 run の result.json・stdout・stderr を読む。秘密や無関係なファイルがないか確認し、
 受入条件を照合する。通知や done だけで成功と判断しない。
 本人に使用CLI・変更内容・テスト結果・残件・PRまたは公開待ちを報告する。
 ログは資格情報らしい文字列をマスクするが完全な漏えい防止境界ではない。
-実機の成功実行・通知・公開は未検証。
+PR ①のCLI成功・resume・通知は受入済み。Appによる公開は反映後の受入が必要。
+
+repoの追加は本人が先にonboardスクリプトでmainのrulesetを付け、次にGitHubのApp設定画面の
+Repository accessでインストール先へ追加する。checkスクリプトはrulesetだけを確認し、
+Appへの登録状況は確認しない。Hermesから設定変更を行わない。
+
+GitHub Freeのprivate repoはruleset保護が使えない。publicだけを対象にするか、Proにするか、
+保護できないリスクを承知で追加するかは本人が決める。個人repoでGitHub Actionsをbypassにできない。
+homelabは毎時staging更新をdeploy key（Actions secret、main限定environment）へ移す別PRと、
+`--allow-deploy-key-bypass`でのonboardingが終わるまで、Appの対象から外しておく。

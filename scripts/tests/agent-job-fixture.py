@@ -72,7 +72,9 @@ sys.exit(1 if mode == 'fail' or mode == 'recover' and n in (1, 3) else 0)
         # Fixture control files are ignored and never checkpointed.
         (self.repo / '.git/info/exclude').write_text('mode\ncalls\nargv\n')
         original = job.env
-        self.env_patch = patch.object(job, 'env', lambda: original() | {'PATH': str(self.bin) + ':/usr/bin:/bin'})
+        self.home = self.root / 'home'
+        self.home.mkdir()
+        self.env_patch = patch.object(job, 'env', lambda: original() | {'HOME': str(self.home), 'PATH': str(self.bin) + ':/usr/bin:/bin'})
         self.env_patch.start()
         self.addCleanup(self.env_patch.stop)
         (self.root / 'tasks').mkdir()
@@ -121,6 +123,43 @@ sys.exit(1 if mode == 'fail' or mode == 'recover' and n in (1, 3) else 0)
                 self.assertEqual(self.git('log', '-1', '--format=%an <%ae>'), 'Agent Job Bot <agent-job@localhost>')
                 self.assertEqual(self.git('show', 'HEAD:implementation.txt'), 'implemented')
                 self.git('switch', '-q', 'main')
+
+    def test_app_identity_global_ignore_and_publication(self):
+        from types import SimpleNamespace
+        class TrustedHelper(type(Path())):
+            def stat(self, **kwargs):
+                return SimpleNamespace(st_uid=0, st_mode=0o100755)
+        helper = self.root / 'helper'
+        helper.write_text('#!/bin/sh\ncat >/dev/null\nprintf "username=x-access-token\\npassword=ghs_FIXTURE\\n\\n"\n')
+        helper.chmod(0o755)
+        job.HELPER = TrustedHelper(helper)
+        self.git('remote', 'add', 'origin', 'https://github.com/owner/repo.git')
+        (self.home / '.gitconfig').write_text('[user]\nname = fixture-app[bot]\nemail = 123+fixture-app[bot]@users.noreply.github.com\n[core]\nexcludesFile = ' + str(self.home / 'ignore') + '\n')
+        (self.home / 'ignore').write_text('*.pyc\n')
+        (self.repo / 'generated.pyc').write_bytes(b'fixture')
+        original = subprocess.run
+        published = []
+        def run(args, **kwargs):
+            if args[0] == '/usr/local/bin/gh-agent' or args[0] == 'git' and 'push' in args:
+                self.assertNotIn('GH_TOKEN', kwargs['env'])
+                published.append(args)
+                return subprocess.CompletedProcess(args, 0)
+            return original(args, **kwargs)
+        self.git('branch', 'develop')
+        plan = self.plan()
+        plan['base'] = 'develop'
+        task, state = self.prepare(plan)
+        with patch.object(subprocess, 'run', run):
+            job.worker(task, state)
+        self.assertEqual(state['status'], 'published')
+        self.assertEqual(len(published), 2)
+        self.assertIn('HEAD:refs/heads/agent/fixture', published[0])
+        self.assertIn('credential.useHttpPath=true', published[0])
+        self.assertEqual(published[1][:5], ['/usr/local/bin/gh-agent', 'owner/repo', 'pr', 'create', '--draft'])
+        self.assertEqual(published[1][published[1].index('--base') + 1], 'develop')
+        self.assertEqual(self.git('log', '-1', '--format=%an <%ae>'),
+                         'fixture-app[bot] <123+fixture-app[bot]@users.noreply.github.com>')
+        self.assertNotIn('generated.pyc', self.git('ls-files'))
 
     def test_retry_without_session_keeps_original_prompt(self):
         for cli in ('claude', 'codex', 'dsh'):
