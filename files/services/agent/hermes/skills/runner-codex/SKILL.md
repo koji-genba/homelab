@@ -7,7 +7,8 @@ platforms: [linux]
 # Codex on Runner
 
 `runner-coding` の作業場所・秘密の扱いを守る。初回device loginは本人がRunnerで行う。
-既定モデルはAnsible管理のgpt-6.1-sol、reasoning effortはmedium。
+既定モデルはAnsible管理の `/etc/codex/config.toml` のgpt-6.1-sol、reasoning effortはmedium。
+`~/.codex/config.toml` はCodex自身の設定で、書かれていればそちらが優先される。
 
 terminalで `mkdir -p /srv/agent-work/results/<task-id>` を先に実行する。
 `-o` はsandboxのworkspace内にある一意な未追跡ファイルを指定する。
