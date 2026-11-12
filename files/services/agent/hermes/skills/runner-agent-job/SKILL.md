@@ -8,7 +8,7 @@ platforms: [linux]
 
 長時間・ブラウザを閉じて放置する作業に使う。短い作業は `runner-claude`、
 `runner-codex`、`runner-dsh` を使う。`runner-coding` の承認済みコードと秘密の扱いを守る。
-Hermes は計画を作って起動し、必要なときに状態を調べ、最後にレビューする。
+Hermes は計画を作って起動し、必要なときに状態を調べる。無人の最終レビューは計画の段階に含める。
 段階をつなぐのは Runner の driver。Webapp の note や background 完了通知で次段階を起動しない。
 
 計画と対象 checkout は Runner に置く。同じ checkout で別 worker を起動しない。
@@ -40,13 +40,34 @@ driver が job の branch へ戻す。未コミットの変更があれば切り
 ```
 
 各段階は、目的と検証可能な受入条件を持つ。cli はどの段階も claude / codex / dsh を選べる。
-dsh に重い実装やレビューを任せてもよい。本人の希望、必要な能力、利用枠から選び、
+dsh（GLM）に重い段階を任せる計画では、最後に claude か codex のレビュー段階を置く。
+実装した CLI とは別のものを選ぶ。claude / codex が実装する場合も、規模が大きければ
+別 CLI の最終レビューを置くのが望ましい。本人の希望、必要な能力、利用枠から選び、
 DGX は Hermes 本体と共用なので dsh の並列使用による待ち時間にも注意する。
 `network` は必須のboolで Codex の sandbox ネットワークだけを制御する。
 `model` は任意。dsh の model は管理済み local-glm provider 内のモデル名。
 段階の timeout は既定45分・最大120分、期限は既定・最大6時間。
 初回計画は起動30回・連続失敗3回まで、段階数は1〜30。
 計画にも資格情報や機密コードを書かない。公開本文には実際の検証結果と未検証事項を書く。
+
+レビュー段階の prompt 雛形（`<base>` は計画の base に置き換える）:
+
+```text
+git diff <base>...HEAD と commit 一覧・内容を読み、要求と照合する。
+テストを全部流し直し、実装とは別の観点（境界値、エラー経路、仕様との差）で検証する。
+小さな不具合は修正してテストを通す。重大な問題が残れば、最終行を
+AGENT_JOB_STATUS: blocked 理由と残件
+として止める。問題が解消したら、最終行を
+AGENT_JOB_STATUS: done 検証したこと・結果、見つけた問題と修正、残る制約の要約
+とする。要約だけでも検証内容と発見した問題が分かるように書く。
+```
+
+acceptance にも「全テスト再実行・独立した検証・小修正後の成功、重大な未解決は blocked」を書く。
+blocked なら公開せず停止し、見張りの通知対象になる。Webapp の完了から Hermes が自動で
+起きる前提にはしない。レビューの timeout は45分を目安に、全テストの所要時間に応じて
+最大120分まで確保し、job 全体の期限・起動予算にも含める。
+network は原則 false。依存取得など検証に必要で許可済みの場合だけ true にする。
+これは Codex の sandbox の設定であり、claude / dsh や Runner の通信制限を変えるものではない。
 
 SSH terminal で通常の短いコマンドとして実行する（PTY・background追跡は不要）:
 
@@ -71,6 +92,9 @@ done の段階ごとに driver が bot 名義の checkpoint commit を作る。
 公開を有効にしてもAppの鍵・credential helperが未導入なら `ready_to_publish` で止まる。
 導入後にresumeすると、対象HTTPS originの `agent/<topic>` へpushし、
 `gh-agent <owner>/<repo> pr create --draft ...` でdraft PRを作る。
+PR本文は publish.body を先頭に残し、末尾の「agent-job の記録」に段階名・CLI・起動回数と
+最後の成功 done の要約を付ける。要約は伏せ字処理後に各1,000文字まで、本文全体は65,536文字まで。
+表の領域を確保して計画の本文を切り詰める。stage のない古い run は集計しない。
 checkpointの名義はAnsible管理のApp bot、未設定時はAgent Job Bot。
 repoのonboardingが必要。mainへのpush・mergeはしない。
 `.github/workflows` を変更したpushが拒否されたら、本人に対応を頼む。
@@ -78,7 +102,7 @@ repoのonboardingが必要。mainへのpush・mergeはしない。
 失敗したコマンド（push・pr create）と終了コードはstateのsummaryに出る。標準出力・標準エラーは
 資格情報らしい文字列を伏せて `runs/publish-<n>/` の stdout・stderr・result.json に残るので、原因はそこで読む。
 
-完了後は Hermes 自身で `git diff <base>...<branch>` と commit 一覧、テスト結果、
+完了後に Hermes が報告するときは `git diff <base>...<branch>` と commit 一覧、テスト結果、
 各 run の result.json・stdout・stderr を読む。秘密や無関係なファイルがないか確認し、
 受入条件を照合する。通知や done だけで成功と判断しない。
 本人に使用CLI・変更内容・テスト結果・残件・PRまたは公開待ちを報告する。
