@@ -1274,6 +1274,7 @@ checkはrulesetの一覧・詳細を読むだけで、期待する設定との�
 未作成または不一致なら非0で終了する。GitHubが省略するupdateのfalse既定値や応答のメタデータは正規化する。
 Appへのインストール状況は確認しない。重複した同名rulesetは停止して本人へ整理を求める。
 途中失敗ならcheckで確認して再実行する。
+onboarding後は本人のPR mergeにも明示的なbypassが必要になる（下記）。
 
 **順番は「rulesetを付ける → 画面でインストール先に足す」**。
 onboard完了後、表示されたrulesetを確認し、本人が
@@ -1287,6 +1288,15 @@ non_fast_forward、既定のbypassはRepository admin（RepositoryRole ID 5）�
 Hermes Appはbypassへ入れず、必須レビューのrulesetは追加しない。
 表示された設定を本人が確認する。既存の他rulesetはスクリプトで削除しない。
 [Rulesets API](https://docs.github.com/en/rest/repos/rules)を参照する。
+
+#### 本人による PR merge と bypass
+
+2026-11-12、homelabのmainに`agent-main-protection`を適用した（update制限、
+bypassはRepository adminとDeployKey、どちらもalways）。本人の認証でも`gh pr merge N --merge`は
+`the base branch policy prohibits the merge`で拒否され、`gh pr merge N --merge --admin`で通ることを確認した。
+Webでは **Merge without waiting for requirements to be met** にチェックしてmergeする。
+本人が`git push`でmainへ直接pushするときはbypassが自動で効く。agent-sandboxも同じ挙動である。
+Appはbypass対象ではないため、`--admin`を付けてもmainへmergeできない。
 
 #### public/private と GitHub のプラン
 

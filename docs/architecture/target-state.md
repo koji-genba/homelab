@@ -209,6 +209,8 @@ VM側はNFSv4、`hard,_netdev`を使用する。systemd mount unit、`RequiresMo
 - Dependabotが週次でCompose（`docker-compose`）、Dockerfile（`docker`）、Terraform
   （apps-vm / agent-vm / runner-vm / elastiflow / tailscale-gateway / stashpad-dev / tailscale）、
   GitHub Actionsを確認する。Proxmox providerの更新は6 VM rootを同じversionに揃えてレビューする。
+  PRは本人が確認後、[共通のマージ手順](../operations/application-lifecycle.md#本人による-pr-のマージ)に従い、
+  CLIでは`gh pr merge N --merge --admin`、Webではbypassにチェックしてmergeする。
   Compose directoryを`docker`で指定した旧設定の`dependency_file_not_found`は、
   `compose.yaml`を検出する専用ecosystemへの切り替えで対処する。
 - `compose.yaml`のdigest-only参照はDependabotの更新先が元のtagではなく`latest`のdigestになるため、
