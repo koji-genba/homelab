@@ -118,6 +118,7 @@ sys.exit(1 if mode == 'fail' or mode == 'recover' and n in (1, 3) else 0)
                 self.assertEqual(state['status'], 'ready_to_publish')
                 self.assertEqual(state['launches'], 3)
                 self.assertEqual(state['stage'], 2)
+                self.assertEqual([job.read(task / 'runs' / str(n) / 'result.json')['stage'] for n in (1, 2, 3)], [0, 0, 1])
                 calls = [json.loads(line) for line in (self.repo / 'argv').read_text().splitlines()]
                 self.assertIn({'claude': '--resume', 'codex': 'resume', 'dsh': '--session-id'}[cli], calls[1])
                 self.assertNotIn({'claude': '--resume', 'codex': 'resume', 'dsh': '--session-id'}[cli], calls[2])
@@ -161,6 +162,12 @@ sys.exit(1 if mode == 'fail' or mode == 'recover' and n in (1, 3) else 0)
         self.assertIn('credential.useHttpPath=true', published[0])
         self.assertEqual(published[1][:5], ['/usr/local/bin/gh-agent', 'owner/repo', 'pr', 'create', '--draft'])
         self.assertEqual(published[1][published[1].index('--base') + 1], 'develop')
+        body_file = Path(published[1][published[1].index('--body-file') + 1])
+        self.assertEqual(body_file, task / 'pr-body.md')
+        body = body_file.read_text()
+        self.assertTrue(body.startswith(plan['publish']['body'] + '\n\n## agent-job の記録\n'))
+        result = job.read(task / 'runs/1/result.json')
+        self.assertIn('| stage-0 | claude | 1 | ' + result['summary'] + ' |', body)
         self.assertEqual(self.git('log', '-1', '--format=%an <%ae>'),
                          'fixture-app[bot] <123+fixture-app[bot]@users.noreply.github.com>')
         self.assertNotIn('generated.pyc', self.git('ls-files'))
@@ -243,6 +250,47 @@ sys.exit(1 if mode == 'fail' or mode == 'recover' and n in (1, 3) else 0)
                 raise step
             return subprocess.CompletedProcess(args, *step)
         return run
+
+    def test_pr_body_stage_records_redaction_and_limits(self):
+        plan = self.plan(stages=2)
+        plan['stages'][1]['cli'] = 'codex'
+        task, _ = self.prepare(plan)
+        samples = {
+            1: dict(status='done', summary='legacy ignored'),
+            2: dict(stage=0, status='continue', summary='unfinished'),
+            3: dict(stage=0, status='done', summary='older done'),
+            10: dict(stage=0, status='done', summary='tests pass | boundary\nfixed token=fixture-secret ghs_fixture-token'),
+            11: dict(stage=0, status='blocked', summary='later blocked'),
+            12: dict(stage=0, status='done', failed=True, summary='failed done'),
+            13: dict(stage=1, status='running'),
+        }
+        for n, result in samples.items():
+            (task / 'runs' / str(n)).mkdir(parents=True)
+            job.atomic(task / 'runs' / str(n) / 'result.json', result)
+        (task / 'runs/publish-1').mkdir()
+        job.atomic(task / 'runs/publish-1/result.json', dict(status='done', summary='publication ignored'))
+        body = job.pr_body(task, plan)
+        self.assertIn('| stage-0 | claude | 5 | tests pass &#124; boundary fixed token=[REDACTED] [REDACTED] |', body)
+        self.assertIn('| stage-1 | codex | 1 | 記録なし |', body)
+        for text in ('fixture-secret', 'ghs_fixture-token', 'older done', 'legacy ignored', 'failed done', 'publication ignored'):
+            self.assertNotIn(text, body)
+
+        # Redact the complete summary before cutting through a credential.
+        samples[10]['summary'] = '検' * 990 + ' token=' + 's' * 5000
+        job.atomic(task / 'runs/10/result.json', samples[10])
+        body = job.pr_body(task, plan)
+        summary = body.split('| stage-0 | claude | 5 | ')[1].split(' |')[0]
+        self.assertEqual(len(summary), 1000)
+        self.assertTrue(summary.endswith('…'))
+        self.assertNotIn('sssss', body)
+
+        # Reserve every stage row even when the original body fills GitHub's limit.
+        plan['publish']['body'] = '元の本文' * 20000
+        body = job.pr_body(task, plan)
+        self.assertEqual(len(body), 65536)
+        self.assertTrue(body.startswith('元の本文'))
+        self.assertIn('…\n\n## agent-job の記録\n', body)
+        self.assertTrue(body.endswith('| stage-1 | codex | 1 | 記録なし |\n'))
 
     def test_publish_failure_is_logged_and_redacted(self):
         token = 'ghs_header.payload_with-hyphen.signature'

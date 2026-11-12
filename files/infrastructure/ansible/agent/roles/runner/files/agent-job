@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import fcntl
 import hashlib
+import html
 import json
 import math
 import os
@@ -264,6 +265,37 @@ def publish_step(run, steps, name, argv, **kwargs):
     return code, timed_out
 
 
+def pr_body(task, plan):
+    """Keep the planned body first and reserve space for bounded stage records."""
+    records = [[] for _ in plan['stages']]
+    for run in sorted((p for p in (task / 'runs').iterdir() if p.name.isdecimal()), key=lambda p: int(p.name)):
+        result = run / 'result.json'
+        if not result.is_file():
+            continue
+        data = read(result)
+        stage = data.get('stage')
+        if type(stage) is int and 0 <= stage < len(records):
+            records[stage].append(data)
+
+    def cell(value, limit):
+        # Redact before truncation, then keep Markdown cells on one line.
+        value = ' '.join(clean(value).splitlines())
+        value = html.escape(value).replace('|', '&#124;').replace('`', '&#96;')
+        return value if len(value) <= limit else value[:limit - 1] + '…'
+
+    rows = ['\n\n## agent-job の記録\n', '| 段階 | cli | 起動回数 | 最後の done の要約 |', '| --- | --- | --- | --- |']
+    for stage, runs in zip(plan['stages'], records):
+        done = [r for r in runs if r.get('status') == 'done' and not r.get('failed')]
+        summary = done[-1].get('summary', '') if done else '記録なし'
+        rows.append(f"| {cell(stage['name'], 200)} | {stage['cli']} | {len(runs)} | {cell(summary, 1000)} |")
+    appendix = '\n'.join(rows) + '\n'
+    budget = 65536 - len(appendix)
+    body = plan['publish']['body']
+    if len(body) > budget:
+        body = body[:budget - 1] + '…'
+    return body + appendix
+
+
 def worker(task, state):
     plan = read(task / 'plan.json')
     repo = plan['repo']
@@ -311,7 +343,7 @@ def worker(task, state):
             run.mkdir(parents=True)
             (run / 'stdout').touch()
             (run / 'stderr').touch()
-            atomic(run / 'result.json', {'exit_code': None, 'status': 'running'})
+            atomic(run / 'result.json', {'stage': state['stage'], 'exit_code': None, 'status': 'running'})
             save(task, state)
             # Temporary raw streams are immediately redacted after the child exits.
             with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
@@ -355,7 +387,7 @@ def worker(task, state):
                 failed = True
             status = match[1] if match else 'continue'
             summary = (match[2] or status) if match else 'no status line; continuing'
-            atomic(run / 'result.json', {'exit_code': child.returncode, 'timeout': timed_out, 'failed': bool(failed), 'status': status, 'summary': clean(summary)})
+            atomic(run / 'result.json', {'stage': state['stage'], 'exit_code': child.returncode, 'timeout': timed_out, 'failed': bool(failed), 'status': status, 'summary': clean(summary)})
             (run / 'exit-code').write_text(str(child.returncode) + '\n')
             if (task / 'stop').exists():
                 return save(task, state, 'stopped', 'stop requested')
@@ -436,7 +468,7 @@ def worker(task, state):
         publish_env = env() | {'GIT_TERMINAL_PROMPT': '0'}
         del fields, credential
         body = task / 'pr-body.md'
-        body.write_text(plan['publish']['body'])
+        body.write_text(pr_body(task, plan))
         commands = [
             ('push', ['git', '-c', 'core.hooksPath=/dev/null', '-c', 'credential.helper=', '-c', 'credential.helper=' + str(HELPER), '-c', 'credential.useHttpPath=true', 'push', '--set-upstream', 'origin', 'HEAD:refs/heads/' + plan['branch']]),
             ('pr create', ['/usr/local/bin/gh-agent', relative.as_posix(), 'pr', 'create', '--draft', '--base', plan['base'], '--head', plan['branch'], '--title', plan['publish']['title'], '--body-file', str(body)]),

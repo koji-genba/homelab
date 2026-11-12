@@ -1063,6 +1063,15 @@ agent-job resume task-01 --deadline-hours 6 --max-launches 60 --max-consecutive-
 ```
 
 計画例と必須項目は [runner-agent-job skill](../../files/services/agent/hermes/skills/runner-agent-job/SKILL.md)。
+重い段階を dsh（GLM）に任せる計画は、最後に実装とは別の CLI（claude / codex）で
+レビューする段階を置く。claude / codex の実装も大規模なら同様にするのが望ましい。
+base との差分と commit を読み、全テストの再実行、境界値・エラー経路・仕様との差の検証、
+小さな修正と再試験まで行う。重大な未解決は `AGENT_JOB_STATUS: blocked` で公開を止め、通知対象にする。
+Webapp の完了で Hermes が自動で起きる前提にはしない。prompt 雛形は skill を参照。
+レビューの timeout は45分を目安に最大120分、全体期限・起動予算にも含める。
+network は原則 false、許可済みの依存取得などが必要な場合だけ true（Codex sandbox のみの設定）。
+固定版 c7da41dd の `tools/skill_manager_tool.py` は本文を100,000文字までとする。
+repo の skill は Ansible `copy force: true` で配布しこの検査を通らないが、同じ上限内に保つ。
 対象は `/srv/agent-work/repos/<owner>/<repo>` の clean な checkout。初回は base から新しい
 `agent/` branch を作る。id の再利用、既存 branch への初回起動、同じrepoでの二重起動は拒否する。
 外部の直接CLIも同じcheckoutで走らせない。排他の対象はこのdriver経由のjobである。
@@ -1085,7 +1094,7 @@ CLIがsessionを作る前に失敗した場合だけ、次回も新規起動に�
 `/srv/agent-work/tasks/<id>/` には plan.json、atomic更新のstate.json、
 runs/<累積起動番号>/stdout・stderr・result.json・exit-code と、公開の試行ごとの
 runs/publish-<n>/stdout・stderr・result.json（下記）がある。
-state.json の stage は0始まり、sessionsは段階ごと、cli_sessionsは各CLIの直近のID。
+state.json と各 CLI run の result.json の stage は0始まり、sessionsは段階ごと、cli_sessionsは各CLIの直近のID。
 launches、consecutive_failures、deadline_at（Unix時刻）、summaryを確認する。
 CLI出力は既知のcredential文字列をマスクする。ログ・計画は0700のtask配下に置き、公開しない。
 マスクは完全な秘密検出ではない。資格情報を読む依頼は禁止し、公開前に差分を点検する。
@@ -1129,6 +1138,11 @@ PR ② のhelper契約は `/usr/local/libexec/agent-job-github-credential`（roo
 Git credential protocolで短命App tokenを返し、CLIの環境には渡さない。
 公開時だけdriverがhelperを使い、対象owner/repoと一致するGitHub HTTPS originへ
 `agent/...` をpushし、`gh-agent <owner/repo> pr create --draft --base <planのbase>` を実行する。
+`--body-file` の `pr-body.md` は計画の `publish.body` を先頭に残し、末尾に
+「## agent-job の記録」を付ける。表は各段階の名前・CLI・起動回数・最後の成功 done の要約。
+要約は `clean()` で伏せ字にして各1,000文字までとし、改行・表の区切り等を処理する。
+stage のない古い run は集計しない。本文全体は65,536文字までとし、表の領域を確保して
+計画の本文を切り詰める。検証したこと・発見した問題はレビュー段階の最終行の要約に書く。
 公開の試行ごとに `runs/publish-<n>/` を作り、`push`・`pr create`（と credential helper）の
 標準出力・標準エラーを `== <名前> ==` の見出し付きで stdout・stderr に、各コマンドの終了コードを
 result.json の `steps` に残す。保存前に `clean()` で伏せ字にし、`gh[pousr]_`・`github_pat_`・`sk-`
