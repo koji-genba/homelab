@@ -3,6 +3,16 @@
 - 対象: Apps VM切替後のCompose project更新、promotion、rollback
 - 自動化の境界: [ADR-0002](../adr/0002-iac-and-deployment-boundaries.md)
 
+## 本人による PR のマージ
+
+2026-11-12にmainへ`agent-main-protection`を適用した（update制限、adminとDeployKeyがalways bypass）。
+レビュー・必要な確認を済ませたPR（Dependabotを含む）は、本人の認証で`gh pr merge N --merge --admin`を使う。
+`--admin`なしでは`the base branch policy prohibits the merge`で拒否される。
+Webでは **Merge without waiting for requirements to be met** にチェックする。
+本人のmainへの直接`git push`ではbypassが自動で効く。agent-sandboxも同じ挙動である。
+Appはbypass対象外なので`--admin`でもmergeできない。
+Compose変更のmainへのmergeは本番deployとなる。詳細は[Hermesのruleset運用](hermes-agent.md#本人による-pr-merge-と-bypass)。
+
 ## 通常のreconcile
 
 Apps VMの`homelab-app-reconcile.timer`は15分ごとに`origin/main`をfetchし、fast-forwardだけを

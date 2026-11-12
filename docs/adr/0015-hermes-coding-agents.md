@@ -181,6 +181,15 @@ Proへ移行するか、main保護が無いリスクを承知して追加する�
 GitHub応答はupdateのfalse parametersを省略するため比較時に正規化し、応答メタデータは比較から除く。
 
 
+## 2026-11-12 補足: 本人の PR merge に必要な bypass
+
+homelabのmainへ`agent-main-protection`を適用した（update制限、adminとDeployKeyはalways bypass）。
+本人の`gh pr merge N --merge`は`the base branch policy prohibits the merge`で拒否され、
+`gh pr merge N --merge --admin`で通ることを確認した。Webでは
+**Merge without waiting for requirements to be met** にチェックする。
+本人のmainへの直接`git push`ではbypassが自動で効き、agent-sandboxも同じ挙動である。
+Appはbypass対象外のため`--admin`でもmergeできない。
+
 ## 2026-11-12 補足: broker専用ディレクトリとtoken形式
 
 App鍵・設定は `/etc/gh-broker/github-app.{pem,json}`（gh-broker所有0400）へ配置し、
