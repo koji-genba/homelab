@@ -1517,3 +1517,15 @@ PEM・config・cacheはrunner-work backupに含まれないのでRunner再構築
 repo限定tokenが漏れた場合はそのrepoに限定され、通常1時間で失効する。
 mainは設定したrulesetで守られるが、他branch・PR・コードの改変や読み取りは可能。
 本人管理のworkflowが作業branchのコードを本番へ反映しないこともonboarding前に確認する。
+
+### 2026-11-16: Terraform stateブランチの追加保護
+
+[ADR-0016](../adr/0016-terraform-state-sync-lock.md)でstate-backupを自動同期する正本へ変更する。
+既存のmain用rulesetは他branchを制限しないため、Contents writeのHermes Appやstaging deploy keyは
+state-backup/state-lockにもpushできる権限を持つ。age公開鍵だけで偽stateを暗号化できるので、
+自動同期前に本人だけに書込みを絞る必要がある。今回GitHubの現状は取得していない。
+
+`github-agent-repo.py protect-state` / `check-state`で独立したstate用rulesetを用意した。
+creation/update/deletion/non_fast_forwardを制限し、個人repoのadminだけbypassにする。
+App/Actions/DeployKeyのbypassは加えず、mainのdeploy key例外は引き継がない。
+コードのみの変更で、GitHubへの反映は未検証。[端末準備手順](workstation-setup.md)に従う。

@@ -56,7 +56,7 @@ SSH origin（またはSSH `pushurl`）を指定して`make state-backup-prefligh
 push URL、SSH agent socket、mode `0600`のlocal state、平文state scanを検証する。
 
 `state-backup`はmodeが異なる既存stateを拒否し、暗黙に修復しない。toolbox内では暗号化、復号確認、
-`state-backup` branchのlocal commitまでを行い、Terraform操作成功後のpushはhost Gitから実行する。
+`state-backup` branchのlocal commitまでを行い、Terraform操作の終了codeによらず変更時にbackupし、pushはhost Gitから実行する。
 実行時はremote-trackingの`origin/state-backup`とlocal branchの履歴を同期確認する。remoteがlocalの先祖なら
 localの先行commitを保持し、localがremoteの先祖ならremoteへ追随する。両者が分岐している場合は既存commitを
 破棄せずfail closedするため、手動で履歴を解決してから再実行する。
@@ -64,6 +64,19 @@ localの先行commitを保持し、localがremoteの先祖ならremoteへ追随�
 `make state-backup-preflight`はtoolbox内のage roundtripと平文state scanに加え、host側でSSH pushの
 dry-runを行う。SSH origin（またはSSH `pushurl`）とhost SSH agentをcredential境界として使い、hostの
 credential helperやtokenをcontainerへmountしない。HTTPS state-backup pushはサポートしない。
+
+planもstate同期のため`AGE_IDENTITY_FILE`が必要。書込みはホストの`state-operation.sh`が
+共有ref lockを取得してからtoolboxを実行する。backup失敗時の復旧は
+[作業端末手順](../../../docs/operations/workstation-setup.md)に従う。
+
+`state-sync-lock-test`はtoolbox内で一時repoを使ってホスト側ラッパーも試すため、imageへ`make`を追加した。
+このfixture targetは`toolbox-build`を前提にし、checkoutからbuildした`TOOLBOX_BUILD_IMAGE`を使う
+（CIでは先のbuildのcacheを再利用）。通常操作の公開digestには依存を追加しない。
+ローカル実行例は次のとおり（Dockerでの実行は未検証）。
+
+```sh
+make state-sync-lock-test TOOLBOX_BUILD_IMAGE=homelab-toolbox:state-test
+```
 
 ## pip 依存の固定と更新
 

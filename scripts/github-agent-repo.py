@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Operator-side main ruleset management/check using the operator's gh login."""
+"""Operator-side main/state ruleset management/check using the operator's gh login."""
 import argparse
 import json
 import os
@@ -46,6 +46,16 @@ def desired(allow_deploy_key_bypass=False):
                       {'type': 'deletion'}, {'type': 'non_fast_forward'}]}
 
 
+def desired_state():
+    """Personal repository owner only; no App/Actions/DeployKey bypass."""
+    return {'name': 'state-owner-protection', 'target': 'branch', 'enforcement': 'active',
+            'bypass_actors': [{'actor_id': 5, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always'}],
+            'conditions': {'ref_name': {'include': ['refs/heads/state-backup', 'refs/heads/state-lock'], 'exclude': []}},
+            'rules': [{'type': 'creation'},
+                      {'type': 'update', 'parameters': {'update_allows_fetch_and_merge': False}},
+                      {'type': 'deletion'}, {'type': 'non_fast_forward'}]}
+
+
 def equivalent(current, wanted):
     def normalized(policy):
         # Compare policy fields, not response metadata such as IDs, URLs or timestamps.
@@ -67,15 +77,15 @@ def equivalent(current, wanted):
     return normalized(current) == normalized(wanted)
 
 
-def rulesets(target):
+def rulesets(target, name='agent-main-protection'):
     return [item for page in api('/repos/' + target + '/rulesets?includes_parents=false&per_page=100', pages=True)
-            for item in page if item['name'] == 'agent-main-protection']
+            for item in page if item['name'] == name]
 
 
 def show(target, wanted):
-    found = rulesets(target)
+    found = rulesets(target, wanted['name'])
     if len(found) > 1:
-        raise ValueError('duplicate agent-main-protection rulesets; resolve manually')
+        raise ValueError('duplicate protection rulesets; resolve manually')
     configured = api('/repos/' + target + '/rulesets/' + str(found[0]['id'])) if found else None
     matches = configured is not None and equivalent(configured, wanted)
     print(json.dumps({'repository': target, 'ruleset': configured, 'matches': matches}, indent=2, ensure_ascii=False))
@@ -91,7 +101,7 @@ def installation_guidance(target, identifier):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=['onboard', 'check'])
+    parser.add_argument('mode', choices=['onboard', 'check', 'protect-state', 'check-state'])
     parser.add_argument('repository')
     parser.add_argument('installation', nargs='?', help='installation ID for the manual setup link only')
     parser.add_argument('--installation-id', default=os.environ.get('GITHUB_APP_INSTALLATION_ID', '180956595'),
@@ -100,6 +110,11 @@ def main():
                         help='allow deploy keys to bypass main protection; check compares against this policy')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
+    state_mode = args.mode in ('protect-state', 'check-state')
+    writing = args.mode in ('onboard', 'protect-state')
+    if state_mode and args.allow_deploy_key_bypass:
+        parser.error('state protection never permits deploy key bypass')
+    wanted = desired_state() if state_mode else desired(args.allow_deploy_key_bypass)
     target = args.repository
     if not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?/[A-Za-z0-9_.-]{1,100}', target):
         parser.error('invalid owner/repo')
@@ -112,22 +127,24 @@ def main():
     if args.dry_run:
         print('No API calls. Read the repository ruleset list and matching ruleset details.')
         print('GET /repos/' + target + '/rulesets')
-        if args.mode == 'onboard':
-            print('Create or update /repos/' + target + '/rulesets (protect main BEFORE adding repo):')
-            print(json.dumps(desired(args.allow_deploy_key_bypass), indent=2))
-            installation_guidance(target, identifier)
+        if writing:
+            print('Create or update /repos/' + target + '/rulesets (install protection BEFORE enabling state sync or adding repo):')
+            print(json.dumps(wanted, indent=2))
+            if not state_mode:
+                installation_guidance(target, identifier)
         return 0
-    if args.mode == 'onboard':
+    if writing:
         repository = api('/repos/' + target)
         if not repository.get('permissions', {}).get('admin'):
             raise ValueError('operator must be repository admin')
         if repository['owner']['login'].lower() != owner.lower():
             raise ValueError('repository owner mismatch')
-        found = rulesets(target)
+        if state_mode and repository['owner'].get('type') != 'User':
+            raise ValueError('state owner policy supports personal repositories only')
+        found = rulesets(target, wanted['name'])
         if len(found) > 1:
-            raise ValueError('duplicate agent-main-protection rulesets; resolve manually')
+            raise ValueError('duplicate protection rulesets; resolve manually')
         endpoint = '/repos/' + target + '/rulesets'
-        wanted = desired(args.allow_deploy_key_bypass)
         if found:
             endpoint += '/' + str(found[0]['id'])
             current = api(endpoint)
@@ -135,7 +152,7 @@ def main():
                 api(endpoint, 'PUT', wanted)
         else:
             api(endpoint, 'POST', wanted)
-    status = show(target, desired(args.allow_deploy_key_bypass))
+    status = show(target, wanted)
     if args.mode == 'onboard' and status == 0:
         installation_guidance(target, identifier)
     return status

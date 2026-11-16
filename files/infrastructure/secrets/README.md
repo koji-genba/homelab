@@ -8,6 +8,31 @@ Apps VM用のsecretは、このdirectoryの`runtime.sops.yaml`としてSOPS/age�
 `make ansible-apply`でAnsibleがApps VM上に生成し、以後は上書きしない。backupは不要で、Apps VMを
 作り直せば再生成される。
 
+## Terraform stateの正本と端末移行
+
+[ADR-0016](../../../docs/adr/0016-terraform-state-sync-lock.md)により、age暗号化した
+`origin/state-backup`を正本とし、local stateは各rootの実行用copyにする。
+**初回移行は既存管理端末で、この変更を使う前に`make state-backup`を実行して全rootを最新にする**。
+tailscale-gatewayのlocalがbackupより新しい場合も同じで、新端末のplanを先に行わない。
+
+`terraform-plan` / `tailscale-plan`にも復号用`AGE_IDENTITY_FILE`が必要。
+同期はlineage/serialと同serialのJSON内容を比較し、backupが新しければlocalを0600の
+`terraform.tfstate.pre-sync.<UTC時刻>`へ退避する。localが新しければ`make state-backup`を促して停止する。
+fetch失敗も停止し、明示的な`STATE_SYNC=skip`だけが警告付きの同期省略となる。
+
+apply/importはpreflight・共有lock・同期を通し、失敗時も変更したstateをbackupする。
+backup失敗ならlockを残す。`make state-lock-status`は公開lock情報を読むだけで、
+`make state-unlock CONFIRM=<SHA先頭12文字以上>`は停止・backup確認後の明示解除用。
+手動backup/restoreもlockを取る。復号平文は0700の一時directoryで扱い、trapで消す。
+local state・退避copyはGit ignoreと0600検査の対象で、storage暗号化を前提にする。
+
+公開鍵だけでも偽stateを暗号化できるため、stateブランチへのpush権限が信頼境界になる。
+main保護だけではHermes Appやstaging deploy keyのstate書込みを防げない。
+本人だけがbypassできる専用rulesetをコードで用意したが、GitHubへの適用は未検証。
+自動同期前の反映・新端末での鍵/SSH/tfvars準備・lock復旧は
+[作業端末手順](../../../docs/operations/workstation-setup.md)を参照する。
+tfvarsは引き続きGit管理外とし、承認済みの暗号化転送またはKeePassXC添付でrootごとに移す。
+
 ## Agent VM用bundle
 
 Agent VMのsecretは`agent/runtime.sops.yaml`として同じSOPS/ageで暗号化し、

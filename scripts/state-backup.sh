@@ -25,14 +25,17 @@ tracked_state=$(git -C "$repo_root" ls-files | awk '/(^|\/)[^/]+\.tfstate(\.|$)/
 test -z "$tracked_state" || { echo "refusing to continue: state is tracked: $tracked_state" >&2; exit 1; }
 
 worktree=$(mktemp -d)
-state_list=$(mktemp)
-expected=$(mktemp)
+scratch=$(mktemp -d)
+chmod 0700 "$scratch"
+state_list="$scratch/state-list"
 cleanup() {
-  rm -f "$state_list" "$expected"
+  rm -rf "$scratch"
   git -C "$repo_root" worktree remove --force "$worktree" >/dev/null 2>&1 || true
   rmdir "$worktree" >/dev/null 2>&1 || true
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 git -C "$repo_root" fetch --no-tags origin state-backup:refs/remotes/origin/state-backup >/dev/null 2>&1 || true
 git -C "$repo_root" worktree add --detach "$worktree" HEAD >/dev/null
@@ -84,15 +87,23 @@ mkdir -p "$worktree/terraform-state"
 # uses randomized encryption, so encrypting every run would create needless
 # state-backup commits.
 while IFS= read -r state; do
+  python3 "$script_root/state-files.py" check "$state"
   relative=${state#"$repo_root/"}
   destination="$worktree/terraform-state/$relative.age"
-  printf '%s\n' "$destination" >>"$expected"
   mkdir -p "$(dirname "$destination")"
-  decrypted=$(mktemp)
+  decrypted=$(mktemp "$scratch/plaintext.XXXXXX")
   keep=0
-  if test -r "$destination" && age --decrypt --identity "$identity" "$destination" >"$decrypted" 2>/dev/null \
-    && cmp -s "$state" "$decrypted"; then
-    keep=1
+  if test -r "$destination"; then
+    if ! age --decrypt --identity "$identity" "$destination" >"$decrypted" 2>/dev/null; then
+      rm -f "$decrypted"
+      echo "refusing to replace unreadable backup: $relative" >&2
+      exit 1
+    fi
+    if ! python3 "$script_root/state-files.py" publish-check "$state" "$decrypted"; then
+      rm -f "$decrypted"
+      exit 1
+    fi
+    if cmp -s "$state" "$decrypted"; then keep=1; fi
   fi
   rm -f "$decrypted"
   if test "$keep" -eq 0; then
@@ -100,7 +111,7 @@ while IFS= read -r state; do
     age --recipient "$recipient" --output "$encrypted" "$state"
     mv -f "$encrypted" "$destination"
   fi
-  decrypted=$(mktemp)
+  decrypted=$(mktemp "$scratch/plaintext.XXXXXX")
   age --decrypt --identity "$identity" "$destination" >"$decrypted"
   cmp -s "$state" "$decrypted" || {
     rm -f "$decrypted"
@@ -110,14 +121,8 @@ while IFS= read -r state; do
   rm -f "$decrypted"
 done <"$state_list"
 
-# Remove ciphertexts for state files that no longer exist. Restrict the find
-# to this generated subtree; unrelated branches/files are never touched.
-find "$worktree/terraform-state" -type f -name '*.age' -print |
-while IFS= read -r old_ciphertext; do
-  if ! grep -Fqx "$old_ciphertext" "$expected"; then
-    rm -f "$old_ciphertext"
-  fi
-done
+# Preserve backup-only roots. Removing a local file is not authorization to
+# delete canonical state belonging to another Terraform root/workstation.
 
 git -C "$worktree" add -A terraform-state
 if git -C "$worktree" diff --cached --quiet; then

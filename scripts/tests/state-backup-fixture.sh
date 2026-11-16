@@ -42,9 +42,9 @@ AGE
 chmod 0755 "$bin/age"
 touch "$fixture/identity"
 mkdir -p "$fixture/files/infrastructure/terraform/apps-vm"
-printf '%s\n' '{"fixture":true}' >"$fixture/files/infrastructure/terraform/apps-vm/terraform.tfstate"
+printf '%s\n' '{"lineage":"apps","serial":1}' >"$fixture/files/infrastructure/terraform/apps-vm/terraform.tfstate"
 mkdir -p "$fixture/files/infrastructure/terraform/tailscale"
-printf '%s\n' '{"fixture":"second"}' >"$fixture/files/infrastructure/terraform/tailscale/terraform.tfstate"
+printf '%s\n' '{"lineage":"tailscale","serial":1}' >"$fixture/files/infrastructure/terraform/tailscale/terraform.tfstate"
 printf '%s\n' stale-backup >"$fixture/files/infrastructure/terraform/apps-vm/terraform.tfstate.backup"
 chmod 0644 \
   "$fixture/files/infrastructure/terraform/apps-vm/terraform.tfstate" \
@@ -127,13 +127,9 @@ grep -q 'refusing diverged state-backup branches' "$fixture/diverged.log"
 test "$(git -C "$fixture" rev-parse refs/heads/state-backup)" = "$local_diverged"
 git -C "$fixture" update-ref refs/heads/state-backup "$remote_diverged" "$local_diverged"
 
-# A removed state is removed from the backup branch while another state keeps
-# the run valid.
+# A removed local state must not remove the canonical copy of that root.
 rm "$fixture/files/infrastructure/terraform/apps-vm/terraform.tfstate"
 PATH="$bin:$PATH" AGE_RECIPIENT=age1fixture AGE_IDENTITY_FILE="$fixture/identity" \
   STATE_BACKUP_REPO_ROOT="$fixture" "$repo_root/scripts/state-backup.sh" --no-push >/dev/null
-if git -C "$fixture" cat-file -e state-backup:terraform-state/files/infrastructure/terraform/apps-vm/terraform.tfstate.age 2>/dev/null; then
-  echo "deleted state still present in backup" >&2
-  exit 1
-fi
+git -C "$fixture" cat-file -e state-backup:terraform-state/files/infrastructure/terraform/apps-vm/terraform.tfstate.age
 echo "state-backup fixture: ok"

@@ -309,15 +309,18 @@ identityの変更をTerraform applyで行わない。
 2. KeePassXCからage keyを文書化されたlocal pathへ復元し、mode `0600`にする。
    [管理端末の入力と接続前提](#管理端末の入力と接続前提)とProxmox側準備を満たす。
 3. Makefileでdigest固定したmanagement toolboxをbuildまたはpullする。
-4. `AGE_IDENTITY_FILE=/path/to/identity make state-restore`で暗号化Terraform stateを復元する。
+4. [作業端末手順](workstation-setup.md)でstate用rulesetと鍵・SSH権限を準備する。
+   通常は最初のplanで正本を同期する。既存上書き禁止の復旧を明示する場合は
+   `AGE_RECIPIENT=<age-recipient> AGE_IDENTITY_FILE=/path/to/identity make state-restore`を使う。
+   restoreもpreflightと共有lockを必要とする（実機未検証）。
    helperは`origin/state-backup`をfetchし、branchをcheckoutせず、
    `terraform-state/files/infrastructure/terraform/**/terraform.tfstate.age`だけを受け付ける。
    全復号stateを検証してからatomic renameでmode `0600`のfileを配置し、既存平文stateは上書きしない。
    plan前に復元結果をreviewする。stateが無ければresourceの存在を調べる。
 
    backupにあるTerraform rootのdirectoryがcheckoutに無いと、`state-restore.sh`は全体を中止する。
-   rootを撤去するときはローカルのstateも削除して`make state-backup`を取り直し、backupから外す。
-   `state-backup.sh`はローカルに無くなったstateの暗号化copyを削除する。旧`k8s-cluster`は
+   ADR-0016以降、localを削除しても正本の暗号化copyは削除しない。
+   root撤去は正本からの除去を含めて別途本人の明示承認で行う。旧`k8s-cluster`は
    2026-10-12にローカルdirectoryとbackupから撤去済み（backup commit `aae3f05`）。
 
    - Proxmox VMが存在しない場合: 空stateから作成する。
@@ -342,13 +345,13 @@ identityの変更をTerraform applyで行わない。
      最初のAnsible接続前に新VMのhost keyを確認・登録する。旧VMのkeyをそのまま信頼しない。
 
    ```sh
-   make terraform-plan
+   AGE_IDENTITY_FILE=/path/to/identity make terraform-plan
    AGE_RECIPIENT=<age-recipient> AGE_IDENTITY_FILE=/path/to/identity make terraform-apply
    ```
 
    planをapply前にreviewする。既定rootは`files/infrastructure/terraform/apps-vm`で、保存planは
    同rootの`terraform.tfplan`（mode `0600`、ignore対象）である。applyは欠落、symlink、緩すぎるmodeを
-   拒否し、`-auto-approve`を使用しない。apply後に暗号化state recovery copyを作成してpushする。
+   拒否し、`-auto-approve`を使用しない。共有lockと同期の後にapplyし、終了codeによらず変更したstateを暗号化して正本へpushする。backup失敗時はlockを残す。
    詳細は[Apps VM Terraform入口](../../files/infrastructure/terraform/apps-vm/README.md)を参照する。
 7. `AGE_IDENTITY_FILE=/path/to/identity make ansible-apply`でbootstrapとdeploymentを行う。
    入力は[apps.yml](../../files/infrastructure/ansible/apps/group_vars/apps.yml)にあり、現行mainの
