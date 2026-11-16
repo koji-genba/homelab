@@ -89,7 +89,19 @@ rmdir "$FIXTURE_STATE_ROOT/terraform.tfstate.d"
 # every internal plan, including the core alias and both router imports.
 mkdir -p "$fixture/repo/root"
 cp "$repo_root/Makefile" "$fixture/repo/Makefile"
-ln -s "$repo_root/scripts" "$fixture/repo/scripts"
+mkdir "$fixture/repo/scripts"
+for script in "$repo_root"/scripts/*.sh; do
+  ln -s "$script" "$fixture/repo/scripts/$(basename "$script")"
+done
+# This fixture tests import gates only. Lifecycle/locking is exercised with
+# real Git/age in state-sync-lock-fixture.sh.
+rm "$fixture/repo/scripts/state-operation.sh"
+cat >"$fixture/repo/scripts/state-operation.sh" <<'SH'
+#!/bin/sh
+shift
+exec "$@"
+SH
+chmod +x "$fixture/repo/scripts/state-operation.sh"
 printf '%s\n' '{"acls":[]}' >"$fixture/repo/policy.json"
 cat >>"$fixture/repo/Makefile" <<'EOF'
 ifeq ($(MAKELEVEL),0)

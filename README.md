@@ -125,7 +125,7 @@ Hermesの自前イメージ（`homelab-hermes-agent` / `homelab-memory-db`）は
 - stagingのアプリケーション更新は自動反映、productionは明示的な昇格
 - 現行構成ではlegacy IPを使用しない
 - Apps VMでage秘密鍵を保持しない。復号は管理端末で行い、runtime secretだけをroot専用領域へ転送する
-- Terraform stateはローカル管理し、同じリポジトリの `state-backup` branchへage暗号化した復旧コピーを保存する
+- Terraform stateはage暗号化した `state-backup` branchを正本とし、plan前にlocalへ同期、書込みは `state-lock` で排他する（[ADR-0016](docs/adr/0016-terraform-state-sync-lock.md)、[端末準備](docs/operations/workstation-setup.md)）
 - NFS mountとmarkerの検証に失敗した場合はアプリケーションを起動しない
 
 実機へ変更を適用する前は、対象の運用手順とpreflightを確認してください。`stashPadDev`（VMID 111）は作業用VMで、この移行の対象外です。

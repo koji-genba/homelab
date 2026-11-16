@@ -82,7 +82,7 @@ TOOLBOX_TAILSCALE_ENV := \
 TOOLBOX_RUN_BASE = docker run --rm --network host --user $(TOOLBOX_USER) \
 	-v "$(CURDIR):/workspace" -w /workspace \
 	$(TOOLBOX_SSH_MOUNT) $(TOOLBOX_AGE_MOUNT) $(TOOLBOX_KNOWN_HOSTS_MOUNT) \
-	$(TOOLBOX_RECIPIENT_ENV) \
+	$(TOOLBOX_RECIPIENT_ENV) -e STATE_SYNC \
 	-e HOME=/tmp/homelab-toolbox -e USER=$(TOOLBOX_USERNAME) -e LOGNAME=$(TOOLBOX_USERNAME)
 TOOLBOX_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_IMAGE)
 TOOLBOX_PROXMOX_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_PROXMOX_ENV) $(TOOLBOX_IMAGE)
@@ -155,17 +155,21 @@ tailscale-acl-preflight:
 	test "$(MANAGE_TAILNET)" != true || test -n "$(ACL_POLICY_FILE)" || { echo "MANAGE_TAILNET=true requires ACL_POLICY_FILE" >&2; exit 1; }
 	if test -n "$(ACL_POLICY_FILE)"; then TAILSCALE_REPO_ROOT="$(CURDIR)" ./scripts/validate-tailscale-acl-path.sh "$(ACL_POLICY_FILE)" >/dev/null; fi
 
-tailscale-plan: tailscale-init
+tailscale-plan: state-sync
+	$(MAKE) _state-tailscale-plan
+
+_state-tailscale-plan: tailscale-init
 	$(MAKE) tailscale-acl-preflight MANAGE_TAILNET="$(MANAGE_TAILNET)" ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
 	$(TOOLBOX_TAILSCALE_RUN) terraform -chdir=$(TAILSCALE_ROOT) plan -input=false -out=$(TAILSCALE_PLAN_NAME) $(TAILSCALE_VAR_ARGS)
 	chmod 0600 "$(TAILSCALE_PLAN_FILE)"
 
-tailscale-apply: tailscale-init
+tailscale-apply:
+	+./scripts/state-operation.sh tailscale-apply $(MAKE) _state-tailscale-apply
+
+_state-tailscale-apply: tailscale-init
 	./scripts/check-saved-terraform-plan.sh "$(TAILSCALE_PLAN_FILE)"
-	$(MAKE) state-backup-preflight
 	$(TOOLBOX_TAILSCALE_RUN) terraform -chdir=$(TAILSCALE_ROOT) apply -input=false "$(TAILSCALE_PLAN_NAME)"
 	rm -f "$(TAILSCALE_PLAN_FILE)"
-	$(MAKE) state-backup
 
 # Import existing Tailscale resources only with explicit live-inventory gates.
 # The quoted addresses are intentional: the [0] is part of Terraform's
@@ -173,43 +177,53 @@ tailscale-apply: tailscale-init
 tailscale-import-core:
 	$(MAKE) tailscale-import-acl MANAGE_TAILNET="$(MANAGE_TAILNET)" ENABLE_ADGUARD_DNS="$(ENABLE_ADGUARD_DNS)" ADGUARD_READY="$(ADGUARD_READY)" MANAGE_SUBNET_ROUTER="$(MANAGE_SUBNET_ROUTER)" ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
 
-tailscale-import-acl: tailscale-init
+tailscale-import-acl:
+	+./scripts/state-operation.sh tailscale-import-acl $(MAKE) _state-tailscale-import-acl MANAGE_TAILNET="$(MANAGE_TAILNET)" ENABLE_ADGUARD_DNS="$(ENABLE_ADGUARD_DNS)" ADGUARD_READY="$(ADGUARD_READY)" MANAGE_SUBNET_ROUTER="$(MANAGE_SUBNET_ROUTER)" ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
+
+_state-tailscale-import-acl: tailscale-init
 	test "$(MANAGE_TAILNET)" = true
 	$(MAKE) tailscale-acl-preflight MANAGE_TAILNET=true ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
 	$(TOOLBOX_RUN) sh ./scripts/check-tailscale-import-gates.sh "$(TAILSCALE_ROOT)" "$(MANAGE_TAILNET)" "$(ENABLE_ADGUARD_DNS)" "$(ADGUARD_READY)" "$(MANAGE_SUBNET_ROUTER)"
 	$(TOOLBOX_TAILSCALE_RUN) terraform -chdir=$(TAILSCALE_ROOT) import -input=false -var='manage_tailnet=true' -var="acl_policy_file=$(TAILSCALE_ACL_POLICY_CONTAINER)" 'tailscale_acl.policy[0]' acl
-	$(MAKE) tailscale-plan MANAGE_TAILNET=true ENABLE_ADGUARD_DNS="$(ENABLE_ADGUARD_DNS)" ADGUARD_READY="$(ADGUARD_READY)" MANAGE_SUBNET_ROUTER="$(MANAGE_SUBNET_ROUTER)" ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
+	$(MAKE) _state-tailscale-plan MANAGE_TAILNET=true ENABLE_ADGUARD_DNS="$(ENABLE_ADGUARD_DNS)" ADGUARD_READY="$(ADGUARD_READY)" MANAGE_SUBNET_ROUTER="$(MANAGE_SUBNET_ROUTER)" ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
 
-tailscale-import-dns: tailscale-init
+tailscale-import-dns:
+	+./scripts/state-operation.sh tailscale-import-dns $(MAKE) _state-tailscale-import-dns MANAGE_TAILNET="$(MANAGE_TAILNET)" ENABLE_ADGUARD_DNS="$(ENABLE_ADGUARD_DNS)" ADGUARD_READY="$(ADGUARD_READY)" MANAGE_SUBNET_ROUTER="$(MANAGE_SUBNET_ROUTER)" ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
+
+_state-tailscale-import-dns: tailscale-init
 	test "$(MANAGE_TAILNET)" = true
 	test "$(ENABLE_ADGUARD_DNS)" = true
 	test "$(ADGUARD_READY)" = true
 	$(MAKE) tailscale-acl-preflight MANAGE_TAILNET=true ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
 	$(TOOLBOX_RUN) sh ./scripts/check-tailscale-import-gates.sh "$(TAILSCALE_ROOT)" "$(MANAGE_TAILNET)" "$(ENABLE_ADGUARD_DNS)" "$(ADGUARD_READY)" "$(MANAGE_SUBNET_ROUTER)"
 	$(TOOLBOX_TAILSCALE_RUN) terraform -chdir=$(TAILSCALE_ROOT) import -input=false -var='manage_tailnet=true' -var='enable_adguard_dns=true' -var='adguard_ready=true' -var="acl_policy_file=$(TAILSCALE_ACL_POLICY_CONTAINER)" 'tailscale_dns_configuration.adguard[0]' dns_configuration
-	$(MAKE) tailscale-plan MANAGE_TAILNET=true ENABLE_ADGUARD_DNS=true ADGUARD_READY=true MANAGE_SUBNET_ROUTER="$(MANAGE_SUBNET_ROUTER)" ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
+	$(MAKE) _state-tailscale-plan MANAGE_TAILNET=true ENABLE_ADGUARD_DNS=true ADGUARD_READY=true MANAGE_SUBNET_ROUTER="$(MANAGE_SUBNET_ROUTER)" ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
 
-tailscale-import-router: tailscale-init
+tailscale-import-router:
+	+./scripts/state-operation.sh tailscale-import-router $(MAKE) _state-tailscale-import-router MANAGE_TAILNET="$(MANAGE_TAILNET)" ENABLE_ADGUARD_DNS="$(ENABLE_ADGUARD_DNS)" ADGUARD_READY="$(ADGUARD_READY)" MANAGE_SUBNET_ROUTER="$(MANAGE_SUBNET_ROUTER)" ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
+
+_state-tailscale-import-router: tailscale-init
 	test "$(MANAGE_TAILNET)" = true
 	test "$(MANAGE_SUBNET_ROUTER)" = true
 	test -n "$(TAILSCALE_DEVICE_ID)"
 	$(MAKE) tailscale-acl-preflight MANAGE_TAILNET=true ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
 	$(TOOLBOX_RUN) sh ./scripts/check-tailscale-import-gates.sh "$(TAILSCALE_ROOT)" "$(MANAGE_TAILNET)" "$(ENABLE_ADGUARD_DNS)" "$(ADGUARD_READY)" "$(MANAGE_SUBNET_ROUTER)"
 	$(TOOLBOX_TAILSCALE_RUN) terraform -chdir=$(TAILSCALE_ROOT) import -input=false -var='manage_tailnet=true' -var='manage_subnet_router=true' -var="acl_policy_file=$(TAILSCALE_ACL_POLICY_CONTAINER)" 'tailscale_device_tags.subnet_router[0]' "$(TAILSCALE_DEVICE_ID)"
-	$(MAKE) tailscale-plan MANAGE_TAILNET=true MANAGE_SUBNET_ROUTER=true ENABLE_ADGUARD_DNS="$(ENABLE_ADGUARD_DNS)" ADGUARD_READY="$(ADGUARD_READY)" ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
+	$(MAKE) _state-tailscale-plan MANAGE_TAILNET=true MANAGE_SUBNET_ROUTER=true ENABLE_ADGUARD_DNS="$(ENABLE_ADGUARD_DNS)" ADGUARD_READY="$(ADGUARD_READY)" ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
 	$(TOOLBOX_TAILSCALE_RUN) terraform -chdir=$(TAILSCALE_ROOT) import -input=false -var='manage_tailnet=true' -var='manage_subnet_router=true' -var="acl_policy_file=$(TAILSCALE_ACL_POLICY_CONTAINER)" 'tailscale_device_subnet_routes.subnet_router[0]' "$(TAILSCALE_DEVICE_ID)"
-	$(MAKE) tailscale-plan MANAGE_TAILNET=true MANAGE_SUBNET_ROUTER=true ENABLE_ADGUARD_DNS="$(ENABLE_ADGUARD_DNS)" ADGUARD_READY="$(ADGUARD_READY)" ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
+	$(MAKE) _state-tailscale-plan MANAGE_TAILNET=true MANAGE_SUBNET_ROUTER=true ENABLE_ADGUARD_DNS="$(ENABLE_ADGUARD_DNS)" ADGUARD_READY="$(ADGUARD_READY)" ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
 
-terraform-plan: terraform-validate
+terraform-plan: terraform-validate state-sync
 	$(TOOLBOX_PROXMOX_RUN) terraform -chdir=$(TERRAFORM_ROOT) plan -input=false -out=$(TERRAFORM_PLAN_NAME) $(TERRAFORM_PLAN_ARGS)
 	chmod 0600 "$(TERRAFORM_PLAN_FILE)"
 
-terraform-apply: terraform-validate
+terraform-apply:
+	+./scripts/state-operation.sh terraform-apply $(MAKE) _state-terraform-apply
+
+_state-terraform-apply: terraform-validate
 	./scripts/check-saved-terraform-plan.sh "$(TERRAFORM_PLAN_FILE)"
-	$(MAKE) state-backup-preflight
 	$(TOOLBOX_PROXMOX_RUN) terraform -chdir=$(TERRAFORM_ROOT) apply -input=false "$(TERRAFORM_PLAN_NAME)"
 	rm -f "$(TERRAFORM_PLAN_FILE)"
-	$(MAKE) state-backup
 
 ansible-lint:
 	$(TOOLBOX_RUN) ansible-lint $(ANSIBLE_ROOT)/site.yml
@@ -337,6 +351,9 @@ preflight:
 	./scripts/preflight-apps.sh
 
 state-backup:
+	+./scripts/state-operation.sh state-backup
+
+_state-backup:
 	$(TOOLBOX_RUN) ./scripts/state-backup.sh --no-push
 	git push origin refs/heads/state-backup:refs/heads/state-backup
 
@@ -348,6 +365,9 @@ state-backup-preflight:
 	@echo "state-backup host SSH push dry-run: ready"
 
 state-restore:
+	+./scripts/state-operation.sh state-restore $(MAKE) _state-restore
+
+_state-restore:
 	$(TOOLBOX_RUN) ./scripts/state-restore.sh
 
 state-backup-test:
@@ -460,3 +480,21 @@ agent-job-fixture:
 .PHONY: runner-github-fixture
 runner-github-fixture:
 	python3 scripts/tests/runner-github-fixture.py
+
+# Host Git owns lock refs; decrypted state is handled only in the toolbox.
+.PHONY: state-sync state-lock-status state-unlock state-sync-lock-test
+.PHONY: _state-backup _state-restore _state-terraform-apply _state-tailscale-apply _state-tailscale-plan _state-tailscale-import-acl _state-tailscale-import-dns _state-tailscale-import-router
+state-sync:
+	@if test "$(STATE_SYNC)" != skip; then ./scripts/state-lock.sh status; fi
+	$(TOOLBOX_RUN) ./scripts/state-sync.sh
+
+state-lock-status:
+	./scripts/state-lock.sh status
+
+state-unlock:
+	CONFIRM="$(CONFIRM)" ./scripts/state-lock.sh unlock
+
+# This fixture invokes make inside the container. Build the checkout image
+# (CI reuses its cached build) rather than requiring a new published digest.
+state-sync-lock-test: toolbox-build
+	$(TOOLBOX_RUN_BASE) $(TOOLBOX_BUILD_IMAGE) ./scripts/tests/state-sync-lock-fixture.sh

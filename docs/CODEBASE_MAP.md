@@ -15,6 +15,7 @@ total_tokens: 576889
 - **Merging to `main` is a production deploy for Compose changes.** A systemd timer on the Apps VM fast-forwards `/opt/homelab` from `origin/main` every 15 min and force-recreates the changed projects. Treat any PR touching `files/services/compose/**` as a live change. **New projects need `make ansible-apply` to update the helpers**; new secrets are required only when the project uses them, and explicit startup is needed only if it remains stopped after apply (see §4.1).
 - **PR merge gotcha (2026-11-12 ruleset):** the owner needs `gh pr merge N --merge --admin` or the Web bypass checkbox; direct owner pushes bypass automatically, while the App cannot merge even with `--admin` (see gotcha 24).
 - **Never run live operations without explicit user approval:** `make terraform-apply`, `make tailscale-apply`, `make ansible-apply`, `make rollback-app`, `make state-restore`, NFS/ZFS/IX2215 changes, `terraform destroy`. Read-only validation (`make` fixtures/lint/validate) is fine.
+- **Terraform stateの現行方針は[ADR-0016](adr/0016-terraform-state-sync-lock.md)。** `origin/state-backup`が暗号化正本、localは実行用copy。planもage identityが必要で同期によりlocalを更新する。apply/importはpreflight → `state-lock`取得 → 同期 → 実行 → 変更時backup（失敗時も）→ 解放。backup失敗はlockを残す。初回は旧管理端末で変更を使う前に`make state-backup`を実行し、state専用rulesetを本人が反映してから新端末を使う（実機未検証）。準備・解除は[作業端末手順](operations/workstation-setup.md)。`_state-*`は内部targetで、通常は直接実行しない。
 - **Do not read or print secrets.** `files/infrastructure/secrets/runtime.sops.yaml` is encrypted (leave it alone); plaintext `runtime.yaml`, `*.tfstate*`, `terraform.tfvars`, `acl-policy.live.json`, `tmp/`, `*.log` (`teraterm.log`, `ts.log` at repo root) are gitignored and may hold sensitive data.
 - **Hard "never" list** (from docs): never delete the `state-backup` branch; never delete dataset `tank-gen2/data/k8s-volumes` or its in-use data: retirement preserved 3 app directories (SillyTavern and stashPad prod/staging); `group_vars/apps.yml` now declares a fourth use, Open WebUI; do not modify VMID 111 (`stashPadDev`, outside production recovery) or 9000 (shared clone template) unless the task explicitly concerns them; rebuilding either follows [Proxmox host recovery](operations/proxmox-host-recovery.md); the ZFS snapshot `@pre-phase5-retire-20260923` was deleted with explicit approval on 2026-11-04 and is no longer a recovery point; never remove the `192.168.10.0/24` advertisement from the Tailscale gateway; never copy the age private key to the Apps VM; preserve adoption-time ADR decisions; later decisions/clarifications go in dated supplements or a new ADR, and replacing a premise requires a new ADR plus current design, runbook and index updates; never put the sparkDash token, SSH private key or NodeID in docs/commits.
 - **Root [CLAUDE.md](../CLAUDE.md) and [AGENTS.md](../AGENTS.md) carry the same short pointer to this map and must be kept identical; no `CONTRIBUTING.md` exists.** Docs are mostly Japanese; identifiers/commands are English.
@@ -23,9 +24,9 @@ total_tokens: 576889
 
 ```mermaid
 graph TB
-    subgraph Admin["Admin terminal (Git, Docker, Make, SSH only)"]
+    subgraph Admin["Admin terminal (Git / Docker / Make / SSH / Bash / Python)"]
         Make[Makefile]
-        Toolbox["homelab-toolbox container<br/>terraform / ansible / sops / age"]
+        Toolbox["homelab-toolbox container<br/>terraform / ansible / sops / age / make"]
         AgeKey[(age key + ssh-agent)]
     end
     subgraph GitHub
@@ -110,7 +111,7 @@ homelab/
 ├── docs/                         # (~126k tokens at the full-map baseline; Japanese except this map)
 │   ├── README.md                 # entry point: current design, operations, decisions, history
 │   ├── CODEBASE_MAP.md            # code navigation (this document)
-│   ├── adr/                      # 0001-0015 + README (Webapp, Hermes NFS and coding CLI exceptions)
+│   ├── adr/                      # 0001-0016 + README (Webapp, Hermes NFS and coding CLI exceptions)
 │   ├── architecture/target-state.md  # current design + unmet goals
 │   ├── network/target-zones.md    # current network specification
 │   ├── operations/               # application-lifecycle, apps-vm-recovery, apps-vm-tailnet, dgx-storage,
@@ -163,14 +164,15 @@ Module token estimates were measured on 2026-10-16 with the Cartographer scanner
 | Terraform ElastiFlow / gateway / stashPadDev | `terraform-validate-elastiflow`, `terraform-validate-tailscale-gateway`, `terraform-validate-stashpad-dev` (CI, `-backend=false`); roots selected by `ELASTIFLOW_ROOT`, `TAILSCALE_GATEWAY_ROOT`, `STASHPAD_DEV_ROOT` |
 | pve1 NUT Ansible | `ansible-lint-pve1`, `ansible-check-pve1` (CI syntax only); manual `ansible-apply-pve1 PVE1_ANSIBLE_ARGS='--check --diff'` contacts host; NUT + VM startup/NFS ordering, no sudo; `secrets-encrypt-pve1` creates operator-supplied bundle |
 | ElastiFlow Ansible | `ansible-lint-elastiflow`, `ansible-check-elastiflow` (CI syntax-check); manual `ansible-apply-elastiflow`, separate from Apps reconcile; `ELASTIFLOW_ANSIBLE_{ROOT,INVENTORY,CONFIG,ARGS}` |
-| CI fixtures | `gateway-routes-test`, `ansible-bootstrap-paths-test`, `terraform-apps-vm-lifecycle-test`, `toolbox-uid-test`, `cloud-init-test`, `compose-config`, `adguard-config-check`, `gatus-config-check`, `compose-reconcile-fixture`, `mover-test`, `shellcheck`, `secrets-scan`, `state-backup-test`, `state-restore-test`, `state-backup-preflight-test`, `tailscale-acl-path-test`, `tailscale-import-gates-test`, `agent-compose-config`, `agent-vm-cloud-init-test`, `runner-vm-cloud-init-test`, `terraform-agent-runner-vm-lifecycle-test`, `agent-job-fixture`, `runner-privilege-fixture`, `runner-firewall-fixture`, `agent-runner-scope-fixture`, `agent-dnat-guard-fixture`, `agent-backup-fixture`, `agent-healthcheck-fixture`, `agent-restore-fixture`, `agent-rebuild-fixture`（restore fixtureからmodel-fetch/ops-cleanup/ops-behaviorも実行） |
+| CI fixtures | `gateway-routes-test`, `ansible-bootstrap-paths-test`, `terraform-apps-vm-lifecycle-test`, `toolbox-uid-test`, `cloud-init-test`, `compose-config`, `adguard-config-check`, `gatus-config-check`, `compose-reconcile-fixture`, `mover-test`, `shellcheck`, `secrets-scan`, `state-backup-test`, `state-restore-test`, `state-backup-preflight-test`, `state-sync-lock-test`, `tailscale-acl-path-test`, `tailscale-import-gates-test`, `agent-compose-config`, `agent-vm-cloud-init-test`, `runner-vm-cloud-init-test`, `terraform-agent-runner-vm-lifecycle-test`, `agent-job-fixture`, `runner-privilege-fixture`, `runner-firewall-fixture`, `agent-runner-scope-fixture`, `agent-dnat-guard-fixture`, `agent-backup-fixture`, `agent-healthcheck-fixture`, `agent-restore-fixture`, `agent-rebuild-fixture`（restore fixtureからmodel-fetch/ops-cleanup/ops-behaviorも実行） |
 | Not in CI | `preflight` |
-| Ops | `state-backup`, `state-backup-push` (alias), `state-backup-preflight`, `state-restore`, `rollback-app` |
+| Ops | `state-backup`, `state-backup-push` (alias), `state-backup-preflight`, `state-sync`, `state-lock-status`, `state-unlock`, `state-restore`, `rollback-app` |
 | Secrets | `secrets-encrypt` (needs `AGE_RECIPIENT`, refuses to overwrite), `secrets-decrypt-check` (needs `AGE_IDENTITY_FILE`), `secrets-encrypt-agent` / `secrets-decrypt-check-agent` (the `secrets/agent/runtime.sops.yaml` bundle) |
 
-`validate.yml` sets `TOOLBOX_BUILD_IMAGE` and `TOOLBOX_IMAGE` to the same local tag, `homelab-toolbox:ci`, so subsequent toolbox checks use the image built from that checkout. Normal Makefile execution still defaults to the published digest. `ansible-check` is syntax-check only; `preflight` statically checks `APPS_MANAGEMENT_IP`/`APPS_VMID` against the VLAN-10 convention, without checking that either is free.
+`validate.yml` sets `TOOLBOX_BUILD_IMAGE` and `TOOLBOX_IMAGE` to the same local tag, `homelab-toolbox:ci`, so subsequent toolbox checks use the image built from that checkout. 通常操作は公開digestを使う。`state-sync-lock-test`だけは内部Make実行のため`make`を追加したcheckout imageを`toolbox-build`して使い、公開imageの更新を待たずに動く。 `ansible-check` is syntax-check only; `preflight` statically checks `APPS_MANAGEMENT_IP`/`APPS_VMID` against the VLAN-10 convention, without checking that either is free.
 
-**Apply gating**: `terraform-apply`/`tailscale-apply` apply only a saved plan (`terraform.tfplan`, must be mode 0600, non-symlink), run `state-backup-preflight` first and `state-backup` after (needs `AGE_RECIPIENT`, `AGE_IDENTITY_FILE`, `SSH_AUTH_SOCK`). There is **no `make destroy`**.
+**state操作の入口**: `terraform-apply`（`TERRAFORM_ROOT`でapps-vm / agent-vm / runner-vm / elastiflow / tailscale-gateway / stashpad-devの6 Proxmox rootを選択）、`tailscale-apply`（7つ目のtailscale root）、`tailscale-import-{acl,dns,router}`（`tailscale-import-core`はaclへ委譲）に共通lock・sync・変更時backupを付ける。applyは引き続き0600・非symlinkのsaved planを必要とする。手動`state-backup`（`state-backup-push` alias）/ `state-restore`もlockを取り、復旧・移行用なので事前syncを行わない。planはsyncだけでlockを取らず、他writerがいれば警告。validateはsync不要。書込みpreflightは`AGE_RECIPIENT`・`AGE_IDENTITY_FILE`・`SSH_AUTH_SOCK`を必要とする。`make destroy`はない。
+
 **Host extras**: some targets run on the host and need `python3`+PyYAML (`ansible-bootstrap-paths-test`, `cloud-init-test`, `terraform-apps-vm-lifecycle-test`, `compose-reconcile-fixture`), `docker compose` (`compose-config`), bash + rsync + coreutils/findutils + flock (`mover-test`, host-run with mountpoint/ZFS stubs). See [toolbox dependencies](../files/tools/homelab-toolbox/README.md).
 
 ### 3.2 Ansible (`files/infrastructure/ansible/apps/`) — ~23.5k tokens
@@ -203,7 +205,7 @@ Module token estimates were measured on 2026-10-16 with the Cartographer scanner
 
 ### 3.3 Terraform (`files/infrastructure/terraform/`) — ~26.8k tokens
 
-State uses the **default local backend per root** (`terraform.tfstate`, gitignored, mode 0600): local state locking applies; there is no shared remote backend. Recovery copy: `make state-backup` age-encrypts every `*.tfstate` to branch `state-backup`.
+state正本はage暗号化した`origin/state-backup`。各rootはdefault local backendの実行用copy（`terraform.tfstate`、ignore、0600）を使い、Makeの共有ref lockとTerraform自身のlocal lockを併用する。remote backendは導入しない（[ADR-0016](adr/0016-terraform-state-sync-lock.md)）。
 
 | Root | Provider | Provisions | Notes |
 |---|---|---|---|
@@ -217,7 +219,7 @@ State uses the **default local backend per root** (`terraform.tfstate`, gitignor
 
 `apps-vm`: `snippet_datastore_id` must support both `Import` (cloud image) and snippets; keep `debian_cloud_image_url` and its SHA-512 checksum in sync.
 
-Older roots (`elastiflow`, `tailscale-gateway`, `stashpad-dev`) full-clone `template_vm_id` (default 9000) and ignore changes to the cloud-init snippet reference, clone VMID and tags. Raw `terraform apply` does not back up state, so run `make state-backup` afterwards. The stashpad-dev README uses its own non-secret tfvars and saved-plan Make entry points (including state backup). As of 2026-10-25, its [development rebuild procedure](../files/infrastructure/terraform/stashpad-dev/README.md#開発環境の再構築) declares tools, a baseline `~/stashPad` checkout of `origin/main` and optional worktrees, separating observed versions from rebuild targets. The procedure has not been verified end to end on a VM; as of 2026-10-25, [`create-proxmox-ubuntu-template.sh`](../scripts/create-proxmox-ubuntu-template.sh) pins template creation to release-20260518 with a fixed URL and SHA-256, reproducing the observed settings except net0: VLAN 10 was selected on 2026-10-25 after untagged-template cloning failed with SDN.Use HTTP 403. On 2026-10-25 the operator verified VM 103 creation from template 9001 after setting tag=10, then recreated template 9000 with the script, restored its clone ACL (destroy removes it), and deleted 9001. All template key/disk checks passed; gateway/stashpad-dev root cloning remains unverified; see the [recovery procedure](operations/proxmox-host-recovery.md#template-vm-9000).
+Older roots (`elastiflow`, `tailscale-gateway`, `stashpad-dev`) full-clone `template_vm_id` (default 9000) and ignore changes to the cloud-init snippet reference, clone VMID and tags. 生の`terraform apply`は共有lock・sync・backupを通らないため、`make terraform-apply TERRAFORM_ROOT=...`を使う。 The stashpad-dev README uses its own non-secret tfvars and saved-plan Make entry points (including state backup). As of 2026-10-25, its [development rebuild procedure](../files/infrastructure/terraform/stashpad-dev/README.md#開発環境の再構築) declares tools, a baseline `~/stashPad` checkout of `origin/main` and optional worktrees, separating observed versions from rebuild targets. The procedure has not been verified end to end on a VM; as of 2026-10-25, [`create-proxmox-ubuntu-template.sh`](../scripts/create-proxmox-ubuntu-template.sh) pins template creation to release-20260518 with a fixed URL and SHA-256, reproducing the observed settings except net0: VLAN 10 was selected on 2026-10-25 after untagged-template cloning failed with SDN.Use HTTP 403. On 2026-10-25 the operator verified VM 103 creation from template 9001 after setting tag=10, then recreated template 9000 with the script, restored its clone ACL (destroy removes it), and deleted 9001. All template key/disk checks passed; gateway/stashpad-dev root cloning remains unverified; see the [recovery procedure](operations/proxmox-host-recovery.md#template-vm-9000).
 
 2026-10-25 ACL recovery decision: the reviewed full policy is stored at `files/infrastructure/secrets/tailscale/acl-policy.sops.json` as a binary SOPS copy using the existing age key. See the [update/restore procedure](../files/infrastructure/terraform/tailscale/README.md#acl全文の復旧用コピー2026-10-25) for `tailscale-acl-encrypt` / `tailscale-acl-decrypt`.
 
@@ -225,7 +227,7 @@ Older roots (`elastiflow`, `tailscale-gateway`, `stashpad-dev`) full-clone `temp
 
 See [rebuildability and backup policy](architecture/target-state.md#再構築性とbackupの方針) for the VM assessment: the operator decided on 2026-10-12 that no VM will be backed up. For ElastiFlow and stashPadDev, the original decision accepted their loss before rebuildability was established. ElastiFlow was rebuilt with Terraform and dedicated Ansible on 2026-10-25; stashPadDev remains unverified end to end. The linked policy records the reasons and handling of their data. Remaining rebuild gaps are tracked in [#87](https://github.com/koji-genba/homelab/issues/87). The policy assumes the required recovery material and NFS data are available; protection of data on pve1's ZFS pools is a separate concern.
 
-All seven roots are fmt/validated in CI. The three added Proxmox validate targets use `init -backend=false -input=false` and need no secrets or live API access. Generic `terraform-validate` retains its `terraform-init` prerequisite; plan/apply prerequisites are unchanged. The agent/runner roots also use `-backend=false` (no remote state access). All six Proxmox roots pin bpg/proxmox to `0.117.0` and are tracked by Dependabot separately, with provider bumps reviewed together.
+All seven roots are fmt/validated in CI. The three added Proxmox validate targets use `init -backend=false -input=false` and need no secrets or live API access. Generic `terraform-validate` retains its `terraform-init` prerequisite; planは同期し、applyは共有lock内で同期してからvalidate/実行する。 The agent/runner roots also use `-backend=false` (no remote state access). All six Proxmox roots pin bpg/proxmox to `0.117.0` and are tracked by Dependabot separately, with provider bumps reviewed together.
 
 ### 3.4 Compose stacks (`files/services/compose/`) — ~13.9k tokens including configs; `files/services/images/` — ~1.5k tokens
 
@@ -265,9 +267,9 @@ Conventions: project name `homelab-<dir>`; all join external network `homelab_fr
 
 ### 3.6 scripts/ — ~15k tokens
 
-All POSIX `sh` + `set -eu` unless noted. `state-backup.sh` / `state-restore.sh` / `state-backup-preflight.sh` / `check-terraform-state-modes.sh` (age-encrypted state recovery; restore never overwrites, validates JSON, allow-lists paths); `check-saved-terraform-plan.sh`; `validate-tailscale-acl-path.sh` (ACL file must be in-repo, non-symlink); `validate-secrets.sh` (current tree only, not history; ignored files exempt unless tracked; rejects plaintext ACL exports and checks the binary SOPS ACL copy when present); `compose-config.sh` (offline `docker compose config` for every project with synthetic env); `adguard-config-check.sh` (when no binary is selected and the local image is unavailable, writes `skipped:` to stderr and exits 0 without pulling); `preflight-apps.sh` (VMID must equal last IP octet); `rollback-app.sh` (ssh wrapper, allow-list of 12 projects in its `case` statement, including `hf-downloader` and `homepage`). `compose-config.sh` also creates a synthetic `sparkdash.env` (`SPARKDASH_TOKEN=fixture-only`) and an empty `sparkdash-ssh/` dir. `agent-compose-config.sh` renders the out-of-tree agent project with synthetic env/secret files and re-checks its digest pins (`make agent-compose-config`).
+原則POSIX `sh` + `set -eu`。`state-operation.sh`はBashのprocess groupとsignal trapを使い、ホストでGit lockとMake子processの後処理を管理する。`state-files.py`はtoolbox内のJSON/path検証・sync共通処理。 `state-backup.sh` / `state-restore.sh` / `state-sync.sh` / `state-lock.sh` / `state-backup-preflight.sh` / `check-terraform-state-modes.sh`（age暗号化正本・同期・排他。restoreは既存上書き禁止、共通JSON/path検証）; `check-saved-terraform-plan.sh`; `validate-tailscale-acl-path.sh` (ACL file must be in-repo, non-symlink); `validate-secrets.sh` (current tree only, not history; ignored files exempt unless tracked; rejects plaintext ACL exports and checks the binary SOPS ACL copy when present); `compose-config.sh` (offline `docker compose config` for every project with synthetic env); `adguard-config-check.sh` (when no binary is selected and the local image is unavailable, writes `skipped:` to stderr and exits 0 without pulling); `preflight-apps.sh` (VMID must equal last IP octet); `rollback-app.sh` (ssh wrapper, allow-list of 12 projects in its `case` statement, including `hf-downloader` and `homepage`). `compose-config.sh` also creates a synthetic `sparkdash.env` (`SPARKDASH_TOKEN=fixture-only`) and an empty `sparkdash-ssh/` dir. `agent-compose-config.sh` renders the out-of-tree agent project with synthetic env/secret files and re-checks its digest pins (`make agent-compose-config`).
 
-`state-backup.sh` removes ciphertexts for states absent from the local checkout, so back up only from a checkout holding every state you want kept. It keeps local-ahead commits, follows remote-ahead history and refuses divergent `state-backup` histories.
+`state-backup.sh`はlocalに無いrootの暗号化コピーを保持する。同lineageで正本より古いlocalや、同serial内容違いの公開は拒否する。local branchがaheadなら保持し、remote aheadなら追従、履歴の分岐は拒否する。`state-sync-lock-test`は生成した試験鍵・一時bare remote・架空stateで同期、競合、失敗時backup、signal、実Makefileの全入口を検証する。
 
 `scripts/tests/gateway-routes-fixture.sh` (`make gateway-routes-test`, CI) compares gateway Ansible effective advertised routes (subnets + exit defaults) with Terraform `tailscale/variables.tf` literal `advertised_routes` default, without credentials or APIs; optional file arguments allow synthetic mismatch tests. It does not inspect local tfvars or live state.
 
@@ -389,6 +391,8 @@ The [Hermes exchange](operations/hermes-share.md) adds `tank-gen1/data/hermes` (
 23. **hf-downloader**: publish the image and pin its real digest before rollout; tag-only Compose remains draft. The optional token is delivered as a file (empty when omitted), and its changes recreate all projects. Create the first Dagu admin at `/setup` immediately after deployment. Its local state is deliberately not backed up; ai artifacts are re-downloadable and excluded from snapshots. See [runbook](operations/hf-downloader.md).
 
 24. **Owner PR merges require explicit bypass** under `agent-main-protection` (homelab and agent-sandbox, confirmed 2026-11-12): use `gh pr merge N --merge --admin` or check **Merge without waiting for requirements to be met** on the Web; without `--admin`, CLI merge fails with `the base branch policy prohibits the merge`. Direct owner pushes bypass automatically. The App is not a bypass actor and cannot merge even with `--admin`. See [merge procedure](operations/application-lifecycle.md#本人による-pr-のマージ).
+
+25. **state同期と残ったlock**: planにも`AGE_IDENTITY_FILE`が必要。fetch失敗は停止し、`STATE_SYNC=skip`だけが警告付きの明示省略。書込みのlock/backupは省略しない。backup失敗・SIGKILLではlockを残すので、元端末でbackupを復旧してからSHA先頭12文字以上の`CONFIRM`で解除する。pre-sync退避も秘密で0600・ignore対象。main用rulesetではstateを保護できず、App/deploy keyをbypassに含めない専用rulesetが必要（コードのみ用意、実機未検証）。[端末準備と復旧](operations/workstation-setup.md)。
 
 **History and remaining code / operational issues**
 
@@ -539,3 +543,10 @@ only rulesets; neither script calls installation APIs. Neither script is run aut
 GitHub Free private repositories cannot use ruleset protection; installation policy must account for
 public-only targets, Pro, or an explicitly accepted lack of main protection. Ruleset comparison ignores
 response metadata and normalizes omitted update parameters to false; check reports matches.
+
+### 2026-11-16: issue #225 state同期・排他
+
+[ADR-0016](adr/0016-terraform-state-sync-lock.md)がADR-0005のstate部分を置き換える。
+`github-agent-repo.py protect-state` / `check-state`でstate-backup/state-lock専用rulesetを管理するコードを追加。
+既存mainルールと独立し、個人repoのadminだけbypass、App/Actions/DeployKeyは許可しない。
+この作業ではGitHubの現状を取得せず、保護の反映・実端末間運用は未検証。

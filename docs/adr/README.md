@@ -10,7 +10,7 @@ ADR は採用時点の判断を固定するもので、前提が変わった場�
 | [0002](0002-iac-and-deployment-boundaries.md) | 承認済み | Terraform、Ansible、Compose、Git reconcile の責務を分ける |
 | [0003](0003-four-network-zones.md) | 実装済み（2026-09-13）。Port 4変更も実機反映済み（2026-09-19） | VLAN を Server、Trusted、IoT、Guest の4ゾーンへ整理する。roaming clientのsubnet route手動切替は[0007](0007-apps-vm-tailnet-dns.md)で置き換え |
 | [0004](0004-dns-and-minimal-observability.md) | 承認済み | AdGuard Home と最小監視を採用する。global nameserverの接続先は[0007](0007-apps-vm-tailnet-dns.md)で具体化 |
-| [0005](0005-secrets-and-terraform-state.md) | 承認済み | SOPS/age と暗号化 state recovery copy を採用する |
+| [0005](0005-secrets-and-terraform-state.md) | 承認済み。state部分は[0016](0016-terraform-state-sync-lock.md)で置換 | SOPS/age と暗号化 state recovery copy を採用する |
 | [0006](0006-ai-dataset-single-export.md) | 承認済み。repo定義済み、pve1/Apps VMは反映済み、DGX 2台の手順Cも2026-10-12に実施済みと確認 | DGX Spark のデータ置き場を単一 NFS export にする。pve1/Apps VMは2026-09-19に反映済み。DGXの実施日は不明、read速度は未測定（[確認方法・記録](../operations/dgx-storage.md#手動反映の記録)）。配置は[0010](0010-tank-gen3-cold-pool.md)で更新 |
 | [0007](0007-apps-vm-tailnet-dns.md) | 承認済み。2026-10-12補足あり | Apps VMのtailnet addressへ内部DNSを切り替える（0003と0004の一部を更新）。補足でSMBの正式な接続先とServer route維持を明記 |
 | [0008](0008-hermes-agent-hindsight-vms.md) | 実装済み（repo定義済み、2026-10-17）。実機では未検証（初回構築は未実施、ローカル品質閾値は一部達成、創作・rerank速度に残課題） | Hermes常駐エージェントとHindsight記憶をAgent VM（104）とRunner VM（105）へ分離して追加する。Ansible手動反映、Composeはreconcile対象外、記憶はRuri-v3 + PGroonga |
@@ -21,3 +21,4 @@ ADR は採用時点の判断を固定するもので、前提が変わった場�
 | [0013](0013-hermes-webapp-caddy.md) | 承認済み。2026-11-02に本番反映（PR #179・#181・#182・#180）、Webappログイン・会話、到達性・認証境界、Gatus監視、Discordでのrecall・ブラウザtool・MEDIA配送・既登録コマンド表示を確認 | Hermes Webapp を Apps Caddy 経由で公開し、Agent の9120到達元を Apps のみに限定する。0009の追加例外、Agentはtailnet外を維持 |
 | [0014](0014-hermes-share-nfs.md) | 採用。2026-11-05反映済み。export・mount・guard・隔離・SMB・Hermesの共有利用を確認。残る確認事項は[共有運用](../operations/hermes-share.md#未検証の項目) | Hermes受け渡し用の専用NFSをRunnerへ直接mountし、pve1:2049/tcpだけを隔離の例外にする。先にaiのexportを3 clientの/32へ絞る |
 | [0015](0015-hermes-coding-agents.md) | 採用。repo定義済み、実機は未検証 | Runnerの固定版コーディングCLI、DGX TCP/8000例外、homeのサブスク認証と外部モデルへのコード送信。GitHub AppはPR ② |
+| [0016](0016-terraform-state-sync-lock.md) | 採用。repo実装済み、実端末間運用・ruleset反映は未検証 | 暗号化GitブランチをTerraform stateの正本に格上げし、同期・refロック・失敗時backupを導入する |

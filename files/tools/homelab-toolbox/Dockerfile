@@ -12,7 +12,7 @@ ARG ADGUARD_ARCHIVE_SHA256=c48f4a43000665484c5ec28177de11a004759b620dae8f77b2aab
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
-      ca-certificates curl git libnss-wrapper openssh-client python3 python3-jinja2 python3-pip python3-yaml \
+      ca-certificates curl git make libnss-wrapper openssh-client python3 python3-jinja2 python3-pip python3-yaml \
       "shellcheck=${SHELLCHECK_VERSION}" tar unzip \
     && rm -rf /var/lib/apt/lists/*
 

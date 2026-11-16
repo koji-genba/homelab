@@ -3,6 +3,10 @@
 - 状態: 承認済み
 - 日付: 2026-08-29
 
+> 2026-11-16: stateの正本・成功時backup・remote lockingなしの判断は
+> [ADR-0016](0016-terraform-state-sync-lock.md)で部分的にsuperseded。
+> 以下は採用時点の記録を保持する。SOPS/age・鍵の保管境界は継続する。
+
 ## 背景
 
 Gitを唯一の信頼できる情報源（source of truth）にしながら、credentialを平文で保存したくない。単一管理者のhomelabに

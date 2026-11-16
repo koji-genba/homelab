@@ -238,7 +238,7 @@ VM側はNFSv4、`hard,_netdev`を使用する。systemd mount unit、`RequiresMo
 | アーティファクト | 保管場所 |
 | --- | --- |
 | 望ましい状態と手順 | Git main branch |
-| 暗号化Terraform復旧state | Git `state-backup` branch |
+| Terraform stateの正本 | age暗号化したGit `state-backup` branch（[ADR-0016](../adr/0016-terraform-state-sync-lock.md)）。local実行copyを同期し、`state-lock` refで書込みを排他 |
 | SOPS暗号化secret | Git main branch |
 | Tailscale ACL全文 | Git main branchのSOPS binary暗号文 |
 | age復旧鍵 | KeePassXC |

@@ -110,6 +110,8 @@ jobs:
         run: make secrets-scan
       - name: State backup worktree fixture
         run: make state-backup-test
+      - name: State sync and lock fixture
+        run: make state-sync-lock-test
       - name: State restore fixture
         run: make state-restore-test
       - name: State backup preflight fixture

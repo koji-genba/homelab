@@ -9,6 +9,8 @@
 
 ## 日常操作
 
+- [作業端末の準備とstate同期](operations/workstation-setup.md): 端末移行、必要な鍵・tfvars、同期・lockの確認と復旧。
+
 - [アプリケーションのライフサイクル](operations/application-lifecycle.md): Git reconcile、stashPad promotion、Ansible反映、rollbackと再開。
 
 - [UPS / NUT運用](operations/ups-nut.md): pve1の導入、停電・復電試験、しきい値と計画停止（2026-11-01に商用電源ありFSDでstayoff・手動復旧・NFS順序を確認）。

@@ -346,11 +346,46 @@ class GitHub(unittest.TestCase):
             self.assertEqual(operator.api('/repos/owner/repo/rulesets', pages=True), [[{'id': 1}], [{'id': 2}]])
 
     def test_operator_dry_run_never_calls_api(self):
-        for mode in ('onboard', 'check'):
+        for mode in ('onboard', 'check', 'protect-state', 'check-state'):
             with patch.object(operator, 'api', side_effect=AssertionError('API forbidden')), \
                  patch.object(sys, 'argv', ['repo', mode, 'owner/repo', '--installation-id', '456', '--dry-run']), \
                  patch('sys.stdout', io.StringIO()):
                 self.assertEqual(operator.main(), 0)
+
+    def test_operator_state_policy_is_separate_and_owner_only(self):
+        wanted = operator.desired_state()
+        rules = [{'name': 'agent-main-protection', 'id': 1}]
+        current, writes = {}, []
+        def api(path, method='GET', body=None, pages=False):
+            if path == '/repos/owner/repo':
+                return {'permissions': {'admin': True}, 'owner': {'login': 'owner', 'type': 'User'}}
+            if path.startswith('/repos/owner/repo/rulesets?'):
+                return [rules]
+            if path == '/repos/owner/repo/rulesets' and method == 'POST':
+                rules.append({'name': wanted['name'], 'id': 2})
+            elif path != '/repos/owner/repo/rulesets/2':
+                raise AssertionError((method, path))
+            if method in ('POST', 'PUT'):
+                writes.append(body)
+                current.update(body)
+            return current
+        for mode in ('protect-state', 'protect-state', 'check-state'):
+            with patch.object(operator, 'api', api), patch('sys.stdout', io.StringIO()), \
+                 patch.object(sys, 'argv', ['repo', mode, 'owner/repo']):
+                self.assertEqual(operator.main(), 0)
+        self.assertEqual(len(writes), 1)
+        self.assertEqual(writes[0], wanted)
+        self.assertEqual(wanted['conditions']['ref_name']['include'],
+                         ['refs/heads/state-backup', 'refs/heads/state-lock'])
+        self.assertEqual(wanted['bypass_actors'],
+                         [{'actor_id': 5, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always'}])
+        self.assertEqual({rule['type'] for rule in wanted['rules']},
+                         {'creation', 'update', 'deletion', 'non_fast_forward'})
+        with patch.object(operator, 'api', side_effect=AssertionError('API forbidden')), \
+             patch.object(sys, 'argv', ['repo', 'protect-state', 'owner/repo', '--allow-deploy-key-bypass']), \
+             patch('sys.stderr', io.StringIO()):
+            with self.assertRaises(SystemExit):
+                operator.main()
 
     def test_operator_deploy_key_bypass_opt_in_and_updates(self):
         admin = {'actor_id': 5, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always'}

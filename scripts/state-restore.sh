@@ -6,6 +6,7 @@ umask 077
 # state-backup branch. The only accepted source paths are the files generated
 # by state-backup.sh under terraform-state/files/infrastructure/terraform/.
 repo_root=${STATE_RESTORE_REPO_ROOT:-$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)}
+script_root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 identity=${AGE_IDENTITY_FILE:-}
 test -n "$identity" || {
   echo "AGE_IDENTITY_FILE is required; recover the key from KeePassXC first" >&2
@@ -64,6 +65,7 @@ while IFS= read -r source_path; do
       exit 1
       ;;
   esac
+  python3 "$script_root/state-files.py" destination "$repo_root" "$source_path"
   destination=${source_path#terraform-state/}
   case "$destination" in
     *..*|*//*|*/./*)
@@ -112,29 +114,7 @@ while IFS= read -r source_path; do
 
   # Validate every decrypted file before installing any of them. Terraform
   # state must be JSON with the stable top-level fields used by all roots.
-  if ! python3 - "$candidate" <<'PY'
-import json
-import pathlib
-import sys
-
-path = pathlib.Path(sys.argv[1])
-try:
-    state = json.loads(path.read_text(encoding="utf-8"))
-except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-    raise SystemExit(f"invalid Terraform state JSON: {exc}")
-if not isinstance(state, dict):
-    raise SystemExit("Terraform state must be a JSON object")
-if not isinstance(state.get("version"), int):
-    raise SystemExit("Terraform state version is missing or not an integer")
-if not isinstance(state.get("serial"), int):
-    raise SystemExit("Terraform state serial is missing or not an integer")
-if not isinstance(state.get("lineage"), str):
-    raise SystemExit("Terraform state lineage is missing or not a string")
-if not isinstance(state.get("outputs"), dict):
-    raise SystemExit("Terraform state outputs is missing or not an object")
-if not isinstance(state.get("resources"), list):
-    raise SystemExit("Terraform state resources is missing or not an array")
-PY
+  if ! python3 "$script_root/state-files.py" validate "$candidate"
   then
     echo "refusing invalid Terraform state: $source_path" >&2
     exit 1
