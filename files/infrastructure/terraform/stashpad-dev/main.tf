@@ -1,5 +1,6 @@
 locals {
-  ssh_public_key = coalesce(var.ssh_public_key, trimspace(file("${path.module}/../bootstrap-ssh-key.pub")))
+  # Match the comment-free key used when the existing VM was created.
+  ssh_public_key = coalesce(var.ssh_public_key, join(" ", slice(split(" ", trimspace(file("${path.module}/../bootstrap-ssh-key.pub"))), 0, 2)))
 }
 
 resource "proxmox_virtual_environment_file" "cloud_config" {

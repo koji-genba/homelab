@@ -13,6 +13,29 @@ import subprocess
 import sys
 
 source, temp = map(Path, sys.argv[1:])
+# Evaluate the real root locals with a synthetic commented public key only.
+# No provider, real tfvars, state, or operator bundle is loaded by console.
+ssh_fixture = temp / 'ssh-defaults'
+ssh_fixture.mkdir()
+(ssh_fixture / 'bootstrap-ssh-key.pub').write_text('ssh-ed25519 AAAAfixture fixture-user@fixture-host\n')
+for name in ('apps-vm', 'agent-vm', 'runner-vm', 'tailscale-gateway', 'elastiflow', 'stashpad-dev'):
+    module = ssh_fixture / name
+    module.mkdir()
+    main = (source / 'files/infrastructure/terraform' / name / 'main.tf').read_text()
+    locals_block = main.split('\n}\n', 1)[0] + '\n}\n'
+    (module / 'main.tf').write_text(locals_block + '\nvariable "ssh_public_key" {\n  type = string\n  default = null\n}\n')
+    expected = 'ssh-ed25519 AAAAfixture'
+    if name not in ('elastiflow', 'stashpad-dev'):
+        expected += ' fixture-user@fixture-host'
+    console_env = {k: v for k, v in os.environ.items() if not k.startswith('TF_VAR_')}
+    for override in (None, 'ssh-ed25519 AAAAoverride explicit-comment'):
+        test_env = console_env.copy()
+        if override is not None:
+            test_env['TF_VAR_ssh_public_key'] = override
+        result = subprocess.run(['terraform', '-chdir=' + str(module), 'console'],
+                                input='local.ssh_public_key == ' + json.dumps(override or expected) + '\n',
+                                text=True, capture_output=True, env=test_env)
+        assert result.returncode == 0 and result.stdout.strip() == 'true', name
 repo = temp / 'repo'
 (repo / 'scripts').mkdir(parents=True)
 for name in ('operator-terraform.py', 'operator-secrets-set.sh', 'validate-tailscale-acl-path.sh', 'validate-secrets.sh'):

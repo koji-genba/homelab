@@ -1,4 +1,5 @@
 locals {
+  # Preserve the key comment used when the existing VM was created.
   ssh_public_key = coalesce(var.ssh_public_key, trimspace(file("${path.module}/../bootstrap-ssh-key.pub")))
 }
 

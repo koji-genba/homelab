@@ -73,8 +73,11 @@ make tailscale-plan
 ```
 
 全rootで`No changes`を確認してから退避したtfvarsを削除する。削除や再作成の差分があれば止める。
-公開鍵のコメントが旧入力に含まれる場合、鍵本体が同じでもcloud-initやuser_account.keysに差分が出る。
-作業端末の公開鍵にはコメントがあったが、3 rootのtfvarsは読まず、コメント有無はplanで確認する。
+公開鍵のコメントだけでもcloud-initやuser_account.keysに差分が出る。
+repoの公開鍵はコメント付きで保存し、apps-vm・agent-vm・runner-vm・tailscale-gatewayは行全体、
+elastiflow・stashpad-devは先頭2フィールドを既定値に使う。明示のTF_VARは加工せず優先する。
+本人の実機planで、前者4 rootはコメント付き、後者2 rootはコメント無しでNo changesとなることを確認済み。
+このrepo既定値への切替後の実機planは未検証。
 Tailscaleの管理gateは記録から採用した既定値なので、現在のstateとの一致もplanで確認する。
 本人による確認が終わるまでapplyしない。この7 rootのNo changes確認は未検証。
 

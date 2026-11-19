@@ -395,7 +395,7 @@ The [Hermes exchange](operations/hermes-share.md) adds `tank-gen1/data/hermes` (
 
 25. **state同期と残ったlock**: planにも`AGE_IDENTITY_FILE`が必要。fetch失敗は停止し、`STATE_SYNC=skip`だけが警告付きの明示省略。書込みのlock/backupは省略しない。backup失敗・SIGKILLではlockを残すので、元端末でbackupを復旧してからSHA先頭12文字以上の`CONFIRM`で解除する。pre-sync退避も秘密で0600・ignore対象。main用rulesetではstateを保護できず、App/deploy keyをbypassに含めない専用rulesetが必要（コードのみ用意、実機未検証）。[端末準備と復旧](operations/workstation-setup.md)。
 
-26. **operator既定値の移行**: `operator-secrets-set`でprovider別暗号文を作り、tfvarsを退避して7 rootのNo changesを確認する。tfvarsはTF_VARより優先し、旧tailnetは未宣言警告になる。鍵のコメント除去でもsnippet/keysに差分が出る。ACL正本とlive.jsonが不一致なら本人が判断する。age鍵をAgent VMへ一時投入するとoperator認証情報も読める。[ADR-0017](adr/0017-operator-defaults.md)、実機未検証。
+26. **operator既定値の移行**: `operator-secrets-set`でprovider別暗号文を作り、tfvarsを退避して7 rootのNo changesを確認する。tfvarsはTF_VARより優先し、旧tailnetは未宣言警告になる。公開鍵はコメント付きで保存し、既存VM作成時に合わせてapps/agent/runner/gatewayは行全体、elastiflow/stashpad-devは先頭2フィールドを既定値にする。本人のplanでこの形式のNo changesを確認済み、repo既定値への切替後は未検証。ACL正本とlive.jsonが不一致なら本人が判断する。age鍵をAgent VMへ一時投入するとoperator認証情報も読める。[ADR-0017](adr/0017-operator-defaults.md)、実機未検証。
 
 **History and remaining code / operational issues**
 

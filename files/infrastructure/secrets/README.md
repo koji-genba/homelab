@@ -65,6 +65,14 @@ bundleが無ければ従来の環境変数allowlistを使い、両方なけれ�
 bundleが存在するときの復号失敗・形式不正は停止する。provider認証情報をVMへ配布しない。
 KeePassXCにはage鍵の復旧コピーとprovider認証情報の控えを残す。
 
+## VMの初期SSH公開鍵
+
+`../terraform/bootstrap-ssh-key.pub`は、作業端末の公開鍵1行をコメント付きで保存する公開情報である。
+既存VMの作成時の値に合わせ、apps-vm・agent-vm・runner-vm・tailscale-gatewayは行全体、
+elastiflow・stashpad-devは先頭2フィールドをnull/未指定時の既定値にする。明示のTF_VARは加工せず優先する。
+この形式でNo changesとなることは本人の実機planで確認済みで、repo既定値への切替後の実機planは未検証。
+コメントに含まれるユーザー名・ホスト名の公開は本人了承済み（[ADR-0017](../../../docs/adr/0017-operator-defaults.md)）。
+
 ## Agent VM用bundle
 
 Agent VMのsecretは`agent/runtime.sops.yaml`として同じSOPS/ageで暗号化し、

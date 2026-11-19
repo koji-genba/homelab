@@ -8,9 +8,12 @@
 この端末移行・実planの手順は未検証。
 
 6 root共通で`ssh_public_key`がnull/未指定なら`../bootstrap-ssh-key.pub`を使う。
-明示した`TF_VAR_ssh_public_key`は既定値より優先する。tfvarsや`-var`が残ればTerraform本来の優先順位
-（`-var` > tfvars > `TF_VAR_*`）に従うため、移行では先に退避する。元の鍵にコメントがある場合、
-鍵本体が同じでもcloud-init snippetや`user_account.keys`に差分が出る。削除・再作成はせずplanで確認する。
+repoの公開鍵は作業端末の公開鍵1行をコメント付きで保持する。既存VMの作成時の値に合わせ、
+apps-vm・agent-vm・runner-vm・tailscale-gatewayは行全体、elastiflow・stashpad-devは先頭2フィールドだけを使う。
+明示した`TF_VAR_ssh_public_key`は加工せず既定値より優先する。tfvarsや`-var`が残ればTerraform本来の優先順位
+（`-var` > tfvars > `TF_VAR_*`）に従うため、移行では先に退避する。
+本人の実機planでこの4 rootはコメント付き、残る2 rootはコメント無しでNo changesとなることを確認済み。
+このrepo既定値へ切り替えた後の実機planは未検証。
 `terraform.tfvars.example`は任意の非秘密の上書き用。provider認証は明示環境変数 > operator bundle、
 bundleが無い場合は従来のallowlist。認証情報をtfvarsやVMへ保存しない。
 ssh-agentは利用者が従来どおり起動・鍵登録する。

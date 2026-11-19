@@ -26,7 +26,11 @@ bundleはOAuthの2キーまたはAPI keyのどちらか一方にする。bundle�
 存在するbundleが壊れている場合や復号できない場合は停止し、環境変数へ黙ってfallbackしない。
 値をMake引数、Dockerの`-e NAME=value`、shell command文字列へ展開しない。
 
-VM用の公開鍵はコメントを除いてrepoへ保存し、6 rootのnull/未指定時の既定値にする。
+VM用の公開鍵は作業端末の`~/.ssh/id_ed25519.pub`の1行をコメント付きでrepoへ保存し、末尾改行は1つにする。
+6 rootのnull/未指定時の既定値として、apps-vm・agent-vm・runner-vm・tailscale-gatewayは行全体を使い、
+elastiflow・stashpad-devだけ先頭2フィールドを使う。明示のTF_VARは加工せず優先する。
+既存VMの作成時の値に合わせる判断であり、本人が実機planで上記の形式なら各rootがNo changesになると確認した。
+公開鍵のコメントには作業端末のユーザー名とホスト名が含まれて公開repoに載るが、既存VMとの一致のため本人が了承した。
 Tailscale providerのtailnet引数と変数を削除し、`TAILSCALE_TAILNET`、次いでproviderの`"-"`を使う。
 本番gateは既存のMakeの`-var`と整合する`?=`へ置き、明示指定を優先する。
 hostname/tags/routesは既存のvariables.tfの既定値を継続する。根拠・推測は[Tailscale README](../../files/infrastructure/terraform/tailscale/README.md)に記す。
@@ -52,5 +56,5 @@ Hermesの復旧試験でage鍵をAgent VMへ一時投入する場合、この2�
 ssh-agentの起動・鍵登録は従来どおり利用者が行う。
 
 移行はbundle作成 → tfvars退避 → 7 rootのplanでNo changes確認 → 退避file削除。
-公開鍵のコメント除去だけでもcloud-init/user_account.keysに差分が出る可能性がある。
+公開鍵のコメントだけでもcloud-init/user_account.keysに差分が出るため、既存VMに合わせて上記のroot別の扱いを維持する。
 自動applyしない。実機手順は未検証。
