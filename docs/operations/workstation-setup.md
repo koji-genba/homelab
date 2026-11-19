@@ -29,6 +29,13 @@ Python 3 + PyYAML + Jinja2、ghを用意する。toolboxにTerraform・Ansible�
 公開toolboxは`linux/amd64`。ARM端末でのemulationは未検証。任意でTailscale（管理経路用）、
 KeePassXC（復旧情報用）を導入する。Dockerの実行権限も確認する。
 
+macOS（Apple Silicon + Docker Desktop 4.43）では2026-11-20に次を確認した。
+toolboxはRosetta経由のamd64 emulationで起動し、`terraform-validate`・`ansible-check`・`secrets-decrypt-check`が通る。
+Docker Desktopはagent socketをVM内で`root:root 0660`として中継するため、Makefileは
+Darwinでだけ`--group-add 0`を付けて非root toolboxから到達させる。Settings → Resources → Network で
+Host networkingを有効にし、ghcr.ioに古い認証情報が残っていれば`docker logout ghcr.io`する
+（公開imageでも`denied`になる）。host側のPythonはvenvで用意する。planと実機Ansibleの通し操作は未検証。
+
 持ち出すものは次のとおり。秘密をterminal出力、chat、docs、Gitへ貼らない。
 
 - age鍵を`~/.config/sops/age/keys.txt`へmode 0600で復旧する。明示的な`AGE_IDENTITY_FILE`も使える。
