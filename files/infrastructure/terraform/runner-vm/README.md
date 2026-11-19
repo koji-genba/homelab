@@ -1,5 +1,25 @@
 # Runner VM用Terraformルート
 
+## operator入力の既定値（issue #228）
+
+[ADR-0017](../../../../docs/adr/0017-operator-defaults.md)により、通常はtfvarsの配置も環境変数の手入力も不要。
+`make operator-secrets-set PROVIDER=proxmox`で共通API tokenをoperator bundleへ保存し、
+`make operator-secrets-check PROVIDER=proxmox`でキー名だけを確認する（repo rootで実行）。
+この端末移行・実planの手順は未検証。
+
+6 root共通で`ssh_public_key`がnull/未指定なら`../bootstrap-ssh-key.pub`を使う。
+repoの公開鍵は作業端末の公開鍵1行をコメント付きで保持する。既存VMの作成時の値に合わせ、
+apps-vm・agent-vm・runner-vm・tailscale-gatewayは行全体、elastiflow・stashpad-devは先頭2フィールドだけを使う。
+明示した`TF_VAR_ssh_public_key`は加工せず既定値より優先する。tfvarsや`-var`が残ればTerraform本来の優先順位
+（`-var` > tfvars > `TF_VAR_*`）に従うため、移行では先に退避する。
+本人の実機planでこの4 rootはコメント付き、残る2 rootはコメント無しでNo changesとなることを確認済み。
+このrepo既定値へ切り替えた後の実機planは未検証。
+`terraform.tfvars.example`は任意の非秘密の上書き用。provider認証は明示環境変数 > operator bundle、
+bundleが無い場合は従来のallowlist。認証情報をtfvarsやVMへ保存しない。
+ssh-agentは利用者が従来どおり起動・鍵登録する。
+移行は[作業端末手順](../../../../docs/operations/workstation-setup.md)に従う。
+
+
 このrootはHermesのコマンド実行・ブラウザを載せる隔離用のDebian 13 Runner VMだけを作成する。
 version固定したgeneric-cloud imageをProxmoxへ直接importし、SHA-512 checksumを検証する。方式は
 [apps-vm](../apps-vm/README.md)に倣う。
@@ -9,9 +29,8 @@ version固定したgeneric-cloud imageをProxmoxへ直接importし、SHA-512 che
 - tailnetには参加しない。egressはAnsible側のnftablesで制限する（PRD §4.2）。
 - Discord token・記憶DB・homelabの管理鍵はこのVMに置かない。
 
-apply前に、KeePassXCから`TF_VAR_proxmox_api_token`と`TF_VAR_ssh_public_key`を管理端末へ一時的に
-注入する。MakeはこれらをProxmox Terraform runnerにだけ渡し、repository、runtime SOPS bundle、
-VMには保存しない。
+applyにはoperator bundle（または明示したprovider環境変数）を使う。
+
 
 ```sh
 terraform init
@@ -47,7 +66,7 @@ Proxmoxのuser/role/token/ACLはTerraformで管理しない。applyの前に、�
 
 1. 全6 Proxmox root共通のAPI token `terraform@pve!terraform`（`privsep=0`）を使う。
    2026-10-25に共通tokenへ移行済み（[記録](../../../../docs/operations/apps-vm-recovery.md#実機確認認証移行の実施記録2026-10-25)）。
-   上記のProxmox準備に従い、KeePassXCに保存した共通tokenを`TF_VAR_proxmox_api_token`へ一時注入する。
+   上記のProxmox準備に従い、共通tokenをoperator bundleへ保存する。
 2. ユーザー`terraform@pve`へVMID 105用のACLを付与する。少なくとも`/vms/105`と、image importに必要な
    datastore権限を対象node/datastoreに与える。`privsep=0`のため共通tokenはユーザーACLを継承し、VM別には分離されない。
 3. 対象datastore `local` のcontent typeに`Import`と`snippets`が含まれることを確認する。

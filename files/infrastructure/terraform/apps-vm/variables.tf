@@ -99,6 +99,7 @@ variable "ssh_public_key" {
   description = "SSH public key installed by cloud-init; no password is configured"
   type        = string
   sensitive   = true
+  default     = null
 }
 
 variable "deploy_user" {

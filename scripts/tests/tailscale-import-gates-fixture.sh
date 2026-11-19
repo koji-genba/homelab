@@ -93,6 +93,7 @@ mkdir "$fixture/repo/scripts"
 for script in "$repo_root"/scripts/*.sh; do
   ln -s "$script" "$fixture/repo/scripts/$(basename "$script")"
 done
+cp "$repo_root/scripts/operator-terraform.py" "$fixture/repo/scripts/"
 # This fixture tests import gates only. Lifecycle/locking is exercised with
 # real Git/age in state-sync-lock-fixture.sh.
 rm "$fixture/repo/scripts/state-operation.sh"
@@ -139,10 +140,10 @@ tailscale_device_subnet_routes.subnet_router[0]'
 run_make() {
   (
     unset MAKELEVEL MAKEFLAGS MFLAGS
-    make --no-print-directory -C "$fixture/repo" "$@" \
+    MANAGE_SUBNET_ROUTER=true make --no-print-directory -C "$fixture/repo" "$@" \
       'TOOLBOX_RUN=env FIXTURE_RUNNER=local' \
       'TOOLBOX_TAILSCALE_RUN=env FIXTURE_RUNNER=tailscale' TAILSCALE_ROOT=root \
-      ACL_POLICY_FILE=policy.json TAILSCALE_DEVICE_ID=dummy-node
+      ACL_POLICY_FILE=policy.json TAILSCALE_DEVICE_ID=dummy-node TAILSCALE_API_KEY=fixture-key AGE_RECIPIENT=fixture-recipient
   ) >"$fixture/make.log" 2>&1
 }
 for target in acl dns router core; do

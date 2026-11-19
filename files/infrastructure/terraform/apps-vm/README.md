@@ -1,11 +1,29 @@
 # Apps VM用Terraformルート
 
+## operator入力の既定値（issue #228）
+
+[ADR-0017](../../../../docs/adr/0017-operator-defaults.md)により、通常はtfvarsの配置も環境変数の手入力も不要。
+`make operator-secrets-set PROVIDER=proxmox`で共通API tokenをoperator bundleへ保存し、
+`make operator-secrets-check PROVIDER=proxmox`でキー名だけを確認する（repo rootで実行）。
+この端末移行・実planの手順は未検証。
+
+6 root共通で`ssh_public_key`がnull/未指定なら`../bootstrap-ssh-key.pub`を使う。
+repoの公開鍵は作業端末の公開鍵1行をコメント付きで保持する。既存VMの作成時の値に合わせ、
+apps-vm・agent-vm・runner-vm・tailscale-gatewayは行全体、elastiflow・stashpad-devは先頭2フィールドだけを使う。
+明示した`TF_VAR_ssh_public_key`は加工せず既定値より優先する。tfvarsや`-var`が残ればTerraform本来の優先順位
+（`-var` > tfvars > `TF_VAR_*`）に従うため、移行では先に退避する。
+本人の実機planでこの4 rootはコメント付き、残る2 rootはコメント無しでNo changesとなることを確認済み。
+このrepo既定値へ切り替えた後の実機planは未検証。
+`terraform.tfvars.example`は任意の非秘密の上書き用。provider認証は明示環境変数 > operator bundle、
+bundleが無い場合は従来のallowlist。認証情報をtfvarsやVMへ保存しない。
+ssh-agentは利用者が従来どおり起動・鍵登録する。
+移行は[作業端末手順](../../../../docs/operations/workstation-setup.md)に従う。
+
+
 このrootはDebian 13 Apps VMだけを作成する。version固定したgeneric-cloud imageをProxmoxへ直接
 importし、SHA-512 checksumを検証する。手動管理のtemplate VMやclone操作は使わない。
 
-apply前に、KeePassXCから`TF_VAR_proxmox_api_token`と`TF_VAR_ssh_public_key`を管理端末へ一時的に
-注入する。MakeはこれらをProxmox Terraform runnerにだけ渡し、repository、runtime SOPS bundle、
-Apps VMには保存しない。
+applyにはoperator bundle（または明示したprovider環境変数）を使う。
 全6 Proxmox root（Apps VM / Agent / Runner / ElastiFlow / Tailscale gateway / stashPadDev）で
 共通token `terraform@pve!terraform`（`privsep=0`）を使う。権限と認証移行は
 [Proxmox側準備](../../../../docs/operations/apps-vm-recovery.md#terraform実行前のproxmox側準備)を参照する。
@@ -21,12 +39,9 @@ VMIDを変更する際はTerraform planのVM replacementを確認し、同じIP�
 起動しない。
 
 ```sh
-terraform init
-terraform providers lock -platform=linux_amd64 -platform=darwin_arm64
-terraform fmt -check
-terraform validate
-terraform plan -out=terraform.tfplan
-terraform apply terraform.tfplan
+make terraform-validate
+make terraform-plan
+make terraform-apply
 ```
 
 repositoryのMake targetも同じ保存plan方式を使う。`make terraform-plan`を実行し、mode `0600`のignore対象

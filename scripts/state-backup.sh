@@ -17,7 +17,7 @@ command -v age >/dev/null 2>&1 || { echo "age is required" >&2; exit 1; }
 recipient=${AGE_RECIPIENT:-}
 identity=${AGE_IDENTITY_FILE:-}
 test -n "$recipient" || { echo "AGE_RECIPIENT must contain an age public recipient" >&2; exit 1; }
-test -r "$identity" || { echo "AGE_IDENTITY_FILE must point to the KeePassXC-recovered age identity" >&2; exit 1; }
+test -r "$identity" || { echo "age identity missing or unreadable: restore ~/.config/sops/age/keys.txt from KeePassXC or set AGE_IDENTITY_FILE" >&2; exit 1; }
 
 "$script_root/check-terraform-state-modes.sh" "$repo_root"
 

@@ -85,6 +85,7 @@ homelab-agent-restore <set> --identity <age-identity-file> [--scratch] [--yes]
 
 `<set>` はセット名（`20260101T033000Z`）またはフルパス。`--identity` は必須で、VMに常設しない。
 復元時だけ運用者がtmpfs等へ一時提供し、終了後に撤去する。
+ADR-0017以後、この鍵をAgent VMへ置く間はProxmox/Tailscaleのoperator認証情報も読める状態になる。
 実行前に `SHA256SUMS` を検証し、`mktemp` に復号（終了時に平文を削除）する。
 
 ### 本番リストア（`--yes` 必須、破壊的）

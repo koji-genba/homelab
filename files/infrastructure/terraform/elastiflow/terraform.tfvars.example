@@ -1,6 +1,5 @@
-# Copy to gitignored terraform.tfvars; keep only non-secret values here.
-# Temporarily inject TF_VAR_proxmox_api_token from KeePassXC.
-# Never put API tokens or a private key in this file.
+# 任意の非秘密の上書き用。通常は配置不要。認証情報はoperator bundleへ保存する。
+# tfvarsはTF_VAR_*より優先する。移行時は既存tfvarsを退避してplanを確認する。
 
 proxmox_endpoint = "https://192.168.10.11:8006/"
 ssh_public_key   = "ssh-ed25519 AAAA... operator@example"

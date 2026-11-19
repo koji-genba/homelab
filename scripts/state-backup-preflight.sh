@@ -8,7 +8,7 @@ recipient=${AGE_RECIPIENT:-}
 identity=${AGE_IDENTITY_FILE:-}
 ssh_socket=${SSH_AUTH_SOCK:-}
 test -n "$recipient" || { echo "AGE_RECIPIENT is required" >&2; exit 1; }
-test -r "$identity" || { echo "AGE_IDENTITY_FILE must be readable (plan also requires the age identity for state sync)" >&2; exit 1; }
+test -r "$identity" || { echo "age identity missing or unreadable: restore ~/.config/sops/age/keys.txt or set AGE_IDENTITY_FILE (plan also requires the age identity for state sync)" >&2; exit 1; }
 "$script_root/check-terraform-state-modes.sh" "$repo_root"
 test -S "$ssh_socket" || { echo "SSH_AUTH_SOCK must point to a live Unix socket" >&2; exit 1; }
 command -v age >/dev/null 2>&1 || { echo "age is required" >&2; exit 1; }

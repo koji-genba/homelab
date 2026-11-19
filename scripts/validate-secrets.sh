@@ -10,7 +10,7 @@ bad=0
 tracked_files=$(git -C "$repo_root" ls-files -co --exclude-standard)
 for path in $tracked_files; do
   case "$path" in
-    *.tfstate|*.tfstate.*|*/runtime.yaml|*/.env|.env|*/acl-policy.live.json)
+    *.tfstate|*.tfstate.*|*/runtime.yaml|*/.env|.env|*/acl-policy.live.json|*/operator/proxmox.yaml|*/operator/tailscale.yaml)
       echo "forbidden plaintext state/runtime file: $path" >&2
       bad=1
       ;;
@@ -48,6 +48,33 @@ PYACL
     bad=1
   fi
 fi
+
+# Operator bundles must be flat and encrypt every documented credential value.
+for provider in proxmox tailscale; do
+  path="files/infrastructure/secrets/operator/$provider.sops.yaml"
+  test -f "$repo_root/$path" || continue
+  if ! python3 - "$repo_root/$path" "$provider" <<'PYOPERATOR'
+import sys
+import yaml
+allowed = {
+    "proxmox": {"TF_VAR_proxmox_api_token"},
+    "tailscale": {"TAILSCALE_OAUTH_CLIENT_ID", "TAILSCALE_OAUTH_CLIENT_SECRET", "TAILSCALE_API_KEY"},
+}
+try:
+    with open(sys.argv[1]) as source:
+        data = yaml.safe_load(source)
+    metadata = data.pop("sops")
+    assert data and set(data) <= allowed[sys.argv[2]]
+    assert metadata["age"] and metadata["mac"].startswith("ENC[AES256_GCM,")
+    assert all(isinstance(v, str) and v.startswith("ENC[AES256_GCM,") for v in data.values())
+except Exception:
+    sys.exit(1)
+PYOPERATOR
+  then
+    echo "operator bundle lacks full SOPS encryption: $path" >&2
+    bad=1
+  fi
+done
 
 # Hermes Agent bundle: the gitignored plaintext must never be tracked, even if
 # it was force-added. The encrypted agent/runtime.sops.yaml is the only

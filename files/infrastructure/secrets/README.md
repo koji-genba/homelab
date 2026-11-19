@@ -31,7 +31,47 @@ main保護だけではHermes Appやstaging deploy keyのstate書込みを防げ�
 本人だけがbypassできる専用rulesetをコードで用意したが、GitHubへの適用は未検証。
 自動同期前の反映・新端末での鍵/SSH/tfvars準備・lock復旧は
 [作業端末手順](../../../docs/operations/workstation-setup.md)を参照する。
-tfvarsは引き続きGit管理外とし、承認済みの暗号化転送またはKeePassXC添付でrootごとに移す。
+tfvarsは不要。既存fileは作業端末手順に従って退避し、7 rootのNo changes確認後に削除する。
+
+## operator認証情報（ADR-0017）
+
+age鍵の既定pathは`~/.config/sops/age/keys.txt`。Makeはhost scriptにもexportする。
+公開recipientは`age-recipient.txt`だけに既定値を持つ。`AGE_IDENTITY_FILE`と`AGE_RECIPIENT`の明示指定が優先する。
+
+| bundle | トップレベルの文字列キー |
+| --- | --- |
+| `operator/proxmox.sops.yaml` | `TF_VAR_proxmox_api_token` |
+| `operator/tailscale.sops.yaml` | `TAILSCALE_OAUTH_CLIENT_ID`、`TAILSCALE_OAUTH_CLIENT_SECRET`、または`TAILSCALE_API_KEY`だけ |
+
+SOPS 3.10.2 exec-envの制約に合わせ、ネストや数値・配列は使わない。以下はrepo rootで実行する（実機未検証）。
+
+```sh
+make operator-secrets-set PROVIDER=proxmox
+make operator-secrets-set PROVIDER=tailscale
+make operator-secrets-check PROVIDER=proxmox
+make operator-secrets-check PROVIDER=tailscale
+```
+
+ホストのBash `read -rs`で入力し、stdinでtoolboxの`sops encrypt`へ渡す。平文をディスクに書かない。
+TailscaleはOAuth（既定）またはAPI keyを選ぶ。既存fileを置き換えるときは`y`の確認が必要。
+暗号化成功後にだけrenameして置換し、一時fileにも暗号文だけを書く。
+checkはメモリ内で復号して形式を検査し、値を出さずキー名だけ表示する。
+平文の誤追加や暗号化していない値は`make secrets-scan`で拒否する。
+
+対応するproviderのTerraformだけへtoolbox内の`sops exec-env`で注入する。明示環境変数が同名bundle値より優先し、
+未指定分をbundleで補う。Tailscaleは明示API keyを優先し、明示OAuthの一部があればOAuth方式を選ぶ。
+異なる方式のbundleでは足りないOAuth項目を補えないため、2項目とも指定するかbundleを更新する。
+bundleが無ければ従来の環境変数allowlistを使い、両方なければ説明付きで停止する。
+bundleが存在するときの復号失敗・形式不正は停止する。provider認証情報をVMへ配布しない。
+KeePassXCにはage鍵の復旧コピーとprovider認証情報の控えを残す。
+
+## VMの初期SSH公開鍵
+
+`../terraform/bootstrap-ssh-key.pub`は、作業端末の公開鍵1行をコメント付きで保存する公開情報である。
+既存VMの作成時の値に合わせ、apps-vm・agent-vm・runner-vm・tailscale-gatewayは行全体、
+elastiflow・stashpad-devは先頭2フィールドをnull/未指定時の既定値にする。明示のTF_VARは加工せず優先する。
+この形式でNo changesとなることは本人の実機planで確認済みで、repo既定値への切替後の実機planは未検証。
+コメントに含まれるユーザー名・ホスト名の公開は本人了承済み（[ADR-0017](../../../docs/adr/0017-operator-defaults.md)）。
 
 ## Agent VM用bundle
 
@@ -54,9 +94,15 @@ homelabは別PRで毎時staging更新のpushをdeploy key（Actions secret、mai
 PostgreSQL passwordとSSH鍵はVM上で生成するためbundleへ
 含めない。
 
-## Tailscale ACL全文の復旧用コピー
+## Tailscale ACL全文の正本
 
-`tailscale/acl-policy.sops.json`は、既存age鍵で暗号化したreview済みACL全文のSOPS binary形式の復旧コピーである。
+`tailscale/acl-policy.sops.json`は、既存age鍵で暗号化したreview済みACL全文のSOPS binary形式の正本である。plan/import時にはtoolbox内の固定パス
+`tmp/tailscale-acl/policy.json`（親0700・file0600、Git ignore対象）へ一時復号する。
+saved planのapplyでも、`terraform show -json`の保存変数`acl_policy_file`をメモリ内で確認し、
+既定パスなら同じ場所へ再復号する。JSONの内容は表示せず、applyに`-var`も追加しない。
+明示パスのplanは元のfileを検査して使い、自動復号・削除しない。旧ランダムパスのplanは作り直す。
+固定directoryが既にあれば停止し、自分が作成したfile/directoryだけを成功・失敗・TERM時に削除する。
+live.jsonと正本の不一致はapplyでも停止する。この実機apply手順は未検証。
 更新・復元は[Tailscale手順](../terraform/tailscale/README.md#acl全文の復旧用コピー2026-10-25)に従う。
 
 ## 初回作成

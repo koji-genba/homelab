@@ -9,7 +9,7 @@ case ${STATE_SYNC:-} in
   *) echo 'STATE_SYNC must be empty or skip' >&2; exit 1 ;;
 esac
 test -r "${AGE_IDENTITY_FILE:-}" || {
-  echo 'AGE_IDENTITY_FILE must be readable for state sync (plan also needs the age identity recovered from KeePassXC)' >&2
+  echo 'age identity missing or unreadable: restore ~/.config/sops/age/keys.txt or set AGE_IDENTITY_FILE for state sync (plan also needs the age identity recovered from KeePassXC)' >&2
   exit 1
 }
 "$script_root/check-terraform-state-modes.sh" "$repo_root"

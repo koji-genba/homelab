@@ -9,10 +9,10 @@ repo_root=${STATE_RESTORE_REPO_ROOT:-$(CDPATH='' cd -- "$(dirname -- "$0")/.." &
 script_root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 identity=${AGE_IDENTITY_FILE:-}
 test -n "$identity" || {
-  echo "AGE_IDENTITY_FILE is required; recover the key from KeePassXC first" >&2
+  echo "age identity missing: restore ~/.config/sops/age/keys.txt from KeePassXC or set AGE_IDENTITY_FILE" >&2
   exit 1
 }
-test -r "$identity" || { echo "age identity is not readable: $identity" >&2; exit 1; }
+test -r "$identity" || { echo "age identity is not readable; restore ~/.config/sops/age/keys.txt or set AGE_IDENTITY_FILE" >&2; exit 1; }
 command -v age >/dev/null 2>&1 || { echo "age is required" >&2; exit 1; }
 git -C "$repo_root" remote get-url origin >/dev/null 2>&1 || {
   echo "repository has no origin remote" >&2

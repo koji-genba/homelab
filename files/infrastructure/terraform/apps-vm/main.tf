@@ -1,3 +1,8 @@
+locals {
+  # Preserve the key comment used when the existing VM was created.
+  ssh_public_key = coalesce(var.ssh_public_key, trimspace(file("${path.module}/../bootstrap-ssh-key.pub")))
+}
+
 resource "proxmox_download_file" "debian_cloud_image" {
   content_type       = "import"
   datastore_id       = var.snippet_datastore_id
@@ -17,7 +22,7 @@ resource "proxmox_virtual_environment_file" "cloud_config" {
     file_name = "apps-cloud-init.yaml"
     data = templatefile("${path.module}/cloud-init.yaml.tftpl", {
       deploy_user    = var.deploy_user
-      ssh_public_key = var.ssh_public_key
+      ssh_public_key = local.ssh_public_key
       vm_name        = var.vm_name
     })
   }

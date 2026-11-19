@@ -1,3 +1,8 @@
+locals {
+  # Preserve the key comment used when the existing VM was created.
+  ssh_public_key = coalesce(var.ssh_public_key, trimspace(file("${path.module}/../bootstrap-ssh-key.pub")))
+}
+
 # k8s実績ベースのTailscale Gateway VM設定
 # 成功実績のあるk8s-cluster設定をベースに必要最小限の変更のみ
 
@@ -17,7 +22,7 @@ resource "proxmox_virtual_environment_file" "tailscale_cloud_config" {
           - sudo
         shell: /bin/bash
         ssh_authorized_keys:
-          - ${var.ssh_public_key}
+          - ${local.ssh_public_key}
         sudo: ALL=(ALL) NOPASSWD:ALL
 
     # 基本パッケージ（k8s実績ベース、Tailscale特化）
@@ -132,7 +137,7 @@ resource "proxmox_virtual_environment_vm" "tailscale_gateway" {
 
     user_account {
       username = "ubuntu"
-      keys     = [var.ssh_public_key]
+      keys     = [local.ssh_public_key]
     }
 
     user_data_file_id = proxmox_virtual_environment_file.tailscale_cloud_config.id

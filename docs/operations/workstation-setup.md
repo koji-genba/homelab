@@ -31,30 +31,68 @@ KeePassXC（復旧情報用）を導入する。Dockerの実行権限も確認�
 
 持ち出すものは次のとおり。秘密をterminal出力、chat、docs、Gitへ貼らない。
 
-- KeePassXCのdatabaseと解除に必要なもの。age identity、public recipient、provider credentialの復旧entryを確認する。
-- age identity。repoの外の安全な場所へ復旧しmode 0600にする。VMへは置かない。
-- SSH鍵を安全な既存経路で移すか、新端末で新しい鍵を作る。新鍵ならGitHub本人accountへ公開鍵を登録し、
-  VMの接続先は各Ansible inventoryと既存の認証運用に従って登録する。ホスト鍵の照合情報も引き継ぐ。
-  deploy key/App tokenではstateのpush権限を代用できない。
-- 各rootの`terraform.tfvars`。Git管理外のまま。旧端末から承認済みの暗号化転送経路、またはKeePassXC添付を介して
-  rootごとに渡し、0600で配置する。移送用平文をrepoや共有directoryへ残さない。
-  `terraform.tfvars.example`だけでは既存環境の全入力を復元できるとは限らない。
-- provider credentialはKeePassXCから必要な環境変数へ一時注入する。Makefileのroot別allowlistを使い、tfvarsへ追加しない。
+- age鍵を`~/.config/sops/age/keys.txt`へmode 0600で復旧する。明示的な`AGE_IDENTITY_FILE`も使える。
+- SSH鍵を安全な既存経路で移す。本人accountのGitHub SSH認証、pve1接続用の鍵とhost key照合情報を引き継ぐ。
+  ssh-agentは従来どおり利用者が起動・鍵登録する。deploy key/App tokenでstate push権限を代用しない。
+- KeePassXCは復旧用。age鍵の復旧コピーとprovider認証情報の控えを保持する。
+
+recipientはrepoの公開fileを既定で読み、provider認証はprovider別operator SOPS bundleから取得する。
+通常の端末移行でtfvarsやprovider環境変数を持ち運ぶ必要はない。
+
+## operator入力の初回移行（未検証）
+
+[ADR-0017](../adr/0017-operator-defaults.md)と[secrets手順](../../files/infrastructure/secrets/README.md)に従う。
+実機へ進む前に上記state移行とrulesetの前提を満たす。
+
+```sh
+make operator-secrets-set PROVIDER=proxmox
+make operator-secrets-set PROVIDER=tailscale
+make operator-secrets-check PROVIDER=proxmox
+make operator-secrets-check PROVIDER=tailscale
+make secrets-scan
+```
+
+入力は非表示。平文をディスクへ書かずに暗号化する。既存bundleの置換には確認がある。
+暗号文だけを通常のreview対象にし、新端末でも取得できるようにする。
+既存の4 rootの`terraform.tfvars`を内容表示せずに`mv`でrepo外の安全な0600の退避先へ移す。
+退避先はあらかじめ本人が用意し、既存fileに上書きしない。対象はelastiflow、stashpad-dev、
+tailscale-gateway、tailscale（ほかのrootにある場合も同様）。この実装作業では退避・削除していない。
+
+残ったtfvarsはTerraformが自動読込みし、宣言済みの値は`TF_VAR_*`より優先する。
+tailscaleの旧`tailnet`は未宣言変数の警告になるが、providerのtailnet選択には使われない。
+`-var=tailnet=...`ならエラーとなる。`TAILSCALE_TAILNET`による明示上書きを使う。
+exampleは任意の非秘密の上書き専用で、通常コピーしない。
+
+環境変数の上書きも解除した状態で、6 VM rootとtailscaleの計7 rootの保存planを順に確認する。
+
+```sh
+for root in apps-vm agent-vm runner-vm elastiflow stashpad-dev tailscale-gateway; do
+  make terraform-plan TERRAFORM_ROOT="files/infrastructure/terraform/$root" || break
+done
+make tailscale-plan
+```
+
+全rootで`No changes`を確認してから退避したtfvarsを削除する。削除や再作成の差分があれば止める。
+公開鍵のコメントだけでもcloud-initやuser_account.keysに差分が出る。
+repoの公開鍵はコメント付きで保存し、apps-vm・agent-vm・runner-vm・tailscale-gatewayは行全体、
+elastiflow・stashpad-devは先頭2フィールドを既定値に使う。明示のTF_VARは加工せず優先する。
+本人の実機planで、前者4 rootはコメント付き、後者2 rootはコメント無しでNo changesとなることを確認済み。
+このrepo既定値への切替後の実機planは未検証。
+Tailscaleの管理gateは記録から採用した既定値なので、現在のstateとの一致もplanで確認する。
+本人による確認が終わるまでapplyしない。この7 rootのNo changes確認は未検証。
 
 ## 新端末で最初に行うこと
 
-本人accountでrepoをcloneし、originのpush URLをSSHにする。SSH agentへ本人の鍵を登録し、
-各Terraform rootのtfvarsを配置する。stateを手動copyする必要はない。公開ホスト名に個人情報が含まれる場合、
-`STATE_LOCK_HOST`へ識別できる公開用別名を設定する。
+本人accountでrepoをcloneし、originのpush URLをSSHにする。age鍵を既定pathへ復旧し、
+SSH agentへ本人の鍵を登録する。stateを手動copyする必要はない。
+公開ホスト名に個人情報が含まれる場合、`STATE_LOCK_HOST`へ公開用別名を設定する。
 
 ```sh
-export AGE_IDENTITY_FILE=/secure/path/age-identity.txt
-export AGE_RECIPIENT='age1...'
-# 必要なprovider環境変数はKeePassXCから安全に設定する
-make terraform-plan TERRAFORM_ROOT=files/infrastructure/terraform/apps-vm
-# Tailscaleは既存のgate・ACL入力も指定する
-# make tailscale-plan ...
+make terraform-plan
+make tailscale-plan
 ```
+
+makeにはage/recipient/provider/gate/ACLの指定を付けない。これらの明示指定も引き続き優先される。
 
 最初のplanはorigin/state-backupをfetchし、toolbox内で復号して各rootへstateを同期する。
 **planにも`AGE_IDENTITY_FILE`が必要**。recipientは書込み後のbackup/preflightにも必要。

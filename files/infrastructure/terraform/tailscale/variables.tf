@@ -1,9 +1,3 @@
-variable "tailnet" {
-  description = "Tailnet ID or legacy tailnet name, supplied after live inventory"
-  type        = string
-  default     = "example.com"
-}
-
 variable "manage_tailnet" {
   description = "Enable manual, import-first management of existing tailnet policy and DNS"
   type        = bool
