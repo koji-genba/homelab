@@ -1,3 +1,7 @@
+locals {
+  ssh_public_key = coalesce(var.ssh_public_key, trimspace(file("${path.module}/../bootstrap-ssh-key.pub")))
+}
+
 resource "proxmox_virtual_environment_file" "cloud_config" {
   content_type = "snippets"
   datastore_id = "local"
@@ -13,7 +17,7 @@ resource "proxmox_virtual_environment_file" "cloud_config" {
           - sudo
         shell: /bin/bash
         ssh_authorized_keys:
-          - ${var.ssh_public_key}
+          - ${local.ssh_public_key}
         sudo: ALL=(ALL) NOPASSWD:ALL
 
     packages:
@@ -110,7 +114,7 @@ resource "proxmox_virtual_environment_vm" "stashpad_dev" {
 
     user_account {
       username = "ubuntu"
-      keys     = [var.ssh_public_key]
+      keys     = [local.ssh_public_key]
     }
 
     user_data_file_id = proxmox_virtual_environment_file.cloud_config.id

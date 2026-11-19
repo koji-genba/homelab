@@ -1,5 +1,16 @@
 SHELL := /bin/sh
 
+AGE_IDENTITY_FILE ?= $(HOME)/.config/sops/age/keys.txt
+AGE_RECIPIENT ?= $(shell cat files/infrastructure/secrets/age-recipient.txt)
+export AGE_IDENTITY_FILE AGE_RECIPIENT
+
+# Existing production management gates; command-line/environment overrides win.
+MANAGE_TAILNET ?= true
+ENABLE_ADGUARD_DNS ?= true
+ADGUARD_READY ?= true
+MANAGE_SUBNET_ROUTER ?= false
+ADGUARD_NAMESERVER_IP ?= 100.86.147.127
+
 TERRAFORM_ROOT ?= files/infrastructure/terraform/apps-vm
 ANSIBLE_ROOT ?= files/infrastructure/ansible/apps
 ANSIBLE_INVENTORY ?= $(ANSIBLE_ROOT)/inventory/hosts.yml
@@ -59,9 +70,9 @@ TOOLBOX_BUILD_IMAGE ?= $(TOOLBOX_IMAGE_REPO):$(TOOLBOX_IMAGE_TAG)
 TOOLBOX_USERNAME ?= homelab-toolbox
 TOOLBOX_USER := $(shell id -u):$(shell id -g)
 TOOLBOX_SSH_MOUNT := $(if $(SSH_AUTH_SOCK),-v "$(SSH_AUTH_SOCK):/run/ssh-agent" -e SSH_AUTH_SOCK=/run/ssh-agent,)
-TOOLBOX_AGE_MOUNT := $(if $(AGE_IDENTITY_FILE),-v "$(AGE_IDENTITY_FILE):/run/secrets/age-identity:ro" -e AGE_IDENTITY_FILE=/run/secrets/age-identity -e SOPS_AGE_KEY_FILE=/run/secrets/age-identity,)
+TOOLBOX_AGE_MOUNT := $(if $(wildcard $(AGE_IDENTITY_FILE)),-v "$(AGE_IDENTITY_FILE):/run/secrets/age-identity:ro" -e AGE_IDENTITY_FILE=/run/secrets/age-identity -e SOPS_AGE_KEY_FILE=/run/secrets/age-identity,)
 TOOLBOX_KNOWN_HOSTS_MOUNT := $(if $(wildcard $(HOME)/.ssh/known_hosts),-v "$(HOME)/.ssh/known_hosts:/etc/ssh/ssh_known_hosts:ro",)
-TOOLBOX_RECIPIENT_ENV := $(if $(AGE_RECIPIENT),-e AGE_RECIPIENT=$(AGE_RECIPIENT),)
+TOOLBOX_RECIPIENT_ENV := $(if $(AGE_RECIPIENT),-e AGE_RECIPIENT,)
 # Provider credentials are added only to the runner for the matching root.
 # The `-e NAME` form deliberately keeps secret values out of Make's expansion
 # and dry-run output.
@@ -71,14 +82,14 @@ TOOLBOX_PROXMOX_ENV := \
 TOOLBOX_TAILSCALE_ENV := \
 	-e TAILSCALE_OAUTH_CLIENT_ID \
 	-e TAILSCALE_OAUTH_CLIENT_SECRET \
-	-e TAILSCALE_API_KEY
+	-e TAILSCALE_API_KEY \
+	-e TAILSCALE_TAILNET
 
 # Management host prerequisite: Git, Docker, Make and SSH. Terraform,
 # Ansible, SOPS, age, shellcheck, and linters run in the pinned toolbox.
 # The repository is mounted as the invoking UID/GID. The toolbox's own
 # container-local /tmp is writable for state-backup worktrees. A recovered age
-# identity is mounted separately and read-only only when AGE_IDENTITY_FILE is
-# supplied; it is never copied into the repository or the Apps VM.
+# identity is mounted separately and read-only when its default/explicit path exists; it is never copied into the repository or the Apps VM.
 TOOLBOX_RUN_BASE = docker run --rm --network host --user $(TOOLBOX_USER) \
 	-v "$(CURDIR):/workspace" -w /workspace \
 	$(TOOLBOX_SSH_MOUNT) $(TOOLBOX_AGE_MOUNT) $(TOOLBOX_KNOWN_HOSTS_MOUNT) \
@@ -152,7 +163,7 @@ tailscale-init:
 	$(TOOLBOX_RUN) terraform -chdir=$(TAILSCALE_ROOT) init -backend=false -input=false
 
 tailscale-acl-preflight:
-	test "$(MANAGE_TAILNET)" != true || test -n "$(ACL_POLICY_FILE)" || { echo "MANAGE_TAILNET=true requires ACL_POLICY_FILE" >&2; exit 1; }
+	test "$(MANAGE_TAILNET)" != true || test -n "$(ACL_POLICY_FILE)" || test -f "$(TAILSCALE_ACL_BACKUP_FILE)" || { echo "missing canonical encrypted ACL" >&2; exit 1; }
 	if test -n "$(ACL_POLICY_FILE)"; then TAILSCALE_REPO_ROOT="$(CURDIR)" ./scripts/validate-tailscale-acl-path.sh "$(ACL_POLICY_FILE)" >/dev/null; fi
 
 tailscale-plan: state-sync
@@ -160,7 +171,7 @@ tailscale-plan: state-sync
 
 _state-tailscale-plan: tailscale-init
 	$(MAKE) tailscale-acl-preflight MANAGE_TAILNET="$(MANAGE_TAILNET)" ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
-	$(TOOLBOX_TAILSCALE_RUN) terraform -chdir=$(TAILSCALE_ROOT) plan -input=false -out=$(TAILSCALE_PLAN_NAME) $(TAILSCALE_VAR_ARGS)
+	$(TOOLBOX_TAILSCALE_RUN) python3 scripts/operator-terraform.py tailscale -chdir=$(TAILSCALE_ROOT) plan -input=false -out=$(TAILSCALE_PLAN_NAME) $(TAILSCALE_VAR_ARGS)
 	chmod 0600 "$(TAILSCALE_PLAN_FILE)"
 
 tailscale-apply:
@@ -168,7 +179,7 @@ tailscale-apply:
 
 _state-tailscale-apply: tailscale-init
 	./scripts/check-saved-terraform-plan.sh "$(TAILSCALE_PLAN_FILE)"
-	$(TOOLBOX_TAILSCALE_RUN) terraform -chdir=$(TAILSCALE_ROOT) apply -input=false "$(TAILSCALE_PLAN_NAME)"
+	$(TOOLBOX_TAILSCALE_RUN) python3 scripts/operator-terraform.py tailscale -chdir=$(TAILSCALE_ROOT) apply -input=false "$(TAILSCALE_PLAN_NAME)"
 	rm -f "$(TAILSCALE_PLAN_FILE)"
 
 # Import existing Tailscale resources only with explicit live-inventory gates.
@@ -184,7 +195,7 @@ _state-tailscale-import-acl: tailscale-init
 	test "$(MANAGE_TAILNET)" = true
 	$(MAKE) tailscale-acl-preflight MANAGE_TAILNET=true ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
 	$(TOOLBOX_RUN) sh ./scripts/check-tailscale-import-gates.sh "$(TAILSCALE_ROOT)" "$(MANAGE_TAILNET)" "$(ENABLE_ADGUARD_DNS)" "$(ADGUARD_READY)" "$(MANAGE_SUBNET_ROUTER)"
-	$(TOOLBOX_TAILSCALE_RUN) terraform -chdir=$(TAILSCALE_ROOT) import -input=false -var='manage_tailnet=true' -var="acl_policy_file=$(TAILSCALE_ACL_POLICY_CONTAINER)" 'tailscale_acl.policy[0]' acl
+	$(TOOLBOX_TAILSCALE_RUN) python3 scripts/operator-terraform.py tailscale -chdir=$(TAILSCALE_ROOT) import -input=false $(TAILSCALE_VAR_ARGS) 'tailscale_acl.policy[0]' acl
 	$(MAKE) _state-tailscale-plan MANAGE_TAILNET=true ENABLE_ADGUARD_DNS="$(ENABLE_ADGUARD_DNS)" ADGUARD_READY="$(ADGUARD_READY)" MANAGE_SUBNET_ROUTER="$(MANAGE_SUBNET_ROUTER)" ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
 
 tailscale-import-dns:
@@ -196,7 +207,7 @@ _state-tailscale-import-dns: tailscale-init
 	test "$(ADGUARD_READY)" = true
 	$(MAKE) tailscale-acl-preflight MANAGE_TAILNET=true ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
 	$(TOOLBOX_RUN) sh ./scripts/check-tailscale-import-gates.sh "$(TAILSCALE_ROOT)" "$(MANAGE_TAILNET)" "$(ENABLE_ADGUARD_DNS)" "$(ADGUARD_READY)" "$(MANAGE_SUBNET_ROUTER)"
-	$(TOOLBOX_TAILSCALE_RUN) terraform -chdir=$(TAILSCALE_ROOT) import -input=false -var='manage_tailnet=true' -var='enable_adguard_dns=true' -var='adguard_ready=true' -var="acl_policy_file=$(TAILSCALE_ACL_POLICY_CONTAINER)" 'tailscale_dns_configuration.adguard[0]' dns_configuration
+	$(TOOLBOX_TAILSCALE_RUN) python3 scripts/operator-terraform.py tailscale -chdir=$(TAILSCALE_ROOT) import -input=false $(TAILSCALE_VAR_ARGS) 'tailscale_dns_configuration.adguard[0]' dns_configuration
 	$(MAKE) _state-tailscale-plan MANAGE_TAILNET=true ENABLE_ADGUARD_DNS=true ADGUARD_READY=true MANAGE_SUBNET_ROUTER="$(MANAGE_SUBNET_ROUTER)" ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
 
 tailscale-import-router:
@@ -208,13 +219,13 @@ _state-tailscale-import-router: tailscale-init
 	test -n "$(TAILSCALE_DEVICE_ID)"
 	$(MAKE) tailscale-acl-preflight MANAGE_TAILNET=true ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
 	$(TOOLBOX_RUN) sh ./scripts/check-tailscale-import-gates.sh "$(TAILSCALE_ROOT)" "$(MANAGE_TAILNET)" "$(ENABLE_ADGUARD_DNS)" "$(ADGUARD_READY)" "$(MANAGE_SUBNET_ROUTER)"
-	$(TOOLBOX_TAILSCALE_RUN) terraform -chdir=$(TAILSCALE_ROOT) import -input=false -var='manage_tailnet=true' -var='manage_subnet_router=true' -var="acl_policy_file=$(TAILSCALE_ACL_POLICY_CONTAINER)" 'tailscale_device_tags.subnet_router[0]' "$(TAILSCALE_DEVICE_ID)"
+	$(TOOLBOX_TAILSCALE_RUN) python3 scripts/operator-terraform.py tailscale -chdir=$(TAILSCALE_ROOT) import -input=false $(TAILSCALE_VAR_ARGS) 'tailscale_device_tags.subnet_router[0]' "$(TAILSCALE_DEVICE_ID)"
 	$(MAKE) _state-tailscale-plan MANAGE_TAILNET=true MANAGE_SUBNET_ROUTER=true ENABLE_ADGUARD_DNS="$(ENABLE_ADGUARD_DNS)" ADGUARD_READY="$(ADGUARD_READY)" ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
-	$(TOOLBOX_TAILSCALE_RUN) terraform -chdir=$(TAILSCALE_ROOT) import -input=false -var='manage_tailnet=true' -var='manage_subnet_router=true' -var="acl_policy_file=$(TAILSCALE_ACL_POLICY_CONTAINER)" 'tailscale_device_subnet_routes.subnet_router[0]' "$(TAILSCALE_DEVICE_ID)"
+	$(TOOLBOX_TAILSCALE_RUN) python3 scripts/operator-terraform.py tailscale -chdir=$(TAILSCALE_ROOT) import -input=false $(TAILSCALE_VAR_ARGS) 'tailscale_device_subnet_routes.subnet_router[0]' "$(TAILSCALE_DEVICE_ID)"
 	$(MAKE) _state-tailscale-plan MANAGE_TAILNET=true MANAGE_SUBNET_ROUTER=true ENABLE_ADGUARD_DNS="$(ENABLE_ADGUARD_DNS)" ADGUARD_READY="$(ADGUARD_READY)" ACL_POLICY_FILE="$(ACL_POLICY_FILE)"
 
 terraform-plan: terraform-validate state-sync
-	$(TOOLBOX_PROXMOX_RUN) terraform -chdir=$(TERRAFORM_ROOT) plan -input=false -out=$(TERRAFORM_PLAN_NAME) $(TERRAFORM_PLAN_ARGS)
+	$(TOOLBOX_PROXMOX_RUN) python3 scripts/operator-terraform.py proxmox -chdir=$(TERRAFORM_ROOT) plan -input=false -out=$(TERRAFORM_PLAN_NAME) $(TERRAFORM_PLAN_ARGS)
 	chmod 0600 "$(TERRAFORM_PLAN_FILE)"
 
 terraform-apply:
@@ -222,7 +233,7 @@ terraform-apply:
 
 _state-terraform-apply: terraform-validate
 	./scripts/check-saved-terraform-plan.sh "$(TERRAFORM_PLAN_FILE)"
-	$(TOOLBOX_PROXMOX_RUN) terraform -chdir=$(TERRAFORM_ROOT) apply -input=false "$(TERRAFORM_PLAN_NAME)"
+	$(TOOLBOX_PROXMOX_RUN) python3 scripts/operator-terraform.py proxmox -chdir=$(TERRAFORM_ROOT) apply -input=false "$(TERRAFORM_PLAN_NAME)"
 	rm -f "$(TERRAFORM_PLAN_FILE)"
 
 ansible-lint:
@@ -400,7 +411,7 @@ tailscale-acl-encrypt:
 		ln "$$tmp" "$$2"' sh "$(TAILSCALE_ACL_POLICY_CONTAINER)" "$(TAILSCALE_ACL_BACKUP_FILE)"
 
 tailscale-acl-decrypt:
-	test -n "$(AGE_IDENTITY_FILE)" && test -r "$(AGE_IDENTITY_FILE)" || { echo "AGE_IDENTITY_FILE must be readable" >&2; exit 1; }
+	test -n "$(AGE_IDENTITY_FILE)" && test -r "$(AGE_IDENTITY_FILE)" || { echo "age identity missing or unreadable: restore ~/.config/sops/age/keys.txt or set AGE_IDENTITY_FILE" >&2; exit 1; }
 	test -f "$(TAILSCALE_ACL_BACKUP_FILE)" && test ! -L "$(TAILSCALE_ACL_BACKUP_FILE)" || { echo "missing regular ACL backup" >&2; exit 1; }
 	TAILSCALE_REPO_ROOT="$(CURDIR)" ./scripts/validate-tailscale-acl-path.sh --allow-missing "$(ACL_POLICY_FILE)" >/dev/null
 	$(TOOLBOX_RUN) sh -eu -c '\
@@ -421,7 +432,7 @@ secrets-encrypt:
 	chmod 0600 files/infrastructure/secrets/runtime.sops.yaml
 
 secrets-decrypt-check:
-	test -n "$(AGE_IDENTITY_FILE)" && test -r "$(AGE_IDENTITY_FILE)" || { echo "AGE_IDENTITY_FILE must be readable" >&2; exit 1; }
+	test -n "$(AGE_IDENTITY_FILE)" && test -r "$(AGE_IDENTITY_FILE)" || { echo "age identity missing or unreadable: restore ~/.config/sops/age/keys.txt or set AGE_IDENTITY_FILE" >&2; exit 1; }
 	test -f files/infrastructure/secrets/runtime.sops.yaml || { echo "missing files/infrastructure/secrets/runtime.sops.yaml" >&2; exit 1; }
 	$(TOOLBOX_RUN) env SOPS_AGE_KEY_FILE=/run/secrets/age-identity sops decrypt files/infrastructure/secrets/runtime.sops.yaml >/dev/null
 
@@ -436,7 +447,7 @@ secrets-encrypt-agent:
 	chmod 0600 files/infrastructure/secrets/agent/runtime.sops.yaml
 
 secrets-decrypt-check-agent:
-	test -n "$(AGE_IDENTITY_FILE)" && test -r "$(AGE_IDENTITY_FILE)" || { echo "AGE_IDENTITY_FILE must be readable" >&2; exit 1; }
+	test -n "$(AGE_IDENTITY_FILE)" && test -r "$(AGE_IDENTITY_FILE)" || { echo "age identity missing or unreadable: restore ~/.config/sops/age/keys.txt or set AGE_IDENTITY_FILE" >&2; exit 1; }
 	test -f files/infrastructure/secrets/agent/runtime.sops.yaml || { echo "missing files/infrastructure/secrets/agent/runtime.sops.yaml" >&2; exit 1; }
 	$(TOOLBOX_RUN) env SOPS_AGE_KEY_FILE=/run/secrets/age-identity sops decrypt files/infrastructure/secrets/agent/runtime.sops.yaml >/dev/null
 
@@ -498,3 +509,17 @@ state-unlock:
 # (CI reuses its cached build) rather than requiring a new published digest.
 state-sync-lock-test: toolbox-build
 	$(TOOLBOX_RUN_BASE) $(TOOLBOX_BUILD_IMAGE) ./scripts/tests/state-sync-lock-fixture.sh
+
+.PHONY: operator-secrets-set operator-secrets-check operator-defaults-test
+operator-secrets-set:
+	@./scripts/operator-secrets-set.sh "$(PROVIDER)"
+
+operator-secrets-check:
+	$(TOOLBOX_RUN) python3 scripts/operator-terraform.py --check "$(PROVIDER)"
+
+operator-defaults-test: toolbox-build
+	$(TOOLBOX_RUN_BASE) $(TOOLBOX_BUILD_IMAGE) ./scripts/tests/operator-defaults-fixture.sh
+
+.PHONY: _operator-secrets-encrypt
+_operator-secrets-encrypt:
+	@$(subst docker run,docker run -i,$(TOOLBOX_RUN)) python3 scripts/operator-terraform.py --encrypt "$(PROVIDER)"

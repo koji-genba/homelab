@@ -4,28 +4,50 @@
 新しいtailnet deviceやgateway VMは作成せず、MagicDNSとAdGuardのglobal nameserverを含むtailnet DNS設定、
 grant/tag、subnet routeを記述する。
 
-`tailnet`のdefaultは`example.com`であり、実際のtailnet ID/nameをignore対象の`terraform.tfvars`などで
-指定する必要がある。gateway VMの管理は[別ルート](../tailscale-gateway/README.md)にある。
+providerの`tailnet`引数は省略する。`TAILSCALE_TAILNET`があれば使い、無ければproviderの`"-"`
+（認証情報が属するtailnet）を使う。旧`var.tailnet`は削除した。gateway VMは[別ルート](../tailscale-gateway/README.md)。
+認証情報は[operator bundle](../../secrets/README.md#operator認証情報adr-0017)へ保存する。
+明示環境変数 > bundle（無ければ従来のallowlist）の順で使い、値をMakeコマンド行へ展開しない。
 
-変更を伴うresourceはすべてdefaultで無効にする。policy resourceはtailnet全体を所有するため、apply前に
-明示的なimportが必要である。review済みのlive exportをignore対象の
-`files/infrastructure/terraform/tailscale/acl-policy.live.json`へ保存する。これはrepository内の通常fileで
-なければならず、symlinkにしてはならない。Make targetはこの境界を検証し、toolbox内の`/workspace`へ対応付ける。
+## 本番の既定値と根拠
+
+Makeの既存の`-var`経路に合わせ、gateはMakefileの`?=`に置く。明示Make変数・環境変数が優先する。
+TF_VAR_*やtfvarsでgateを上書きしてもMakeの`-var`が優先するため、gate変更はMake変数で指定する。
+hostname/tags/routesは従来どおりvariables.tfに置き、必要時はTerraformの明示入力で上書きする。
+
+| 入力 | 既定値 | 根拠と確認対象 |
+| --- | --- | --- |
+| `MANAGE_TAILNET` | `true` | このREADMEの既存ACL import・運用記録 |
+| `ENABLE_ADGUARD_DNS` / `ADGUARD_READY` | `true` / `true` | このREADMEのDNS移行記録、[tailnet移行](../../../../docs/operations/apps-vm-tailnet.md)、[現行network](../../../../docs/network/target-zones.md) |
+| `MANAGE_SUBNET_ROUTER` | `false` | [pre-phase5記録](../../../../docs/archive/next-session-pre-phase5.md)はfalse維持を明記、CODEBASE_MAPもrouter未importと記録。現在も未importかは記録からの推測、planで確認 |
+| `ADGUARD_NAMESERVER_IP` | `100.86.147.127` | 上記現行network・Apps VM tailnet手順 |
+| `subnet_router_hostname` / `subnet_router_tags` | `home-gateway` / `[]` | phase2a inventoryの実測（無タグ、user-owned） |
+| `advertised_routes` | `0.0.0.0/0`, `::/0`, `192.168.10.0/24` | [next-session記録](../../../../docs/archive/next-session.md)でVLAN 11撤去後に再登録・広告・承認。現行networkとも一致 |
+
+現在のstateや実機は読んでいない。管理gateの現在のstateとの一致、DNS readiness、device identityは
+7 root移行planで本人が確認する（未検証）。新しいtailnetへの復旧ではimport前にgateを必要に応じて明示的に無効化する。
+通常は次の指定だけでよい。
 
 ```sh
-make tailscale-import-acl MANAGE_TAILNET=true \
-  ACL_POLICY_FILE=files/infrastructure/terraform/tailscale/acl-policy.live.json
-make tailscale-plan MANAGE_TAILNET=true \
-  ACL_POLICY_FILE=files/infrastructure/terraform/tailscale/acl-policy.live.json
+make tailscale-plan
 ```
 
-上の例はDNS設定をimportする前の初回用である。`tailscale_dns_configuration`がstateにある現在は、
-ACLだけを変える場合も`ENABLE_ADGUARD_DNS=true ADGUARD_READY=true`を付ける（後述）。
+## ACLの正本と一時復号
 
-```sh
-make tailscale-plan MANAGE_TAILNET=true ENABLE_ADGUARD_DNS=true ADGUARD_READY=true \
-  ACL_POLICY_FILE=files/infrastructure/terraform/tailscale/acl-policy.live.json
-```
+`files/infrastructure/secrets/tailscale/acl-policy.sops.json`を正本とする。
+`ACL_POLICY_FILE`未指定のplan/importはtoolbox内の固定パス`tmp/tailscale-acl/policy.json`へ復号する。
+親directoryは0700、fileは0600、Git ignore対象で、既存のpath validatorを通す。
+applyは`terraform show -json <saved plan>`の`variables.acl_policy_file.value`をメモリ内で確認する。
+plan JSONの内容は表示しない。保存値が固定パスなら、apply前にも同じ場所へ正本を復号する。
+保存値が明示パスなら、その元のfileを検査して使い、自動復号や削除はしない。
+apply時の`ACL_POLICY_FILE`指定では保存変数を変更できないため、保存planの値を正とし、`-var`は追加しない。
+旧方式のランダムパスを含むplanは作り直す。この実機apply手順は未検証。
+
+固定directoryは排他的に作成し、既存なら他の実行中・残存fileとして停止する。
+自分が作成したfileとdirectoryだけを正常終了・エラー・TERM時に削除する。
+SIGKILLや電源断後に残った場合は、全実行が停止したことを確認して本人が安全に削除する。
+手元に`acl-policy.live.json`がある場合はbyte単位で照合し、不一致なら停止する。差分の内容は表示しない。
+本人が正しい版を判断して暗号文を更新するか、古いlive.jsonを退避する。明示`ACL_POLICY_FILE`は従来のpath検査を使う。
 
 `tailscale-plan`はreview対象planをignore対象、mode `0600`の
 `files/infrastructure/terraform/tailscale/terraform.tfplan`へ書き込む。保存planをreviewしてから
@@ -34,13 +56,15 @@ make tailscale-plan MANAGE_TAILNET=true ENABLE_ADGUARD_DNS=true ADGUARD_READY=tr
 値が含まれる場合があるため、state fileと同様に保護する。
 
 `terraform import`はremote resource addressをstateへ記録するだけで、live ACLをconfigurationへコピーしない。
-`manage_tailnet=true`を設定する前に、admin consoleから新しいexportを取得して`acl_policy_file`へ保存する。
-このfileがなければplanとimport targetは実行を拒否する。保存planをreviewした後、`tailscale-apply`は再度ACL pathを
-読まず、その指定も要求せずにapplyする。grant、tag owner、route auto-approverを含む完全なplanをlive exportと
+ACL正本はreview済みの完全なpolicyを保持する。consoleで緊急変更した場合は最新exportと照合して更新する。保存planをreviewした後、`tailscale-apply`は保存されたACL pathを確認し、
+既定パスなら正本を再復号してapplyする。grant、tag owner、route auto-approverを含む完全なplanをlive exportと
 照合する。`autoApprovers.routes`の各項目は既にadvertise済みの`advertised_routes` inventoryと一致しなければ
 ならず、Terraformが新しいrouteを作成・承認することはない。
 
 ## ACL全文の復旧用コピー（2026-10-25）
+
+2026-11-19追記: ADR-0017でこの暗号文を正本へ格上げした。以下の復旧・更新用targetは継続する。
+通常planではlive.jsonを用意する必要はない。編集手順は実機未検証。
 
 review済みACL全文を`files/infrastructure/secrets/tailscale/acl-policy.sops.json`へSOPSのbinary形式で
 暗号化してrepoに保存する。
@@ -48,7 +72,11 @@ review済みACL全文を`files/infrastructure/secrets/tailscale/acl-policy.sops.
 全文をblobとして暗号化するbinary形式を使う。既存の`AGE_RECIPIENT`と`AGE_IDENTITY_FILE`を使い、
 creation_rulesは追加しない。鍵の保管は[secret手順](../../secrets/README.md)に従う。
 
-### 復旧用コピーの更新
+### ACL正本の編集・更新
+
+`make tailscale-acl-decrypt ACL_POLICY_FILE=files/infrastructure/terraform/tailscale/acl-policy.live.json`で
+復号し、mode 0600のlive.jsonをエディタで編集する。編集後は以下の暗号化手順で正本へ戻す。
+平文やACL全文をGit・logへ貼らず、更新後のlive.jsonは削除またはrepo外へ安全に退避する。
 
 ACLを変えるたびに更新する。consoleでの緊急変更後も、最新export全文をreviewし、ignore対象の
 `acl-policy.live.json`へmode `0600`で保存する。厳密なJSONであることを確認し、内容をlogやPRへ貼らない。
@@ -110,9 +138,9 @@ importは自動実行せず、live valueをconfigurationへコピーもしない
 ### import helperのgate制約
 
 [Makefile](../../../../Makefile)の`tailscale-import-core`は`tailscale-import-acl`を呼ぶ。
-各helperはimport対象のgateを確認し、内部の`tailscale-plan`へ他のgateも呼出時の値のまま明示的に渡す。
+各helperは既定値を含むimport対象のgateを確認し、内部の`tailscale-plan`へ他のgateも呼出時の値のまま明示的に渡す。
 `tailscale-import-core`からACL helperへの呼出しも同様である。DNSのreadinessやrouterのinventory確認を
-省略してgateを自動で有効にすることはない。
+省略すると現在の本番gateの既定値が使われる。新環境ではreadiness/inventoryを再確認する。
 
 このrootはbackendブロックを持たず、`tailscale-init`は`init -backend=false`を使う。
 defaultのlocal backend・default workspaceだけを前提とし、`terraform.tfstate.d`が存在すれば
@@ -135,7 +163,7 @@ readinessとinventoryを確認してから、既に管理している全対象�
 import済みdeviceのrouteを有効化するだけである。
 `subnet_router_hostname`はtailnet hostnameを指定する変数で、PVE VM名 / guest hostnameの`tailscale-gateway`とは区別する。
 
-`enable_adguard_dns`は別のdefault false gateである。`manage_tailnet=true`かつ`adguard_ready=true`でなければ
+Terraform変数単体の`enable_adguard_dns`はdefault falseだが、通常Makeは本番gateのtrueを渡す。`manage_tailnet=true`かつ`adguard_ready=true`でなければ
 有効にできない。有効にするとMagicDNSとtailnet global DNS serverを管理し、後者をApps VMのtailnet IP
 `100.86.147.127`へ向ける。`final_apps_ip`はLAN側の固定値`192.168.10.101`を検証し、rollback時に
 `adguard_nameserver_ip`で許容するLAN addressとして残す。到達性を自動確認するものではなく、readinessは
@@ -164,8 +192,7 @@ stateから除外され、`tailscale_dns_configuration.adguard[0]`では最大�
 `will be created`と表示される場合もimportが抜けているので停止する。createはlive DNS設定全体を上書きする。
 確認後に`make tailscale-apply`を実行する。
 
-以後、`MANAGE_TAILNET=true`のplanには、ACLだけの変更であっても必ず`ENABLE_ADGUARD_DNS=true ADGUARD_READY=true`を
-指定する。指定しない場合はresourceのcountが0となり、`prevent_destroy`によりplanは意図的に失敗する
+現在のMakeではこれらのgateを既定で渡す。明示的にfalseへ変更する場合は慎重にreviewする。指定しない場合はresourceのcountが0となり、`prevent_destroy`によりplanは意図的に失敗する
 （`Instance cannot be destroyed`）。このerrorはflagの付け忘れを示すだけで、tailnetは変更されていない。
 即時rollbackはadmin consoleの`Use with exit node`を無効にすることである。その変更はTerraformにdriftとして
 表示されるため、後で整合させる。codeをrollbackする場合は、revertより先に
@@ -195,8 +222,8 @@ rollback時は`ADGUARD_NAMESERVER_IP=192.168.10.101`を上記`make tailscale-pla
 Makeが`-var="adguard_nameserver_ip=192.168.10.101"`を渡すので、addressだけ戻るplanを確認して
 `make tailscale-apply`する。admin consoleで先に戻した場合も、後でTerraformと整合させる。
 
-OAuth/API credentialはproviderが環境変数から読み取るため、KeePassXCから管理端末へ一時的に注入する。
-Tailscale Terraform toolbox runnerにだけ渡し、runtime SOPS bundle、Terraform variable、file、Apps VMには保存しない。
+OAuth/API credentialはoperator SOPS bundleまたは明示環境変数から対応するTerraformへだけ渡す。
+runtime bundle、Terraform variable、Apps VMへ保存しない。KeePassXCの控えは復旧用として残す。
 `make tailscale-init`と`make tailscale-plan`はremote設定を適用しないが、localの初期化file・保存planを作成する。
 `make tailscale-apply`は明示的な手動操作で、
 apply成功後は通常のstate-backup targetで暗号化stateを記録する。CI jobからは実行しない。

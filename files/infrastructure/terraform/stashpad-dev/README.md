@@ -1,5 +1,22 @@
 # stashPadDev VM
 
+## operator入力の既定値（issue #228）
+
+[ADR-0017](../../../../docs/adr/0017-operator-defaults.md)により、通常はtfvarsの配置も環境変数の手入力も不要。
+`make operator-secrets-set PROVIDER=proxmox`で共通API tokenをoperator bundleへ保存し、
+`make operator-secrets-check PROVIDER=proxmox`でキー名だけを確認する（repo rootで実行）。
+この端末移行・実planの手順は未検証。
+
+6 root共通で`ssh_public_key`がnull/未指定なら`../bootstrap-ssh-key.pub`を使う。
+明示した`TF_VAR_ssh_public_key`は既定値より優先する。tfvarsや`-var`が残ればTerraform本来の優先順位
+（`-var` > tfvars > `TF_VAR_*`）に従うため、移行では先に退避する。元の鍵にコメントがある場合、
+鍵本体が同じでもcloud-init snippetや`user_account.keys`に差分が出る。削除・再作成はせずplanで確認する。
+`terraform.tfvars.example`は任意の非秘密の上書き用。provider認証は明示環境変数 > operator bundle、
+bundleが無い場合は従来のallowlist。認証情報をtfvarsやVMへ保存しない。
+ssh-agentは利用者が従来どおり起動・鍵登録する。
+移行は[作業端末手順](../../../../docs/operations/workstation-setup.md)に従う。
+
+
 TerraformでProxmox VE上にstashPad開発用VMを構築します。
 本番Apps VMの再構築対象には含めず、このTerraformルートで別に管理します。
 
@@ -178,13 +195,9 @@ git -C ~/stashPad worktree list
 
 このrootでは全6 Proxmox root共通のtoken `terraform@pve!terraform`を使います。
 2026-10-25に共通tokenへ移行済み（[記録](../../../../docs/operations/apps-vm-recovery.md#実機確認認証移行の実施記録2026-10-25)）。
-実行前にKeePassXCから`TF_VAR_proxmox_api_token`を管理端末へ一時注入します。
-Makeはこの環境変数をProxmox Terraform runnerへ名前で渡すため、値をMakeの出力へ展開しません。
-tokenはrepository、tfvars、runtime SOPS bundle、VMへ保存しません。作業後は
-`unset TF_VAR_proxmox_api_token`で管理端末の環境から削除します。
+実行時の認証情報は上記operator bundleを使います。明示環境変数も利用できます。
 
-`terraform.tfvars.example`を同じdirectoryの`terraform.tfvars`へコピーし、`ssh_public_key`など
-非秘密の値だけを設定します。既存ファイルは上書きしません。tfvarsはGit ignore対象です。
+tfvarsは通常不要です。exampleは任意の非秘密の上書き専用で、Git ignore対象です。
 Proxmoxのuser / role / token / ACLの期待状態と既存環境からの移行は
 [Proxmox側準備](../../../../docs/operations/apps-vm-recovery.md#terraform実行前のproxmox側準備)を正とします。
 
@@ -193,13 +206,10 @@ API認証とは別に、cloud-init snippetのアップロードにpve1の`root` 
 信頼できる経路でpve1のhost keyを照合して`known_hosts`へ登録します。Makeはagent socketと
 `known_hosts`をtoolboxへmountします。`ssh_public_key`はguestへ配置する公開鍵で、providerのSSH認証とは別です。
 
-repository rootから設定を用意します。他rootのtfvarsを`-var-file`で共有せず、このrootの入力を使います。
+repository rootから実行します。通常tfvarsは不要です。
 以下のうち plan までは2026-10-25に実機で確認済み。apply は未検証です。
 
 ```bash
-cp files/infrastructure/terraform/stashpad-dev/terraform.tfvars.example files/infrastructure/terraform/stashpad-dev/terraform.tfvars
-chmod 0600 files/infrastructure/terraform/stashpad-dev/terraform.tfvars
-# このrootのterraform.tfvarsを編集してから実行
 make terraform-plan TERRAFORM_ROOT=files/infrastructure/terraform/stashpad-dev
 make terraform-apply TERRAFORM_ROOT=files/infrastructure/terraform/stashpad-dev
 ```

@@ -1,3 +1,7 @@
+locals {
+  ssh_public_key = coalesce(var.ssh_public_key, trimspace(file("${path.module}/../bootstrap-ssh-key.pub")))
+}
+
 # The Runner VM imports its own copy of the pinned Debian cloud image. The
 # image object is intentionally owned by this root only: agent-vm declares a
 # different file_name, so two Terraform states never manage the same object.
@@ -21,7 +25,7 @@ resource "proxmox_virtual_environment_file" "cloud_config" {
     file_name = "runner-cloud-init.yaml"
     data = templatefile("${path.module}/cloud-init.yaml.tftpl", {
       deploy_user    = var.deploy_user
-      ssh_public_key = var.ssh_public_key
+      ssh_public_key = local.ssh_public_key
       vm_name        = var.vm_name
     })
   }

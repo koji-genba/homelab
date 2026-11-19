@@ -120,3 +120,5 @@ jobs:
         run: make tailscale-acl-path-test
       - name: Tailscale import gates fixture
         run: make tailscale-import-gates-test
+      - name: Operator defaults and credentials fixture
+        run: make operator-defaults-test

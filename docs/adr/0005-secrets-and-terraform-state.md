@@ -7,6 +7,9 @@
 > [ADR-0016](0016-terraform-state-sync-lock.md)で部分的にsuperseded。
 > 以下は採用時点の記録を保持する。SOPS/age・鍵の保管境界は継続する。
 
+> 2026-11-19: provider認証情報の扱いは[ADR-0017](0017-operator-defaults.md)で置換。
+> provider別operator SOPS bundleを採用し、KeePassXCは復旧用の控えとして継続する。
+
 ## 背景
 
 Gitを唯一の信頼できる情報源（source of truth）にしながら、credentialを平文で保存したくない。単一管理者のhomelabに

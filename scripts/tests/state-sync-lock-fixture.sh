@@ -214,6 +214,7 @@ set -eu
 root=${1#-chdir=}
 case $2 in
   init|validate) ;;
+  show) printf '%s\n' '{"variables":{"acl_policy_file":{"value":""}}}' ;;
   apply|import)
     test -n "$(git ls-remote origin refs/heads/state-lock)"
     python3 - "$root/terraform.tfstate" <<'PYTF'
@@ -236,7 +237,7 @@ chmod +x "$fixture/bin/terraform"
 PATH="$fixture/bin:$PATH"
 export PATH
 integration_make() {
-  make --no-print-directory -C "$repo" "$@" TOOLBOX_RUN= TOOLBOX_PROXMOX_RUN= TOOLBOX_TAILSCALE_RUN= >"$fixture/make.log" 2>&1 || {
+  make --no-print-directory -C "$repo" "$@" TOOLBOX_RUN= TOOLBOX_PROXMOX_RUN= TOOLBOX_TAILSCALE_RUN= TF_VAR_proxmox_api_token=fixture TAILSCALE_API_KEY=fixture >"$fixture/make.log" 2>&1 || {
     cat "$fixture/make.log" >&2
     return 1
   }

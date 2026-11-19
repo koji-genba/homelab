@@ -118,3 +118,7 @@ files/infrastructure/terraform/tailscale/acl-policy.live.json
 
 # pve1 NUT plaintext input
 files/infrastructure/secrets/pve1/runtime.yaml
+
+# Operator plaintext inputs are never a committable form.
+files/infrastructure/secrets/operator/*.yaml
+!files/infrastructure/secrets/operator/*.sops.yaml
