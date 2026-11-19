@@ -2,6 +2,8 @@
 
 [ADR-0016](../adr/0016-terraform-state-sync-lock.md)に従う単一利用者向け手順。
 一時bare repoでのfixture以外、新端末・GitHub ruleset・実planでの通し手順は**未検証**。
+2026-11-20、macOS新端末で`check-state`・`state-lock-status`・7 rootの実plan（全No changes）までを確認した。
+apply・backup・lock解除の実機操作は引き続き未検証。
 
 ## 最初の移行
 
@@ -17,7 +19,7 @@ python3 scripts/github-agent-repo.py protect-state koji-genba/homelab --dry-run
 ```
 
 本人による反映は同commandの`--dry-run`を外す（GitHubへの書込み、実機未検証）。確認は
-`python3 scripts/github-agent-repo.py check-state koji-genba/homelab`（読取りのみ、実機未検証）。
+`python3 scripts/github-agent-repo.py check-state koji-genba/homelab`（読取りのみ。2026-11-20に`matches: true`を確認）。
 対象は個人repoで、adminのみbypass。main用の`--allow-deploy-key-bypass`はstateには付けない。
 App・staging deploy key・Actionsはstate-backup/state-lockのbypassへ入れない。
 
@@ -26,7 +28,7 @@ App・staging deploy key・Actionsはstate-backup/state-lockのbypassへ入れ�
 Linux端末（WindowsならLinux環境を用意。WSL2での通し操作は未検証）を基本とする。
 Git、GNU make、Docker Engine + Compose v2、OpenSSH（ssh-agent含む）、Bash、GNU coreutils/findutils、
 Python 3 + PyYAML + Jinja2、ghを用意する。toolboxにTerraform・Ansible・SOPS・age・shellcheckが入っている。
-公開toolboxは`linux/amd64`。ARM端末でのemulationは未検証。任意でTailscale（管理経路用）、
+公開toolboxは`linux/amd64`。ARM端末ではmacOS（Rosetta）でのemulationのみ確認済み。任意でTailscale（管理経路用）、
 KeePassXC（復旧情報用）を導入する。Dockerの実行権限も確認する。
 
 macOS（Apple Silicon + Docker Desktop 4.43）では2026-11-20に次を確認した。
@@ -34,7 +36,10 @@ toolboxはRosetta経由のamd64 emulationで起動し、`terraform-validate`・`
 Docker Desktopはagent socketをVM内で`root:root 0660`として中継するため、Makefileは
 Darwinでだけ`--group-add 0`を付けて非root toolboxから到達させる。Settings → Resources → Network で
 Host networkingを有効にし、ghcr.ioに古い認証情報が残っていれば`docker logout ghcr.io`する
-（公開imageでも`denied`になる）。host側のPythonはvenvで用意する。planと実機Ansibleの通し操作は未検証。
+（公開imageでも`denied`になる）。host側のPythonはvenvで用意する。7 rootのplanと、
+toolbox経由の`ansible -m ping`（inventory全6ホスト）も通った。`ansible-apply`系の実行は未検証。
+Homebrewのtailscale formulaとTailscale.appを併用するとCLIとdaemonのversionがずれて警告が出るため、
+CLIはapp同梱のものを使う。
 
 持ち出すものは次のとおり。秘密をterminal出力、chat、docs、Gitへ貼らない。
 
@@ -84,9 +89,9 @@ make tailscale-plan
 repoの公開鍵はコメント付きで保存し、apps-vm・agent-vm・runner-vm・tailscale-gatewayは行全体、
 elastiflow・stashpad-devは先頭2フィールドを既定値に使う。明示のTF_VARは加工せず優先する。
 本人の実機planで、前者4 rootはコメント付き、後者2 rootはコメント無しでNo changesとなることを確認済み。
-このrepo既定値への切替後の実機planは未検証。
+このrepo既定値への切替後、tfvarsもoperator環境変数も無い新端末で2026-11-20に実機planを確認した。
 Tailscaleの管理gateは記録から採用した既定値なので、現在のstateとの一致もplanで確認する。
-本人による確認が終わるまでapplyしない。この7 rootのNo changes確認は未検証。
+本人による確認が終わるまでapplyしない。この7 rootのNo changesは2026-11-20に新端末で確認済み。
 
 ## 新端末で最初に行うこと
 
@@ -103,7 +108,7 @@ makeにはage/recipient/provider/gate/ACLの指定を付けない。これらの
 
 最初のplanはorigin/state-backupをfetchし、toolbox内で復号して各rootへstateを同期する。
 **planにも`AGE_IDENTITY_FILE`が必要**。recipientは書込み後のbackup/preflightにも必要。
-新端末での実planは未検証。planはprovider APIを読み、local stateとsaved planを配置する操作なので、
+新端末での実plan（origin/state-backupからの7 root同期を含む）は2026-11-20に確認済み。planはprovider APIを読み、local stateとsaved planを配置する操作なので、
 単なる静的検証とは区別する。applyは0600のsaved planを必要とし、その前にlock取得と再同期を行う。
 plan後に正本が進んでいた場合はsaved planを作り直す。
 
@@ -134,7 +139,7 @@ make state-lock-status
 ```
 
 `state-lock-status`はremoteを読むだけ（Gitのobject/FETCH_HEADはlocalに取得する）で、公開lock情報だけを表示する。
-実GitHubでの確認は未検証。state、tfvars、鍵の中身を`cat`したり、stateブランチの暗号文を出力する必要はない。
+実GitHubでの確認は2026-11-20に済み（`unlocked`）。state、tfvars、鍵の中身を`cat`したり、stateブランチの暗号文を出力する必要はない。
 
 ## lockが残った場合
 
