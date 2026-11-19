@@ -70,6 +70,9 @@ TOOLBOX_BUILD_IMAGE ?= $(TOOLBOX_IMAGE_REPO):$(TOOLBOX_IMAGE_TAG)
 TOOLBOX_USERNAME ?= homelab-toolbox
 TOOLBOX_USER := $(shell id -u):$(shell id -g)
 TOOLBOX_SSH_MOUNT := $(if $(SSH_AUTH_SOCK),-v "$(SSH_AUTH_SOCK):/run/ssh-agent" -e SSH_AUTH_SOCK=/run/ssh-agent,)
+# Docker Desktop for Mac relays the agent socket as root:root 0660 inside its VM,
+# so the non-root toolbox user needs supplementary group 0 to reach it.
+TOOLBOX_SSH_GROUP := $(if $(and $(SSH_AUTH_SOCK),$(filter Darwin,$(shell uname -s))),--group-add 0,)
 TOOLBOX_AGE_MOUNT := $(if $(wildcard $(AGE_IDENTITY_FILE)),-v "$(AGE_IDENTITY_FILE):/run/secrets/age-identity:ro" -e AGE_IDENTITY_FILE=/run/secrets/age-identity -e SOPS_AGE_KEY_FILE=/run/secrets/age-identity,)
 TOOLBOX_KNOWN_HOSTS_MOUNT := $(if $(wildcard $(HOME)/.ssh/known_hosts),-v "$(HOME)/.ssh/known_hosts:/etc/ssh/ssh_known_hosts:ro",)
 TOOLBOX_RECIPIENT_ENV := $(if $(AGE_RECIPIENT),-e AGE_RECIPIENT,)
@@ -92,7 +95,7 @@ TOOLBOX_TAILSCALE_ENV := \
 # identity is mounted separately and read-only when its default/explicit path exists; it is never copied into the repository or the Apps VM.
 TOOLBOX_RUN_BASE = docker run --rm --network host --user $(TOOLBOX_USER) \
 	-v "$(CURDIR):/workspace" -w /workspace \
-	$(TOOLBOX_SSH_MOUNT) $(TOOLBOX_AGE_MOUNT) $(TOOLBOX_KNOWN_HOSTS_MOUNT) \
+	$(TOOLBOX_SSH_MOUNT) $(TOOLBOX_SSH_GROUP) $(TOOLBOX_AGE_MOUNT) $(TOOLBOX_KNOWN_HOSTS_MOUNT) \
 	$(TOOLBOX_RECIPIENT_ENV) -e STATE_SYNC \
 	-e HOME=/tmp/homelab-toolbox -e USER=$(TOOLBOX_USERNAME) -e LOGNAME=$(TOOLBOX_USERNAME)
 TOOLBOX_RUN = $(TOOLBOX_RUN_BASE) $(TOOLBOX_IMAGE)
