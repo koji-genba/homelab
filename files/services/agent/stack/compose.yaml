@@ -159,7 +159,7 @@ services:
     # Built by .github/workflows/tei-reranker-onnx-image.yml (pinned FP32 ONNX
     # with Candle-compatible tanh GELU on TEI cpu-1.9.4 ORT). Pinned to the
     # digest published by the first workflow run (tag cpu-1.9.4, 2026-10-18).
-    image: ghcr.io/koji-genba/homelab-tei-reranker-onnx@sha256:ccc54b553f32e619e278544d70961c0dc8ddfac67beffdf6bf40c3e625240a79
+    image: ghcr.io/koji-genba/homelab-tei-reranker-onnx@sha256:16c19a3819abd2db50b9113af52cc612d5acbc804557888ce48f668a4e519edf
     restart: unless-stopped
     # ORT uses num_cpus 1.17 (cgroup v1/v2 quota aware) for intra-op threads:
     # 6 CPU quota -> 6 threads; OMP/MKL/Rayon envs alone do not set ORT threads.
