@@ -857,6 +857,8 @@ secret bundleの復号確認は別枠で`make secrets-decrypt-check-agent`（ide
 | 2026-10-18 JST | 運用者 | Agent VMの`/srv/agent/hermes/.ssh/known_hosts`を一度限りの手動整理 | 5行（banner comment 2行、同じRunner鍵3行、うち1行はbannerが鍵に連結した不正形式）を正しい鍵1行へ整理。鍵は`qm guest exec`でout-of-band取得したものと一致、owner 10000:10000・0600 |
 | 2026-10-18 JST | 運用者 | PR #108反映後のmainから5回目`make ansible-apply-agent` | agent-vm changed=1。bannerを除いたCDP known_hostsのcopyを一度限りで反映 |
 | 2026-10-18 JST | 運用者 | mainから6回目`make ansible-apply-agent` | agent-vm changed=0、runner-vm changed=0。PGDATA 999:999 0700、export root 0700を維持。健康確認all checks passed、再適用の冪等性を確認 |
+| 2026-11-22 15:45 JST | 運用者 | 旧版（Hindsight 1.1.0-slim、reranker `ccc54b55…`）で`homelab-agent-backup`を手動実行し、更新前セット`20261122T064500Z`を作成 | `SHA256SUMS`全件OK、METADATAに旧版imageを記録。日次の世代管理（直近14セット）の対象であり、旧版へ戻すときはこのセットを使う |
+| 2026-11-22 15:48 JST | 運用者 | main `f6405a7`から`make ansible-apply-agent`（#239 Hindsight 1.2.3-slim、#240 reranker `16c19a38…`） | agent-vm changed=4（Compose定義、Hermes `config.yaml`、stack再起動、Hermes/CDP tunnel再作成）、runner-vm changed=0、failed=0。Hindsightのalembic migrationが`completed successfully`。全container healthy、健康確認all checks passed、bank `personal`のstatsとrecall（8件）を確認。`config.yaml`の差分はHermesがruntimeで追記した`telemetry.shared_metrics.offer_version`の削除のみ。Hindsight経由のLLM処理（retain/reflect）は未確認 |
 
 ## ファイルの受け渡し（issue #194、2026-11-05反映済み）
 
