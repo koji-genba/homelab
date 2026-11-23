@@ -232,6 +232,8 @@ assert config["_config_version"] == 52
 assert "backend" not in config["browser"]
 assert config["browser"]["cdp_url"] == "http://127.0.0.1:9222"
 assert config["sessions"]["auto_prune"] is False
+assert config["memory"]["memory_char_limit"] == 5000
+assert config["memory"]["user_char_limit"] == 5000
 assert config["onboarding"]["run"] is False
 assert config["security"]["allow_lazy_installs"] is False
 assert config["webapp"] == dict(enabled=True, host="0.0.0.0", port=9120,

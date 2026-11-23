@@ -12,11 +12,11 @@
 
 ## 用途と構成
 
-個人用の常駐エージェントをDiscordを主窓口として動かす。長期記憶はHindsightへ保存し、コマンド実行と
+個人用の常駐エージェントを[Hermes Webapp](../adr/0013-hermes-webapp-caddy.md)を主窓口として使う。Discordも利用できる。長期記憶はHindsightへ保存し、コマンド実行と
 ブラウザは別VMへ分離する。homelabの管理操作を行うためのものではなく、管理credentialも持たない。
 
 ```text
-Discord
+Hermes Webapp (Apps VM の Caddy 経由) / Discord
   │
   ▼
 Agent VM 192.168.10.104 (VMID 104, VLAN 10, tailnet外)
@@ -707,6 +707,8 @@ Runner の疎通失敗を直接示すものではない。運用者の確認で�
   別ゲートによりfalseでも保留され、`/memory pending`から確認する。
   この承認ゲートはHindsightのretain/自動retainを止めない。Hindsight側はcustom抽出とSOULの方針で守り、
   誤記憶があれば元発話と照合してbank修復・再構築を判断する。
+- 2026-11-23のユーザー決定で、使用量が約95%に達していた組み込み記憶の上限を各5,000文字に引き上げる。
+  `MEMORY.md`は`memory.memory_char_limit`（従来2,200）、`USER.md`は`memory.user_char_limit`（従来1,375）で設定する。
 - 2026-10-25: コマンド承認を`approvals.mode: smart`へ変更し、ローカルGLM guard（thinking off）で一次判定する。
   manualでは無害な`python -c`・heredoc・`bash -lc`や全`execute_code`も承認対象となり、
   2026-10-19〜2026-10-25にDiscord承認ボタンが33回押された。thinking offは判定が約0.5秒と速く、運用者の出力上限なしの直接リプレイでは

@@ -183,6 +183,11 @@ agent_stack_hindsight_image: ghcr.io/vectorize-io/hindsight@sha256:fbc37d194bce0
 agent_stack_hermes_image: docker.io/nousresearch/hermes-agent@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7
 agent_stack_hindsight_integration_revision: d952b6e655fccab4581ee0722b51c5f103873d12
 
+# --- Built-in memory --------------------------------------------------------
+# 2026-11-23 user decision: both files were about 95% full.
+agent_stack_memory_char_limit: 5000
+agent_stack_user_char_limit: 5000
+
 # --- Hindsight bank policy ---------------------------------------------------
 # One fixed bank shared by every Discord channel. reflect_mission steers the
 # synthesis, retain_mission steers extraction, disposition biases judgement.
