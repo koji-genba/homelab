@@ -94,6 +94,9 @@ WS16の8同時負荷ではqueryの待ち時間がclient既定timeoutの30秒を�
 1HTTPで32入力あり、2HTTPでもCandleの実行batch 4を供給できる。Cだけ増やして長い待ち行列を作らない。
 rerankerは全recall共通の同時数1、client batch 32、候補LOW 8 / MID 20 / HIGH 30を維持する。
 workers・replica・batch・同時数を増やす際はpermit数も再計算する。Cは待機入力数を増やし得るが、backendの実行batch上限とtoken上限は変えない。
+worker IDは`HINDSIGHT_API_WORKER_ID: hindsight`で固定する。既定のcontainer hostnameは再作成ごとに変わり、
+再作成時に`processing`だった非同期タスクが起動時の回収（同じIDのものだけ）から漏れて、そのbankの後続処理を止める。
+replicaを増やす場合はreplicaごとに別の固定IDにする。
 固定Hindsight imageのTEI clientは429/5xxを最大3回retry（計4試行）し、使い切ると例外になる。
 query embedding失敗もrerank失敗もrecallはエラーになり、429時にrerankを省略して成功を返す設定ではない。
 負荷上限に合わせた設定で429自体を避ける。既知panicへの対策を含む版だが、キュー送信の`expect`は残るため全負荷での無障害を保証しない。
