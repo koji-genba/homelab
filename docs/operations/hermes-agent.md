@@ -860,6 +860,8 @@ secret bundleの復号確認は別枠で`make secrets-decrypt-check-agent`（ide
 | 2026-10-18 JST | 運用者 | mainから6回目`make ansible-apply-agent` | agent-vm changed=0、runner-vm changed=0。PGDATA 999:999 0700、export root 0700を維持。健康確認all checks passed、再適用の冪等性を確認 |
 | 2026-11-22 15:45 JST | 運用者 | 旧版（Hindsight 1.1.0-slim、reranker `ccc54b55…`）で`homelab-agent-backup`を手動実行し、更新前セット`20261122T064500Z`を作成 | `SHA256SUMS`全件OK、METADATAに旧版imageを記録。日次の世代管理（直近14セット）の対象であり、旧版へ戻すときはこのセットを使う |
 | 2026-11-22 15:48 JST | 運用者 | main `f6405a7`から`make ansible-apply-agent`（#239 Hindsight 1.2.3-slim、#240 reranker `16c19a38…`） | agent-vm changed=4（Compose定義、Hermes `config.yaml`、stack再起動、Hermes/CDP tunnel再作成）、runner-vm changed=0、failed=0。Hindsightのalembic migrationが`completed successfully`。全container healthy、健康確認all checks passed、bank `personal`のstatsとrecall（8件）を確認。`config.yaml`の差分はHermesがruntimeで追記した`telemetry.shared_metrics.offer_version`の削除のみ。Hindsight経由のLLM処理（retain/reflect）は未確認 |
+| 2026-11-23 JST | 運用者 | main `0184c79`から`make ansible-apply-agent`（#242 shared metrics `offer_version: 2`） | agent-vm changed=2（Hermes `config.yaml`、Hermes/CDP tunnel再作成）、runner-vm changed=0、failed=0。実機の`telemetry.shared_metrics`に`offer_version: 2`を確認。全container稼働、健康確認all checks passed |
+| 2026-11-23 JST | 運用者 | 同じmainから再度`make ansible-apply-agent` | agent-vm changed=0、runner-vm changed=0。`config.yaml`を含め再適用の冪等性を確認 |
 
 ## ファイルの受け渡し（issue #194、2026-11-05反映済み）
 
