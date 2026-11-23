@@ -22,8 +22,12 @@ helper = runpy.run_path(str(worker))
 
 
 def convert(source, data, *options):
-    input_file, output_file, report_file = (work / name for name in ("export.json", "sessions.jsonl", "report.json"))
-    input_file.write_text(json.dumps(data), encoding="utf-8")
+    output_file, report_file = work / "sessions.jsonl", work / "report.json"
+    if isinstance(data, Path):
+        input_file = data
+    else:
+        input_file = work / "export.json"
+        input_file.write_text(json.dumps(data), encoding="utf-8")
     result = subprocess.run([
         sys.executable, "-I", str(converter),
         "--source", source, "--input", str(input_file),
@@ -50,7 +54,8 @@ def check_worker(sessions, report):
         "--bank", "fixture", "--dry-run", "--state-dir", str(work / "state"),
     ], text=True, capture_output=True)
     assert result.returncode == 0, result.stderr
-    assert f"retained={len(sessions)} turns={report['turns']}" in result.stderr, result.stderr
+    messages = sum(len(session["messages"]) for session in sessions)
+    assert f"retained={len(sessions)} turns={report['turns']} messages={messages}" in result.stderr, result.stderr
     assert "missing_timestamp_turns=0 dropped_user_turns=0" in result.stderr
     assert not (work / "state/progress.json").exists()
     user_chars = assistant_chars = max_size = 0
@@ -59,7 +64,7 @@ def check_worker(sessions, report):
         turns, dropped, missing = helper["build_turns"](session)
         assert not dropped and not missing and turns
         users = sum(len(user) for user, _, _ in turns)
-        assistants = sum(len(assistant) for _, assistant, _ in turns)
+        assistants = sum(len(assistant or "") for _, assistant, _ in turns)
         user_chars += users
         assistant_chars += assistants
         max_size = max(max_size, users + assistants)
@@ -159,6 +164,52 @@ assert [session["id"] for session in sessions] == [
 ]
 for session in sessions:
     assert [message["content"] for message in session["messages"]] == ["編集後の質問", "編集後の回答"]
+check_worker(sessions, report)
+
+project_export = work / "claude-export"
+projects_dir = project_export / "projects"
+projects_dir.mkdir(parents=True)
+project = {
+    "uuid": "fixture-project",
+    "name": "架空のプロジェクト",
+    "created_at": iso_time,
+    "description": "概要の本文",
+    "prompt_template": "文体は簡潔に",
+    "docs": [
+        {"uuid": "empty-doc", "filename": "空.txt", "content": "  "},
+        {"uuid": "real-doc", "filename": "猫.txt", "content": "猫が好きです\napi_key=fixture-project-key",
+         "created_at": "2025-07-01T01:02:03Z"},
+        {"uuid": "undated-doc", "filename": "予備.txt", "content": "会話開始時刻へフォールバック"},
+    ],
+}
+(projects_dir / "project.json").write_text(json.dumps(project), encoding="utf-8")
+(projects_dir / "empty.json").write_text(json.dumps(
+    dict(project, uuid="empty-project", description="", prompt_template="", docs=[project["docs"][0]]),
+), encoding="utf-8")
+sessions, report = convert("claude-projects", project_export)
+assert sessions[0]["id"] == "import-claude-project-fixture-project"
+assert report["conversations_skipped"] == {"no_usable_turns": 1}
+assert report["turns"] == 4 and report["assistant_chars"] == 0
+assert report["redactions"] == {"assignment": 1}
+assert "fixture-project-key" not in json.dumps(sessions)
+item, = check_worker(sessions, report)
+assert item["context"] == "project materials provided by the User in Claude.ai Projects"
+assert item["metadata"]["message_count"] == "4"
+project_messages = json.loads(item["content"])
+assert all(message["role"] == "user" for message in project_messages)
+assert [message["content"] for message in project_messages] == [
+    "User: [Claude Project「架空のプロジェクト」の概要]\n概要の本文",
+    "User: [Claude Project「架空のプロジェクト」のプロンプトテンプレート]\n文体は簡潔に",
+    "User: [Claude Project「架空のプロジェクト」の資料: 猫.txt]\n猫が好きです\napi_key=[REDACTED:assignment]",
+    "User: [Claude Project「架空のプロジェクト」の資料: 予備.txt]\n会話開始時刻へフォールバック",
+]
+assert [message["timestamp"] for message in project_messages] == [
+    "2025-06-16T12:50:11+09:00", "2025-06-16T12:50:11+09:00",
+    "2025-07-01T10:02:03+09:00", "2025-06-16T12:50:11+09:00",
+]
+sessions, report = convert("claude-projects", projects_dir, "--split-max-chars", "45")
+assert [session["id"] for session in sessions] == [f"import-claude-project-fixture-project-p{i:02d}" for i in range(1, 5)]
+assert all(session["parent_session_id"] == "import-claude-project-fixture-project" for session in sessions)
 check_worker(sessions, report)
 
 
@@ -278,6 +329,65 @@ reply_with_secrets = dict(chatgpt, mapping=dict(chatgpt["mapping"], answer=node(
 sessions, report = convert("chatgpt", [reply_with_secrets], "--assistant-max-chars", "36")
 assert report["redactions"]["assignment"] == 3 and report["redactions"]["bearer"] == 2
 assert "fixture-db-pass" not in json.dumps(sessions)
+check_worker(sessions, report)
+
+assets = work / "chatgpt-assets"
+extracted = work / "pre-extracted"
+assets.mkdir()
+extracted.mkdir()
+(assets / "conversation_asset_file_names.json").write_text(json.dumps({
+    "note.dat": "記録", "scan.dat": "スキャン.pdf", "image.dat": "写真.png",
+}), encoding="utf-8")
+(assets / "note.dat").write_text(
+    "テキストの先頭\npassword=fixture-attachment-pass\n" + "中" * 80 + "\nテキストの末尾", encoding="utf-8",
+)
+(assets / "plain.dat").write_text("raw text superseded by supplied text", encoding="utf-8")
+(extracted / "plain.txt").write_text("preferred supplied text", encoding="utf-8")
+(assets / "scan.dat").write_bytes(b"%PDF-1.7 binary PDF fixture")
+(assets / "image.dat").write_bytes(b"untrusted image bytes")
+(assets / "invalid.dat").write_bytes(b"\xff\xfe\x00")
+(assets / "large.dat").write_bytes(b"x" * (4 * 1024 * 1024 + 1))
+(extracted / "scan.txt").write_text("PDFから抽出した本文", encoding="utf-8")
+(work / "outside.txt").write_text("must never be read as an attachment", encoding="utf-8")
+
+attachment_user = node(None, "user", kind="multimodal_text")
+attachment_user["message"]["metadata"]["attachments"] = [
+    {"id": "note", "name": "original-name.dat", "mime_type": "application/octet-stream"},
+    {"id": "plain", "name": "plain.txt", "mime_type": "text/plain; charset=utf-8"},
+    {"id": "scan", "mime_type": "application/pdf"},
+    {"id": "image", "mime_type": "image/png"},
+    {"id": "invalid", "name": "invalid.txt", "mime_type": "text/plain"},
+    {"id": "large", "name": "large.txt", "mime_type": "text/plain"},
+    {"id": "missing", "name": "missing.txt", "mime_type": "text/plain"},
+    {"id": "../outside", "name": "unsafe ID.txt", "mime_type": "text/plain"},
+]
+attachment_chat = dict(chatgpt, id="fixture-attachments", current_node="a", mapping={
+    "u": attachment_user, "a": node("u", "assistant", "受け取りました"),
+})
+dirs = ("--attachments-dir", str(assets), "--attachment-text-dir", str(extracted))
+sessions, report = convert("chatgpt", [attachment_chat], *dirs)
+assert report["attachments"] == {"inlined": 0, "placeholder_only": 8, "truncated": 0}
+assert "[添付: 記録]" in sessions[0]["messages"][0]["content"]
+assert "PDFから抽出した本文" not in sessions[0]["messages"][0]["content"]
+check_worker(sessions, report)
+
+sessions, report = convert("chatgpt", [attachment_chat], *dirs, "--include-attachment-text")
+assert report["attachments"] == {"inlined": 3, "placeholder_only": 5, "truncated": 0}
+user_text = sessions[0]["messages"][0]["content"]
+assert "[添付: 記録]\nテキストの先頭\npassword=[REDACTED:assignment]" in user_text
+assert "[添付: plain.txt]\npreferred supplied text" in user_text
+assert "[添付: スキャン.pdf]\nPDFから抽出した本文\n[添付: 写真.png]" in user_text
+assert all(text not in user_text for text in (
+    "fixture-attachment-pass", "raw text superseded", "binary PDF fixture", "untrusted image bytes", "must never be read",
+))
+assert report["redactions"] == {"assignment": 1}
+check_worker(sessions, report)
+
+sessions, report = convert("chatgpt", [attachment_chat], *dirs, "--include-attachment-text", "--attachment-max-chars", "28")
+assert report["attachments"] == {"inlined": 3, "placeholder_only": 5, "truncated": 1}
+inlined_note = sessions[0]["messages"][0]["content"].split("[添付: 記録]\n")[1].split("\n[添付: plain.txt]")[0]
+assert len(inlined_note) == 28 and inlined_note.endswith("テキストの末尾") and "[…省略…]" in inlined_note
+assert report["redactions"] == {"assignment": 1}
 check_worker(sessions, report)
 
 print("Hermes chat export fixture: ok")

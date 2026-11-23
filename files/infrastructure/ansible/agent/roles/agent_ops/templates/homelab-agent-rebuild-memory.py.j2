@@ -26,6 +26,7 @@
 # messages are never retained, exactly as sync_turn never receives them. Each
 # turn is stamped with the user message's time (session start when absent) and
 # both messages of a turn share that timestamp, like the plugin.
+# Claude Project imports are user-only materials, with one timestamp per entry.
 #
 # The checkpoint records the input's SHA-256 and the target bank. If the state
 # file does not match the input being processed, the run fails instead of
@@ -55,6 +56,7 @@ RETAIN_ASSISTANT_PREFIX = "Assistant"
 RETAIN_CONTEXT = "conversation between Hermes Agent and the User"
 IMPORT_CONTEXTS = {
     "claude": "conversation between Claude.ai and the User",
+    "claude-project": "project materials provided by the User in Claude.ai Projects",
     "chatgpt": "conversation between ChatGPT and the User",
 }
 OBSERVATION_SCOPES = "shared"
@@ -144,15 +146,24 @@ def _session_started_at(session):
     return None
 
 
+def import_source(session, session_id):
+    source = session.get("source")
+    if isinstance(source, str) and source in IMPORT_CONTEXTS and session_id.startswith(f"import-{source}-"):
+        return source
+    return None
+
+
 def build_turns(session):
     """Return (turns, dropped_user_turns, missing_timestamp_turns).
 
     Each turn is (user_text, assistant_text, isoTimestamp). Only a user message
     paired with the last assistant prose before the next user message becomes a
-    turn; a user message with no assistant answer is dropped (the plugin never
-    saw a completed turn to retain).
+    turn; an unanswered user message is dropped in conversations. Claude
+    Project imports contain standalone user materials with no assistant answer.
     """
     started_at = _session_started_at(session)
+    session_id = str(session.get("id") or session.get("session_id") or "")
+    user_only = import_source(session, session_id) == "claude-project"
     turns = []
     dropped = 0
     missing = 0
@@ -162,7 +173,7 @@ def build_turns(session):
     def flush():
         nonlocal user, assistant, dropped, missing
         if user is not None:
-            if assistant is None:
+            if assistant is None and not user_only:
                 dropped += 1
             else:
                 timestamp = user[1] or started_at
@@ -186,7 +197,7 @@ def build_turns(session):
             flush()
             if text:
                 user = (text, _iso_timestamp(message.get("timestamp")))
-        elif role == "assistant" and text and not message.get("tool_calls") and user is not None:
+        elif role == "assistant" and not user_only and text and not message.get("tool_calls") and user is not None:
             # Keep the last assistant prose of the turn: tool-call-only
             # assistant turns and intermediate text are superseded by the answer.
             assistant = text
@@ -201,7 +212,8 @@ def build_item(session, turns, fallback_timestamp=None):
     for user_text, assistant_text, timestamp in turns:
         timestamp = timestamp or fallback_timestamp
         flat.append({"role": "user", "content": f"{RETAIN_USER_PREFIX}: {user_text}", "timestamp": timestamp})
-        flat.append({"role": "assistant", "content": f"{RETAIN_ASSISTANT_PREFIX}: {assistant_text}", "timestamp": timestamp})
+        if assistant_text is not None:
+            flat.append({"role": "assistant", "content": f"{RETAIN_ASSISTANT_PREFIX}: {assistant_text}", "timestamp": timestamp})
     content = json.dumps(flat, ensure_ascii=False)
     tags = [f"session:{session_id}"]
     if parent and parent != session_id:
@@ -223,8 +235,8 @@ def build_item(session, turns, fallback_timestamp=None):
     if title:
         metadata["title"] = str(title)
     context = RETAIN_CONTEXT
-    source = session.get("source")
-    if isinstance(source, str) and source in IMPORT_CONTEXTS and session_id.startswith(f"import-{source}-"):
+    source = import_source(session, session_id)
+    if source:
         context = IMPORT_CONTEXTS[source]
         tags.append(f"source:{source}")
         metadata["source"] = source
@@ -393,7 +405,7 @@ def main():
         sessions_seen += 1
         turns_seen += len(turns)
         dropped_turns += dropped
-        messages_seen += len(turns) * 2
+        messages_seen += len(turns) + sum(assistant is not None for _, assistant, _ in turns)
         missing_timestamps += missing
 
         if not turns:

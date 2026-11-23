@@ -236,8 +236,32 @@ Claude.aiでは `--source claude` を指定する。予備検証は `--sample N 
   そのまま出力し、reportに数える。分割した部分は `-p01` からの枝番を持ち、それぞれ独立したdocumentとしてretainされる。
   `parent:<id>` は元会話を示すtag。再投入時は同じ分割設定を使う。分割設定を変えると旧IDのdocumentが残り得る。
 
+ChatGPTの添付を含めるには `--attachments-dir DIR` に展開済みexportのディレクトリを指定する。
+`conversation_asset_file_names.json` があれば元のファイル名を表示する。添付本文は
+`--include-attachment-text` 指定時だけ、ユーザーの発話に追記する。`--attachment-text-dir DIR` に
+`<添付ID>.txt` として用意したUTF-8本文（PDFから別途抽出した本文など）を優先し、次にexport内の
+`<添付ID>.dat` がUTF-8のテキストなら使う。画像・PDFのバイナリや本文を利用できない添付はファイル名だけ表示する。
+1ファイルの読込上限は4 MiB。本文は伏字処理の後に `--attachment-max-chars N`（既定64,000文字）で
+先頭と末尾を残して短縮する。reportの `attachments` は出力したターンの `metadata.attachments` について
+本文あり（`inlined`）、名前のみ（`placeholder_only`）、本文を短縮した内数（`truncated`）を集計する。
+
+### Claude.ai Projects のexport
+
+```sh
+python3 -I scripts/hermes-import-chat-exports.py --source claude-projects \
+  --input /path/to/private/claude-export \
+  --output /path/to/private/claude-projects.jsonl \
+  --report /path/to/private/claude-projects-report.json
+```
+
+展開先の `projects/*.json` を読む。`projects` ディレクトリ自体も指定できる。空でない概要・プロンプトテンプレート・
+資料本文をユーザー提供の資料として取り込み、資料ごとの作成時刻を使う（欠落時はプロジェクトの作成時刻）。
+通常は1プロジェクトを `import-claude-project-<uuid>` とし、`--split-max-chars` 指定時は資料の境界で分割できる。
+抽出対象の発話はユーザーの資料のみとし、helperはこの出典に限りassistant発話が無くてもretainする。
+reportの `conversations_*` はこのモードではプロジェクトの集計。
+
 変換したJSONLをAgent VMの非公開パスに置き、`homelab-agent-rebuild-memory --from <sessions.jsonl> --bank <検証用bank> --dry-run`
-で形状を確認する。helperは `import-claude-…` / `import-chatgpt-…` と `source` の組から出典を判定し、
+で形状を確認する。helperは `import-claude-…` / `import-claude-project-…` / `import-chatgpt-…` と `source` の組から出典を判定し、
 サービス別の `context`、`source:<source>` のtag、元のタイトル・作成時刻を付ける。投入時も引数は既存のものを使う。
 
 ## 6. 健康確認

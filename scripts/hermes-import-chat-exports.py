@@ -14,6 +14,16 @@ import tempfile
 UTC = timezone.utc
 OMISSION = "\n[…省略…]\n"
 EXPORT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
+ATTACHMENT_READ_LIMIT = 4 * 1024 * 1024
+TEXT_ATTACHMENT_TYPES = {
+    "application/javascript", "application/json", "application/toml",
+    "application/x-ndjson", "application/xml", "application/yaml", "application/x-yaml",
+}
+BINARY_ATTACHMENT_SUFFIXES = {
+    ".avif", ".bmp", ".gif", ".heic", ".ico", ".jpeg", ".jpg", ".pdf",
+    ".png", ".svg", ".tif", ".tiff", ".webp",
+}
+NON_TEXT_CONTROLS = re.compile(r"[\x00-\x08\x0b\x0e-\x1f\x7f]")
 SECRET_PATTERNS = {
     "pem-private-key": r"-----BEGIN ([A-Z0-9 ]*PRIVATE KEY)-----[\s\S]*?(?:-----END \1-----|\Z)",
     "aws-access-key": r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b",
@@ -175,8 +185,66 @@ def chatgpt_text(message):
     return "\n".join(part for part in parts if part)
 
 
-def normalized_messages(path, args):
+def text_attachment_type(mime, name):
+    mime = string(mime).partition(";")[0].strip().lower()
+    if Path(name).suffix.lower() in BINARY_ATTACHMENT_SUFFIXES:
+        return False
+    if mime in ("", "application/octet-stream"):
+        return True
+    return mime.startswith("text/") or mime in TEXT_ATTACHMENT_TYPES or (
+        mime.startswith("application/") and mime.endswith(("+json", "+xml"))
+    )
+
+
+def read_attachment_text(path):
+    try:
+        if path.is_symlink() or not path.is_file():
+            return ""
+        with path.open("rb") as handle:
+            data = handle.read(ATTACHMENT_READ_LIMIT + 1)
+        if len(data) > ATTACHMENT_READ_LIMIT:
+            return ""
+        text = data.decode("utf-8-sig")
+    except (OSError, UnicodeError):
+        return ""
+    if NON_TEXT_CONTROLS.search(text) or text.lstrip().startswith("%PDF-"):
+        return ""
+    return text.strip()
+
+
+def chatgpt_attachments(metadata, args, asset_names):
+    parts = []
+    counts = Counter()
+    redactions = Counter()
+    for attachment in as_list(metadata.get("attachments")):
+        if not isinstance(attachment, dict):
+            continue
+        attachment_id = string(attachment.get("id"))
+        dat_name = f"{attachment_id}.dat"
+        name = string(asset_names.get(dat_name)) or string(attachment.get("name")) or "ファイル"
+        parts.append(f"[添付: {name}]")
+        text = ""
+        if args.include_attachment_text and EXPORT_ID.fullmatch(attachment_id):
+            if args.attachment_text_dir:
+                text = read_attachment_text(args.attachment_text_dir / f"{attachment_id}.txt")
+            if not text and args.attachments_dir and text_attachment_type(attachment.get("mime_type"), name):
+                text = read_attachment_text(args.attachments_dir / dat_name)
+        if not text:
+            counts["placeholder_only"] += 1
+            continue
+        counts["inlined"] += 1
+        # Redact before shortening so a cut cannot expose a fragment of a secret.
+        text = redact(text, redactions)
+        if len(text) > args.attachment_max_chars:
+            counts["truncated"] += 1
+            text = shorten(text, args.attachment_max_chars)
+        parts.append(text)
+    return parts, counts, redactions
+
+
+def normalized_messages(path, args, asset_names):
     for message in path:
+        stats = {}
         if args.source == "claude":
             sender = message.get("sender")
             if sender not in ("human", "assistant"):
@@ -186,14 +254,45 @@ def normalized_messages(path, args):
             created = timestamp(message.get("created_at"))
         else:
             role = as_dict(message.get("author")).get("role")
-            if role not in ("user", "assistant") or as_dict(message.get("metadata")).get(
-                "is_visually_hidden_from_conversation"
-            ):
+            metadata = as_dict(message.get("metadata"))
+            if role not in ("user", "assistant") or metadata.get("is_visually_hidden_from_conversation"):
                 continue
             content = chatgpt_text(message)
             created = timestamp(message.get("create_time"))
+            content_type = as_dict(message.get("content")).get("content_type")
+            if role == "user" and metadata.get("attachments") and content_type in (None, "text", "multimodal_text"):
+                parts, attachment_counts, redactions = chatgpt_attachments(metadata, args, asset_names)
+                if parts:
+                    content = "\n".join(filter(None, [content, *parts]))
+                    stats = {"_attachments": attachment_counts, "_attachment_redactions": redactions}
         if content:
-            yield {"role": role, "content": content, "timestamp": created.isoformat() if created else None}
+            yield dict(role=role, content=content, timestamp=created.isoformat() if created else None, **stats)
+
+
+def project_materials(project, created):
+    for key, label in (("description", "概要"), ("prompt_template", "プロンプトテンプレート")):
+        content = string(project.get(key))
+        if content:
+            yield label, content, created
+    for doc in as_list(project.get("docs")):
+        doc = as_dict(doc)
+        content = string(doc.get("content"))
+        if content:
+            filename = string(doc.get("filename")) or "ファイル"
+            yield f"資料: {filename}", content, timestamp(doc.get("created_at")) or created
+
+
+def project_turns(project, created, stats):
+    name = string(project.get("name")) or "名称未設定"
+    for label, content, material_time in project_materials(project, created):
+        if material_time is None:
+            stats["missing_timestamp"] += 1
+            continue
+        yield {
+            "role": "user",
+            "content": f"[Claude Project「{name}」の{label}]\n{content}",
+            "timestamp": material_time.isoformat(),
+        }, None
 
 
 def complete_turns(messages, started_at, stats):
@@ -232,9 +331,10 @@ def shorten(text, limit):
 
 def redact_turns(turns, assistant_limit):
     for user, assistant in turns:
-        counts = Counter()
+        counts = user.pop("_attachment_redactions", Counter())
         user["content"] = redact(user["content"], counts)
-        assistant["content"] = shorten(redact(assistant["content"], counts), assistant_limit)
+        if assistant is not None:
+            assistant["content"] = shorten(redact(assistant["content"], counts), assistant_limit)
         yield user, assistant, counts
 
 
@@ -242,7 +342,7 @@ def session_parts(turns, limit):
     part = []
     size = 0
     for user, assistant, counts in turns:
-        turn_size = len(user["content"]) + len(assistant["content"])
+        turn_size = len(user["content"]) + (len(assistant["content"]) if assistant is not None else 0)
         if part and limit is not None and size + turn_size > limit:
             yield part, size
             part, size = [], 0
@@ -252,7 +352,9 @@ def session_parts(turns, limit):
         yield part, size
 
 
-def convert(conversations, args, selected_ids):
+def convert(conversations, args, selected_ids, asset_names):
+    projects = args.source == "claude-projects"
+    source = "claude-project" if projects else args.source
     report = {
         "source": args.source,
         "conversations_in": len(conversations),
@@ -269,13 +371,15 @@ def convert(conversations, args, selected_ids):
         "redactions": Counter(),
         "redactions_by_session": {},
     }
+    if args.source == "chatgpt":
+        report["attachments"] = dict.fromkeys(("inlined", "placeholder_only", "truncated"), 0)
     skipped = report["conversations_skipped"]
     candidates = {}
     for conversation in conversations:
         if not isinstance(conversation, dict):
             skipped["invalid_conversation"] += 1
             continue
-        if args.source == "claude":
+        if args.source != "chatgpt":
             original_id = conversation.get("uuid")
             raw_created = conversation.get("created_at")
         else:
@@ -312,18 +416,21 @@ def convert(conversations, args, selected_ids):
 
     output = []
     output_ids = set()
-    branch = claude_branch if args.source == "claude" else chatgpt_branch
+    branch = chatgpt_branch if args.source == "chatgpt" else claude_branch
     for original_id in ids:
         conversation, raw_created, created = candidates[original_id]
-        parent_id = f"import-{args.source}-{original_id}"
-        path, excluded = branch(conversation)
-        if path is None:
-            skipped["invalid_branch"] += 1
-            continue
-        if excluded:
-            report["branch_notes"][parent_id] = {"off_path_messages": excluded}
+        parent_id = f"import-{source}-{original_id}"
         stats = Counter()
-        turns = list(complete_turns(normalized_messages(path, args), created, stats))
+        if projects:
+            turns = list(project_turns(conversation, created, stats))
+        else:
+            path, excluded = branch(conversation)
+            if path is None:
+                skipped["invalid_branch"] += 1
+                continue
+            if excluded:
+                report["branch_notes"][parent_id] = {"off_path_messages": excluded}
+            turns = list(complete_turns(normalized_messages(path, args, asset_names), created, stats))
         report["turns_dropped"].update(stats)
         if not turns:
             skipped["no_usable_turns"] += 1
@@ -331,14 +438,14 @@ def convert(conversations, args, selected_ids):
         report["conversations_out"] += 1
 
         title_counts = Counter()
-        title = redact(string(conversation.get("name" if args.source == "claude" else "title")), title_counts)
+        title = redact(string(conversation.get("title" if args.source == "chatgpt" else "name")), title_counts)
         parts = list(session_parts(redact_turns(turns, args.assistant_max_chars), args.split_max_chars))
         for index, (part, size) in enumerate(parts, 1):
             session_id = f"{parent_id}-p{index:02d}" if len(parts) > 1 else parent_id
             if session_id in output_ids:
                 raise ValueError("generated session IDs collide")
             output_ids.add(session_id)
-            session = dict(id=session_id, source=args.source, title=title, messages=[])
+            session = dict(id=session_id, source=source, title=title, messages=[])
             if created is not None:
                 session.update(created_at=raw_created, started_at=created.isoformat())
             if len(parts) > 1:
@@ -347,10 +454,14 @@ def convert(conversations, args, selected_ids):
 
             counts = title_counts.copy()
             for user, assistant, turn_counts in part:
-                session["messages"].extend((user, assistant))
+                for key, value in user.pop("_attachments", {}).items():
+                    report["attachments"][key] += value
+                session["messages"].append(user)
                 counts.update(turn_counts)
                 report["user_chars"] += len(user["content"])
-                report["assistant_chars"] += len(assistant["content"])
+                if assistant is not None:
+                    session["messages"].append(assistant)
+                    report["assistant_chars"] += len(assistant["content"])
             report["redactions"].update(counts)
             report["redactions_by_session"][session_id] = counts
             report["turns"] += len(part)
@@ -365,6 +476,22 @@ def paths_overlap(first, second):
     return first.resolve() == second.resolve() or (
         first.exists() and second.exists() and first.samefile(second)
     )
+
+
+def read_json(path):
+    with path.open(encoding="utf-8-sig") as handle:
+        return json.load(handle)
+
+
+def project_files(export_dir):
+    projects_dir = export_dir / "projects"
+    if projects_dir.is_symlink():
+        raise ValueError("projects directory must not be a symlink")
+    if projects_dir.is_dir():
+        export_dir = projects_dir
+    if not export_dir.is_dir():
+        raise ValueError("project input must be a directory")
+    return sorted(path for path in export_dir.glob("*.json") if not path.is_symlink() and path.is_file())
 
 
 def write_results(output_path, report_path, sessions, report):
@@ -395,11 +522,15 @@ def positive_int(value):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", choices=("claude", "chatgpt"), required=True)
-    parser.add_argument("--input", type=Path, required=True)
+    parser.add_argument("--source", choices=("claude", "claude-projects", "chatgpt"), required=True)
+    parser.add_argument("--input", type=Path, required=True, help="conversations.json or Claude Projects export directory")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--include-attachment-text", action="store_true")
+    parser.add_argument("--attachments-dir", type=Path, help="ChatGPT export directory containing attachment .dat files")
+    parser.add_argument("--attachment-text-dir", type=Path, help="ChatGPT pre-extracted UTF-8 text as <attachment-id>.txt")
+    parser.add_argument("--attachment-max-chars", type=positive_int, default=64000,
+                        help="limit per ChatGPT attachment after redaction (default: %(default)s)")
     parser.add_argument("--include-do-not-remember", action="store_true")
     parser.add_argument("--assistant-max-chars", type=positive_int, help="limit per merged reply")
     parser.add_argument("--split-max-chars", type=positive_int, help="target text size per session; keep whole turns")
@@ -413,22 +544,39 @@ def main():
         parser.error("--since must be on or before --until")
     if args.assistant_max_chars is not None and args.assistant_max_chars < len(OMISSION) + 2:
         parser.error(f"--assistant-max-chars must be at least {len(OMISSION) + 2}")
+    if args.attachment_max_chars < len(OMISSION) + 2:
+        parser.error(f"--attachment-max-chars must be at least {len(OMISSION) + 2}")
+    if args.source != "chatgpt" and (args.attachments_dir or args.attachment_text_dir):
+        parser.error("attachment directory options require --source chatgpt")
 
     try:
-        inputs = [args.input] + ([args.ids_file] if args.ids_file else [])
+        projects = args.source == "claude-projects"
+        data_files = project_files(args.input) if projects else [args.input]
+        input_files = data_files + ([args.ids_file] if args.ids_file else [])
+        asset_map = None
+        for directory, pattern in ((args.attachments_dir, "*.dat"), (args.attachment_text_dir, "*.txt")):
+            if directory:
+                if not directory.is_dir():
+                    raise ValueError("attachment input must be a directory")
+                input_files.extend(directory.glob(pattern))
+        if args.attachments_dir:
+            candidate = args.attachments_dir / "conversation_asset_file_names.json"
+            if not candidate.is_symlink() and candidate.is_file():
+                asset_map = candidate
+                input_files.append(candidate)
         if paths_overlap(args.output, args.report) or any(
-            paths_overlap(path, dest) for path in inputs for dest in (args.output, args.report)
+            paths_overlap(path, dest) for path in input_files for dest in (args.output, args.report)
         ):
             raise ValueError("input and destination files must be distinct")
-        with args.input.open(encoding="utf-8-sig") as handle:
-            conversations = json.load(handle)
+        conversations = [read_json(path) for path in data_files] if projects else read_json(args.input)
         if not isinstance(conversations, list):
             raise ValueError("export must be a JSON array")
         selected_ids = None
         if args.ids_file:
             selected_ids = {line.strip() for line in args.ids_file.read_text(encoding="utf-8-sig").splitlines()
                             if line.strip()}
-        sessions, report = convert(conversations, args, selected_ids)
+        asset_names = as_dict(read_json(asset_map)) if asset_map else {}
+        sessions, report = convert(conversations, args, selected_ids, asset_names)
         write_results(args.output, args.report, sessions, report)
     except (OSError, UnicodeError):
         # File paths and text fragments can carry personal data.
