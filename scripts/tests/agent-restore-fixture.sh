@@ -177,6 +177,7 @@ PY
 ./scripts/tests/agent-model-fetch-fixture.sh
 ./scripts/tests/agent-ops-cleanup-fixture.sh
 ./scripts/tests/agent-rebuild-fixture.sh
+./scripts/tests/hermes-import-chat-exports-fixture.sh
 ./scripts/tests/agent-ops-behavior-fixture.sh
 
 echo "Agent restore/export/rebuild fixture: ok"

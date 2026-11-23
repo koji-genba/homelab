@@ -53,6 +53,10 @@ STATE_VERSION = 3
 RETAIN_USER_PREFIX = "User"
 RETAIN_ASSISTANT_PREFIX = "Assistant"
 RETAIN_CONTEXT = "conversation between Hermes Agent and the User"
+IMPORT_CONTEXTS = {
+    "claude": "conversation between Claude.ai and the User",
+    "chatgpt": "conversation between ChatGPT and the User",
+}
 OBSERVATION_SCOPES = "shared"
 SOURCE = "hermes-session-export"
 
@@ -218,9 +222,18 @@ def build_item(session, turns, fallback_timestamp=None):
     title = session.get("title")
     if title:
         metadata["title"] = str(title)
+    context = RETAIN_CONTEXT
+    source = session.get("source")
+    if isinstance(source, str) and source in IMPORT_CONTEXTS and session_id.startswith(f"import-{source}-"):
+        context = IMPORT_CONTEXTS[source]
+        tags.append(f"source:{source}")
+        metadata["source"] = source
+        created_at = session.get("created_at")
+        if _parse_timestamp(created_at) is not None:
+            metadata["created_at"] = str(created_at)
     item = {
         "content": content,
-        "context": RETAIN_CONTEXT,
+        "context": context,
         "document_id": session_id,
         "tags": tags,
         "observation_scopes": OBSERVATION_SCOPES,

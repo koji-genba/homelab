@@ -208,6 +208,38 @@ rebuild同士は排他制御する。`--dry-run`は投入・bank設定・checkpo
 旧WS7dの試験値（架空データ）: 15ターン/4.6 KBの1セッションで初回約25秒・GLM 4回。
 WS8の時刻・再開・bank方針修正はネットワーク不要fixtureで確認した。修正後のLLM再抽出品質・本番規模の所要時間は未検証。
 
+### Claude.ai / ChatGPT の会話export
+
+作業端末で各サービスの `conversations.json` を個別に変換する。変換はPython 3標準ライブラリのみで動作し、
+通信しない。元exportと変換後のJSONLは個人データとしてrepo外に保管する。集計reportにも会話IDが入る。
+
+```sh
+python3 -I scripts/hermes-import-chat-exports.py --source chatgpt \
+  --input /path/to/private/chatgpt/conversations.json \
+  --output /path/to/private/chatgpt-sessions.jsonl \
+  --report /path/to/private/chatgpt-report.json \
+  --sample 10 --seed 42
+```
+
+Claude.aiでは `--source claude` を指定する。予備検証は `--sample N --seed S`、元の会話IDを
+1行に1件書いた `--ids-file FILE`、または作成日（UTC、両端を含む）の `--since YYYY-MM-DD` /
+`--until YYYY-MM-DD` で絞れる。サンプルは絞り込み後、ターン変換前に選ぶ。全件の変換ではこれらの指定を外す。
+
+- ChatGPTは現在の枝、Claude.aiは親リンクがあれば末尾メッセージの枝をたどる。親がexport内に無ければそこで止める
+  （Claude.aiのルートを示す固定UUIDを含む）。枝から外れた件数はreportに記録する。
+  可視のuser/assistant本文を使い、連続するassistant本文は結合する。未回答や、userにも会話開始にも時刻のないターンは除外する。
+- 添付は短い表示に置き換える。Claude.aiの抽出済み添付本文は `--include-attachment-text` 指定時だけ含める。
+  ChatGPTの記憶対象外の会話は `--include-do-not-remember` 指定時だけ含める。既知の形式の認証情報は
+  本文・タイトルなどから常に伏せる。reportには本文・タイトルを出さず、除外理由、文字数、伏せた箇所の件数などを出す。
+- `--assistant-max-chars N` は結合済みの返答の先頭と末尾を省略マーカー付きで残す。
+  `--split-max-chars N` は本文の合計文字数を目安にターン境界で分ける。単独のターンが上限を超える場合は
+  そのまま出力し、reportに数える。分割した部分は `-p01` からの枝番を持ち、それぞれ独立したdocumentとしてretainされる。
+  `parent:<id>` は元会話を示すtag。再投入時は同じ分割設定を使う。分割設定を変えると旧IDのdocumentが残り得る。
+
+変換したJSONLをAgent VMの非公開パスに置き、`homelab-agent-rebuild-memory --from <sessions.jsonl> --bank <検証用bank> --dry-run`
+で形状を確認する。helperは `import-claude-…` / `import-chatgpt-…` と `source` の組から出典を判定し、
+サービス別の `context`、`source:<source>` のtag、元のタイトル・作成時刻を付ける。投入時も引数は既存のものを使う。
+
 ## 6. 健康確認
 
 5 分間隔で次を確認し、失敗が **状態変化したときだけ** 通知（継続失敗は 6 時間ごとに再通知、
