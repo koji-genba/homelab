@@ -208,6 +208,62 @@ rebuild同士は排他制御する。`--dry-run`は投入・bank設定・checkpo
 旧WS7dの試験値（架空データ）: 15ターン/4.6 KBの1セッションで初回約25秒・GLM 4回。
 WS8の時刻・再開・bank方針修正はネットワーク不要fixtureで確認した。修正後のLLM再抽出品質・本番規模の所要時間は未検証。
 
+### Claude.ai / ChatGPT の会話export
+
+作業端末で各サービスの `conversations.json` を個別に変換する。変換はPython 3標準ライブラリのみで動作し、
+通信しない。元exportと変換後のJSONLは個人データとしてrepo外に保管する。集計reportにも会話IDが入る。
+
+```sh
+python3 -I scripts/hermes-import-chat-exports.py --source chatgpt \
+  --input /path/to/private/chatgpt/conversations.json \
+  --output /path/to/private/chatgpt-sessions.jsonl \
+  --report /path/to/private/chatgpt-report.json \
+  --sample 10 --seed 42
+```
+
+Claude.aiでは `--source claude` を指定する。予備検証は `--sample N --seed S`、元の会話IDを
+1行に1件書いた `--ids-file FILE`、または作成日（UTC、両端を含む）の `--since YYYY-MM-DD` /
+`--until YYYY-MM-DD` で絞れる。サンプルは絞り込み後、ターン変換前に選ぶ。全件の変換ではこれらの指定を外す。
+
+- ChatGPTは現在の枝、Claude.aiは親リンクがあれば末尾メッセージの枝をたどる。親がexport内に無ければそこで止める
+  （Claude.aiのルートを示す固定UUIDを含む）。枝から外れた件数はreportに記録する。
+  可視のuser/assistant本文を使い、連続するassistant本文は結合する。未回答や、userにも会話開始にも時刻のないターンは除外する。
+- 添付は短い表示に置き換える。Claude.aiの抽出済み添付本文は `--include-attachment-text` 指定時だけ含める。
+  ChatGPTの記憶対象外の会話は `--include-do-not-remember` 指定時だけ含める。既知の形式の認証情報は
+  本文・タイトルなどから常に伏せる。reportには本文・タイトルを出さず、除外理由、文字数、伏せた箇所の件数などを出す。
+- `--assistant-max-chars N` は結合済みの返答の先頭と末尾を省略マーカー付きで残す。
+  `--split-max-chars N` は本文の合計文字数を目安にターン境界で分ける。単独のターンが上限を超える場合は
+  そのまま出力し、reportに数える。分割した部分は `-p01` からの枝番を持ち、それぞれ独立したdocumentとしてretainされる。
+  `parent:<id>` は元会話を示すtag。再投入時は同じ分割設定を使う。分割設定を変えると旧IDのdocumentが残り得る。
+
+ChatGPTの添付を含めるには `--attachments-dir DIR` に展開済みexportのディレクトリを指定する。
+`conversation_asset_file_names.json` があれば元のファイル名を表示する。添付本文は
+`--include-attachment-text` 指定時だけ、ユーザーの発話に追記する。`--attachment-text-dir DIR` に
+`<添付ID>.txt` として用意したUTF-8本文（PDFから別途抽出した本文など）を優先し、次にexport内の
+`<添付ID>.dat` がUTF-8のテキストなら使う。画像・PDFのバイナリや本文を利用できない添付はファイル名だけ表示する。
+1ファイルの読込上限は4 MiB。本文は伏字処理の後に `--attachment-max-chars N`（既定64,000文字）で
+先頭と末尾を残して短縮する。reportの `attachments` は出力したターンの `metadata.attachments` について
+本文あり（`inlined`）、名前のみ（`placeholder_only`）、本文を短縮した内数（`truncated`）を集計する。
+
+### Claude.ai Projects のexport
+
+```sh
+python3 -I scripts/hermes-import-chat-exports.py --source claude-projects \
+  --input /path/to/private/claude-export \
+  --output /path/to/private/claude-projects.jsonl \
+  --report /path/to/private/claude-projects-report.json
+```
+
+展開先の `projects/*.json` を読む。`projects` ディレクトリ自体も指定できる。空でない概要・プロンプトテンプレート・
+資料本文をユーザー提供の資料として取り込み、資料ごとの作成時刻を使う（欠落時はプロジェクトの作成時刻）。
+通常は1プロジェクトを `import-claude-project-<uuid>` とし、`--split-max-chars` 指定時は資料の境界で分割できる。
+抽出対象の発話はユーザーの資料のみとし、helperはこの出典に限りassistant発話が無くてもretainする。
+reportの `conversations_*` はこのモードではプロジェクトの集計。
+
+変換したJSONLをAgent VMの非公開パスに置き、`homelab-agent-rebuild-memory --from <sessions.jsonl> --bank <検証用bank> --dry-run`
+で形状を確認する。helperは `import-claude-…` / `import-claude-project-…` / `import-chatgpt-…` と `source` の組から出典を判定し、
+サービス別の `context`、`source:<source>` のtag、元のタイトル・作成時刻を付ける。投入時も引数は既存のものを使う。
+
 ## 6. 健康確認
 
 5 分間隔で次を確認し、失敗が **状態変化したときだけ** 通知（継続失敗は 6 時間ごとに再通知、

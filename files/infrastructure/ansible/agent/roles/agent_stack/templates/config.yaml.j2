@@ -154,6 +154,8 @@ memory:
   provider: hindsight
   memory_enabled: true
   user_profile_enabled: true
+  memory_char_limit: {{ agent_stack_memory_char_limit | int }}
+  user_char_limit: {{ agent_stack_user_char_limit | int }}
   # 2026-10-17 user decision: write built-in MEMORY.md/USER.md immediately.
   # This gate does not cover Hindsight retain/auto-retain. Unattended
   # background_review replace/remove still stage under a separate upstream gate.
