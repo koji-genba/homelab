@@ -727,6 +727,9 @@ Runner の疎通失敗を直接示すものではない。運用者の確認で�
   `retain_extraction_mode=custom` / `retain_custom_instructions`で本人の明示発話だけを個人の事実として抽出し、
   assistantの回答を本人の確認済み情報へ昇格させない。`observations_mission`は統合時の出典・不確実性の保持を促す。
   B1回答の再投入ではmission追加だけは誤名を保存し、custom抽出は0件にできたが、一般的な保証にはならない。
+  2026-11-23の会話export投入試験で、本人が伝えた父の意見が本人の意見として、予定の引っ越しが完了済みとして
+  抽出された例があったため、事実の主語を明示し第三者の発言・所有・好みはその人を主語にすること、
+  予定・意図はEvent Date時点の状態のまま記録し本人が完了を述べない限り完了扱いしないことを指示に加えた。
 - 週次振り返りはHermes cron（`agent_stack_weekly_review_schedule`、既定で毎週月曜9時）からSkill
   `weekly-review`を実行し、結果を通知チャンネルへ配信する。前日までの7日間（Asia/Tokyo）について
   `hindsight_recall`を4観点で各1回、必要なら根拠確認を追加1回行い、Hermes自身が統合する。

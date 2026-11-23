@@ -209,6 +209,8 @@ agent_stack_bank_retain_mission: >-
 # A recalled assistant reply must not become evidence about the user on retain.
 # WS7a replay: mission alone retained a fabricated name; custom mode rejected it
 # while preserving user-authored facts. This is prompt guidance, not enforcement.
+# 2026-11-23 import pilot: a third person's opinion was retained as the user's,
+# and a planned move was also retained as completed; subject/status added.
 agent_stack_bank_retain_extraction_mode: custom
 agent_stack_bank_retain_custom_instructions: >-
   Extract durable personal facts only from explicit assertions in messages with
@@ -219,7 +221,13 @@ agent_stack_bank_retain_custom_instructions: >-
   supplies no new fact, return {"facts": []}. Preserve user names, event
   identities, dates and uncertainty exactly. Resolve relative dates using Event
   Date. Never assign a date from one event to another. Never invent aliases,
-  schedule history, reasons, or a missing year.
+  schedule history, reasons, or a missing year. Name the subject of every fact.
+  When the user reports what another person (family, friend, coworker) said,
+  wants, owns or prefers, make that person the subject, never the user, and do
+  not turn assistant suggestions into user proposals or decisions. Keep each
+  fact's status as of Event Date: a plan, intention or upcoming event stays
+  planned with its expected date and is never recorded as done unless the user
+  says it happened.
 agent_stack_bank_observations_mission: >-
   Consolidate only source-supported personal facts. Preserve speaker attribution,
   exact names, event identity and uncertainty. Assistant guesses or summaries are
