@@ -54,6 +54,7 @@ TTSはツール非公開に加え、command型providerを`/bin/false`へ向け�
 `voice.auto_tts: false`も明示する。command型providerはEdgeの利用可否チェックを通らないため、Edgeのlazy installも起きない。
 画像添付は`image_input_mode: native`でmainのGLMへ直接渡し、`vision_analyze`用の`auxiliary.vision`もDGXへ固定する。
 shared metricsの収集・送信、skill sync、Nous guest、connectors、外部monitoring exportは明示的に無効にする。
+shared metricsには`offer_version: 2`も書く。無いと「No thanks」が未確定と読まれ、Webapp等の対話画面で再度尋ねられ、回答時の追記が次のapplyの差分になる。
 最初のメッセージでのプロフィール作り（同意後に`web_search`で本人の公開情報を調べる流れ）は`onboarding.profile_build: "off"`で止める。
 Hermesは一度きりの案内を出すと`config.yaml`の`onboarding.seen`へ印を書き込み、次のapplyで描画し直されて差分になるため、Gatewayの印は最初からseenにしておく。
 これは機能設定による制限であり、Agent全体のnetwork egress遮断ではない。

@@ -211,10 +211,15 @@ onboarding:
     tool_progress_prompt: true
 
 # Keep unused hosted features and external monitoring exports off explicitly.
+# Without offer_version, Hermes reads "off" as a pre-type-ahead-fix answer and
+# re-asks on interactive surfaces; any reply writes offer_version back, which
+# the next apply then reverts. 2 matches OFFER_VERSION in the pinned image
+# (hermes_cli/observability/shared_metrics_consent.py).
 telemetry:
   shared_metrics:
     enabled: false
     send: false
+    offer_version: 2
 
 sync:
   enabled: false
