@@ -865,6 +865,8 @@ secret bundleの復号確認は別枠で`make secrets-decrypt-check-agent`（ide
 | 2026-11-22 15:48 JST | 運用者 | main `f6405a7`から`make ansible-apply-agent`（#239 Hindsight 1.2.3-slim、#240 reranker `16c19a38…`） | agent-vm changed=4（Compose定義、Hermes `config.yaml`、stack再起動、Hermes/CDP tunnel再作成）、runner-vm changed=0、failed=0。Hindsightのalembic migrationが`completed successfully`。全container healthy、健康確認all checks passed、bank `personal`のstatsとrecall（8件）を確認。`config.yaml`の差分はHermesがruntimeで追記した`telemetry.shared_metrics.offer_version`の削除のみ。Hindsight経由のLLM処理（retain/reflect）は未確認 |
 | 2026-11-23 JST | 運用者 | main `0184c79`から`make ansible-apply-agent`（#242 shared metrics `offer_version: 2`） | agent-vm changed=2（Hermes `config.yaml`、Hermes/CDP tunnel再作成）、runner-vm changed=0、failed=0。実機の`telemetry.shared_metrics`に`offer_version: 2`を確認。全container稼働、健康確認all checks passed |
 | 2026-11-23 JST | 運用者 | 同じmainから再度`make ansible-apply-agent` | agent-vm changed=0、runner-vm changed=0。`config.yaml`を含め再適用の冪等性を確認 |
+| 2026-11-23 11:06 JST | 運用者 | 非同期タスクが全件completed（`pending`・`processing`なし）であることを確認後、main `1e90824`から`make ansible-apply-agent`（#244 `HINDSIGHT_API_WORKER_ID: hindsight`） | agent-vm changed=2（Compose定義、stack再起動でHindsightのみ再作成）、runner-vm changed=0、failed=0。起動ログが`Worker id: hindsight (source: HINDSIGHT_API_WORKER_ID)`となり、worker IDの警告は消えた。全container稼働、健康確認all checks passed |
+| 2026-11-23 JST | 運用者 | 同じmainから再度`make ansible-apply-agent` | agent-vm changed=0、runner-vm changed=0。再適用の冪等性を確認 |
 
 ## ファイルの受け渡し（issue #194、2026-11-05反映済み）
 
