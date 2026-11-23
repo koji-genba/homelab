@@ -229,6 +229,10 @@ services:
       # HTTP slots across query/retain callers on the serving loop (32 texts each).
       # Recalculate TEI permits if workers, replicas, batch or concurrency change.
       HINDSIGHT_API_WORKERS: "1"
+      # The worker id otherwise defaults to the container hostname, which every
+      # recreate changes. recover_own_tasks only re-queues rows still marked
+      # 'processing' under the same id, and such a row holds its bank's queue.
+      HINDSIGHT_API_WORKER_ID: hindsight
       HINDSIGHT_API_EMBEDDINGS_TEI_BATCH_SIZE: "32"
       # Bound CPU queueing: eight retain requests exceeded the client timeout
       # in WS16. Two still keep Candle's four-input batches supplied.
