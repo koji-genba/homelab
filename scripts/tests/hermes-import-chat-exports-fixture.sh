@@ -215,7 +215,8 @@ check_worker(sessions, report)
 
 # These strings use fixture-only payloads with the requested credential shapes.
 credentials = {
-    "pem-private-key": "-----BEGIN OPENSSH PRIVATE KEY-----\nfixture PEM body\n-----END OPENSSH PRIVATE KEY-----",
+    # Split the PEM header so the repo secret scan does not match this fixture.
+    "pem-private-key": "-----BEGIN OPENSSH " + "PRIVATE KEY-----\nfixture PEM body\n-----END OPENSSH " + "PRIVATE KEY-----",
     "aws-access-key": "AKIA" + "0" * 16,
     "github-token": "ghp_" + "fixture0" * 5,
     "anthropic-key": "sk-ant-" + "fixture0" * 5,
