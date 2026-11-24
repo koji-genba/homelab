@@ -206,7 +206,8 @@ rebuild同士は排他制御する。`--dry-run`は投入・bank設定・checkpo
 最大itemサイズ・時刻欠落数を表示する（`--fresh`併用でも既存checkpointは消さない）。
 
 旧WS7dの試験値（架空データ）: 15ターン/4.6 KBの1セッションで初回約25秒・GLM 4回。
-WS8の時刻・再開・bank方針修正はネットワーク不要fixtureで確認した。修正後のLLM再抽出品質・本番規模の所要時間は未検証。
+WS8の時刻・再開・bank方針修正はネットワーク不要fixtureで確認した。本番規模の所要時間と抽出品質は
+[会話exportの本番投入の記録](#本番投入の記録2026-11-2324-jst)を参照。
 
 ### Claude.ai / ChatGPT の会話export
 
@@ -263,6 +264,33 @@ reportの `conversations_*` はこのモードではプロジェクトの集計�
 変換したJSONLをAgent VMの非公開パスに置き、`homelab-agent-rebuild-memory --from <sessions.jsonl> --bank <検証用bank> --dry-run`
 で形状を確認する。helperは `import-claude-…` / `import-claude-project-…` / `import-chatgpt-…` と `source` の組から出典を判定し、
 サービス別の `context`、`source:<source>` のtag、元のタイトル・作成時刻を付ける。投入時も引数は既存のものを使う。
+
+### 本番投入の記録（2026-11-23〜24 JST）
+
+ユーザーの判断で、Claude.ai・ChatGPTの全会話を本番bank `personal` に投入した。雑談も含め、本文の短縮はしていない。
+センシティブな話題も除外していない（Hermes上で同じ会話をしていれば記録されていた内容、という判断）。
+
+- 入力: Claude.ai 258、ChatGPT 83、Claude.ai Projects 4の計345 document（5,395,880文字、11.0 MB）。
+  作成順（2025-06-26〜2026-11-01）に1ファイルへ連結した。変換オプションは `--include-attachment-text` と
+  `--split-max-chars 100000` で、ChatGPTには `--attachments-dir` / `--attachment-text-dir` も指定した。
+  上限を超えた単独ターンは1件（約23万文字、CMakeのログを添付したもの）で、抽出された事実はビルド実施の1件程度だった。
+- 事前準備: 本番へ反映する前に、手動バックアップを2回取った（`20261123T061935Z`、`20261123T112829Z`）。
+  組み込み記憶（`USER.md` / `MEMORY.md`）の旧版は `/srv/agent/memory-pre-import-20261123T082443Z/` に退避した。
+  #246（変換・投入helper）と #247（主語・時制の抽出指示）はそれぞれ `make ansible-apply-agent` で反映した。
+- 試験投入（試験用bankは確認後に削除）: 並列度1で117k文字を投入し、retainに862秒かかった。
+  並列度4では142k文字で591秒だった。この試験で第三者の意見が本人の意見に、予定が完了済みに変わる誤りが見つかり、
+  #247で直したあと再試験で解消を確認した。
+- 本投入: DGXの枠を1つ空けておくため、並列度を3にした。`compose.env` の `HINDSIGHT_LLM_MAX_CONCURRENT` を
+  一時的に書き換えてHindsightだけを再作成し、終了後は `make ansible-apply-agent` で1に戻した。
+  投入にかかったのは20:29〜03:09（24,009秒、平均約225文字/秒）で、失敗は0件だった。
+  その後の統合処理（待ち最大約2,800件）は12:21に終わり、1時間あたり約300件のペースだった。
+  完了時点で world 4,881、observation 4,557、document 554。
+- 律速: 実際に同時に走る生成は2〜3本で、並列度の上限まではほぼ使われない。helperは1 documentずつ完了を待つ。
+  documentの中でもsub-batchは既定どおり1つずつ処理される。統合処理は同じtag群のbatchを順番に処理する
+  （`consolidator.py` の `_process_tag_group`）。並列度を上げても、統合処理の時間は大きくは縮まない。
+- 抜き取り確認: 予定・趣味・家族・機材の4つの話題で検索した。予定は予定のまま記録され、家族の意見は家族を主語にしていた。
+  ただし本人の呼び方は「ユーザー」「s-satoさん」と実名とで揺れていた。後から変わった事実の旧状態（例: 以前はK8sを使っていた）も
+  その時点の事実として残る。こうした古い状態は、最新の状態を組み込み記憶とGitHubのリポジトリで補う。
 
 ## 6. 健康確認
 

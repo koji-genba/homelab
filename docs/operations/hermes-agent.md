@@ -872,6 +872,10 @@ secret bundleの復号確認は別枠で`make secrets-decrypt-check-agent`（ide
 | 2026-11-23 JST | 運用者 | 同じmainから再度`make ansible-apply-agent` | agent-vm changed=0、runner-vm changed=0。`config.yaml`を含め再適用の冪等性を確認 |
 | 2026-11-23 11:06 JST | 運用者 | 非同期タスクが全件completed（`pending`・`processing`なし）であることを確認後、main `1e90824`から`make ansible-apply-agent`（#244 `HINDSIGHT_API_WORKER_ID: hindsight`） | agent-vm changed=2（Compose定義、stack再起動でHindsightのみ再作成）、runner-vm changed=0、failed=0。起動ログが`Worker id: hindsight (source: HINDSIGHT_API_WORKER_ID)`となり、worker IDの警告は消えた。全container稼働、健康確認all checks passed |
 | 2026-11-23 JST | 運用者 | 同じmainから再度`make ansible-apply-agent` | agent-vm changed=0、runner-vm changed=0。再適用の冪等性を確認 |
+| 2026-11-23 17:15 JST | 運用者 | main `8205895`から`make ansible-apply-agent`（#246 会話export投入helper、組み込み記憶の上限5,000） | agent-vm changed=3、runner-vm changed=0、failed=0。組み込み記憶`USER.md` / `MEMORY.md`を作り直した版へ差し替え（旧版は`/srv/agent/memory-pre-import-20261123T082443Z/`）。Hermesだけを再起動したら`agent-cdp-tunnel-1`のnetnsが切れ、健康確認の`cdp`が失敗したので、tunnelも再起動して回復 |
+| 2026-11-23 19:29 JST | 運用者 | main `2da2b35`から`make ansible-apply-agent`（#247 retain抽出の主語・時制） | agent-vm changed=4、runner-vm changed=0、failed=0。試験用bankでの再試験で、第三者の意見と予定が正しく抽出されることを確認 |
+| 2026-11-23 20:29〜11-24 12:21 JST | 運用者 | `compose.env`の`HINDSIGHT_LLM_MAX_CONCURRENT`を一時的に3としてHindsightだけを再作成し、bank `personal`へ会話exportの全345件を投入 | retainは24,009秒、rc=0で失敗0件、統合処理は12:21に完了。詳細は[バックアップ文書の本番投入の記録](hermes-agent-backup.md#本番投入の記録2026-11-2324-jst) |
+| 2026-11-24 12:54 JST | 運用者 | main `2da2b35`から`make ansible-apply-agent`（並列度を1へ戻す） | agent-vm changed=2（`compose.env`、Hindsight再作成）、runner-vm changed=0、failed=0。実機のretain / consolidation / LLMの並列度が1であることを確認、健康確認all checks passed。staging用のJSONLと`compose.env.pre-trial`は削除 |
 
 ## ファイルの受け渡し（issue #194、2026-11-05反映済み）
 
