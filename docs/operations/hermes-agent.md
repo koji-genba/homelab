@@ -876,6 +876,7 @@ secret bundleの復号確認は別枠で`make secrets-decrypt-check-agent`（ide
 | 2026-11-23 19:29 JST | 運用者 | main `2da2b35`から`make ansible-apply-agent`（#247 retain抽出の主語・時制） | agent-vm changed=4、runner-vm changed=0、failed=0。試験用bankでの再試験で、第三者の意見と予定が正しく抽出されることを確認 |
 | 2026-11-23 20:29〜11-24 12:21 JST | 運用者 | `compose.env`の`HINDSIGHT_LLM_MAX_CONCURRENT`を一時的に3としてHindsightだけを再作成し、bank `personal`へ会話exportの全345件を投入 | retainは24,009秒、rc=0で失敗0件、統合処理は12:21に完了。詳細は[バックアップ文書の本番投入の記録](hermes-agent-backup.md#本番投入の記録2026-11-2324-jst) |
 | 2026-11-24 12:54 JST | 運用者 | main `2da2b35`から`make ansible-apply-agent`（並列度を1へ戻す） | agent-vm changed=2（`compose.env`、Hindsight再作成）、runner-vm changed=0、failed=0。実機のretain / consolidation / LLMの並列度が1であることを確認、健康確認all checks passed。staging用のJSONLと`compose.env.pre-trial`は削除 |
+| 2026-11-24 23:54 JST | 運用者 | main `ca209c3`から`make ansible-apply-agent`（#250 dshをomp 19.1.0へ置き換え、思考レベルの既定をhigh） | agent-vm changed=5（`runner-omp`の配布、`runner-dsh`の削除、Hermes/CDP tunnel再作成）、runner-vm changed=10（npm ci、`/usr/local/bin/omp`、`~/.omp/agent/`の設定、`/usr/local/bin/dsh`と`cordis.patch.yml`の削除）、failed=0。`hermes-runner`の`bash -c`・`bash -lc`で`omp/19.1.0`、`defaultThinkingLevel`が`high`、DGXの`glm-5.3-flash`が`low,medium,high,max`を持つことを確認。短い質問への応答は4秒・rc=0で、JSON出力は`stopReason: stop`。Hermesから`runner-omp`で起動できることを運用者が確認。`~/.dsh`の旧セッションは残置。再applyのchanged=0と`agent-job`での再開は未確認 |
 
 ## ファイルの受け渡し（issue #194、2026-11-05反映済み）
 
@@ -899,6 +900,8 @@ Runner の実体は `/srv/agent-work/share`。inbox/outbox は約束で、権限
 Runner の CLI と公開の設計は [ADR-0015](../adr/0015-hermes-coding-agents.md)、omp への移行は
 [ADR-0018](../adr/0018-runner-omp.md) を参照。
 実機での導入・ログイン・推論実行・再 apply の changed=0 は未検証。
+ただし omp は 2026-11-24 に導入し、推論実行と Hermes からの起動を確認した（[手動反映の記録](#手動反映の記録)）。
+omp の再 apply の changed=0 と `agent-job` でのセッション再開は未検証。
 反映は本人が `make ansible-apply-agent` で行う。skill/config の変更は Hermes と
 CDP tunnel を再作成するので会話中を避ける。GitHub 公開処理は PR ② 完了後に開始する。
 
