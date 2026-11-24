@@ -222,7 +222,7 @@ credentials = {
     "anthropic-key": "sk-ant-" + "fixture0" * 5,
     "openai-key": "sk-" + "fixture0" * 5,
     "slack-token": "xoxb-00000000-fixture",
-    "tailscale-key": "tskey-auth-fixture-fixture",
+    "tailscale-key": "tskey-" + "auth-fixture-fixture",
     "age-key": "AGE-SECRET-KEY-1" + "0" * 24,
     "jwt": "eyJmaXh0dXJlIn0.YWJj.ZGVm",
     "bearer": "Bearer abcdefghfixture",
