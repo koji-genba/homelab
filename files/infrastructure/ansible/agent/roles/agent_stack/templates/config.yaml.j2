@@ -45,6 +45,12 @@ max_concurrent_sessions: 2
 # IANA timezone for cron schedules and logs.
 timezone: {{ agent_stack_timezone }}
 
+# Language for the Webapp UI and Hermes' fixed strings (approval prompts,
+# gateway replies). Model output is unaffected. Set here: a language picked
+# in the Webapp is written to this file and lost on the next apply.
+display:
+  language: ja
+
 agent:
   # Send attached images directly to GLM; keep the local auxiliary for tool use.
   image_input_mode: native
