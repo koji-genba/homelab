@@ -162,10 +162,71 @@ memory:
   write_approval: false
 
 skills:
-  # Shipped instructions assume local PTY/old flags. Use runner-* on SSH.
   disabled:
+    # Shipped instructions assume local PTY/old flags. Use runner-* on SSH.
     - claude-code
     - codex
+    # 2026-11-24 skill curation: zero use_count and a poor fit for this
+    # environment (no SaaS accounts, no macOS, coding is delegated through
+    # runner-*). Reversible; every skill with recorded use stays enabled.
+    # Manage this list here: `hermes skills config` edits are overwritten on
+    # the next apply.
+    # SaaS with no account / not used
+    - airtable
+    - box
+    - notion
+    - obsidian
+    # Mail: Gmail is handled by google-workspace and its cron
+    - himalaya
+    - email-inbox-triage
+    # Office formats (xlsx/pdf stay enabled)
+    - microsoft-office
+    - docx
+    - powerpoint
+    # Social / media
+    - xurl
+    - gif-search
+    - songsee
+    - youtube-content
+    # Creative
+    - architecture-diagram
+    - ascii-video
+    - baoyu-infographic
+    - claude-design
+    - design-md
+    - humanizer
+    - manim-video
+    - p5js
+    - popular-web-designs
+    - songwriting-and-ai-music
+    # Research (web_search covers these)
+    - arxiv
+    - competitor-news-monitor
+    - grounded-citations
+    - llm-wiki
+    # Dev methodology (coding is delegated via runner-*)
+    - codebase-inspection
+    - dogfood
+    - github
+    - hermes-agent-skill-authoring
+    - inspecting-hermes-desktop-dom
+    - node-inspect-debugger
+    - python-debugpy
+    - requesting-code-review
+    - simplify-code
+    - spike
+    - systematic-debugging
+    - test-driven-development
+    # Misc
+    - document-to-action-items
+    - meeting-action-items
+    - weekly-review-planning
+    - product-price-monitor
+    - opencode
+    # Not injectable here today (kanban/Teams/Windows-only); keep them off
+    - sdlc-review
+    - teams-meeting-pipeline
+    - windows-smb-shares
   # Stage every skill write for review.
   write_approval: true
 
