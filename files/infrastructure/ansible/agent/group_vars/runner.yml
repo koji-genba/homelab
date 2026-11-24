@@ -60,7 +60,7 @@ firewall_egress_allowed_networks: []
 firewall_egress_allowed_tcp:
   - address: 192.168.10.11/32
     port: 2049
-  # ADR-0015: dsh uses only the DGX OpenAI-compatible inference endpoint.
+  # ADR-0018: omp uses only the DGX OpenAI-compatible inference endpoint.
   - address: 192.168.10.51/32
     port: 8000
 # The Runner never runs Docker, so the DNAT guard is unnecessary here.

@@ -75,6 +75,12 @@
   loop: "{{ agent_stack_managed_skills }}"
   notify: Recreate Hermes and the CDP tunnel
 
+- name: Remove the retired runner-dsh skill
+  ansible.builtin.file:
+    path: "{{ agent_stack_hermes_data_dir }}/skills/runner-dsh"
+    state: absent
+  notify: Recreate Hermes and the CDP tunnel
+
 - name: Install the Compose wrapper helper
   ansible.builtin.template:
     src: homelab-agent-compose-up.sh.j2

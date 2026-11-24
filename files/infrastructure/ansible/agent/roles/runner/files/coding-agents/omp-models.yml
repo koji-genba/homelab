@@ -1,0 +1,14 @@
+# Managed by Ansible.
+providers:
+  dgx:
+    api: openai-completions
+    baseUrl: http://192.168.10.51:8000/v1
+    auth: none
+    compat:
+      supportsDeveloperRole: false
+      maxTokensField: max_tokens
+    models:
+      - id: glm-5.3-flash
+        contextWindow: 1048576
+        maxTokens: 65536
+        input: [text, image]

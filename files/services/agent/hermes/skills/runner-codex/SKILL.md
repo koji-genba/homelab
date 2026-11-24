@@ -28,5 +28,5 @@ PTY、`--full-auto`、対話的な承認待ちは使わない。
 
 sandboxがnamespace・bwrap・seccompで起動できなければ再試行を止め、エラーを報告する。
 本人にRunner側のuser namespace・bwrap・サービス制限の確認を依頼し、修復後に再試行する。
-急ぐ場合は承認された同じタスクをrunner-claudeへ回すか、読み取りだけならrunner-dshへ回す。
+急ぐ場合は承認された同じタスクをrunner-claudeへ回すか、読み取りだけならrunner-ompへ回す。
 `danger-full-access` やsandboxを無効化するフラグへ自動で切り替えない。

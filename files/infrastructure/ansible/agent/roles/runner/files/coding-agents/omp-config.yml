@@ -1,0 +1,22 @@
+# Managed by Ansible.
+modelRoles:
+  default: dgx/glm-5.3-flash
+retry:
+  modelFallback: false
+tools:
+  approvalMode: yolo
+startup:
+  checkUpdate: false
+update:
+  auto: false
+marketplace:
+  autoUpdate: 'off'
+telemetry:
+  otlpExportEnabled: false
+memory:
+  backend: 'off'
+mcp:
+  enableProjectConfig: false
+spotlight:
+  experiment:
+    enabled: false

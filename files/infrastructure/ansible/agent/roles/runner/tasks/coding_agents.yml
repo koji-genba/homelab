@@ -37,6 +37,14 @@
     checksum_algorithm: sha256
   register: runner_coding_installed_lock
 
+- name: Clear the success marker before replacing the installed packages
+  ansible.builtin.file:
+    path: /opt/coding-agents/.installed-package-lock.json
+    state: absent
+  when:
+    - runner_coding_installed_lock.stat.exists
+    - runner_coding_lock.stat.checksum | default('desired') != runner_coding_installed_lock.stat.checksum
+
 - name: Install coding CLIs when the integrity lock changes
   ansible.builtin.command:
     argv:
@@ -54,18 +62,6 @@
   register: runner_coding_install
   changed_when: true
 
-- name: Record the successfully installed coding CLI lock
-  ansible.builtin.copy:
-    src: /opt/coding-agents/package-lock.json
-    remote_src: true
-    dest: /opt/coding-agents/.installed-package-lock.json
-    owner: root
-    group: root
-    mode: '0644'
-  when:
-    - runner_coding_install is changed
-    - not ansible_check_mode
-
 - name: Link the coding CLIs into the system PATH
   ansible.builtin.file:
     src: "/opt/coding-agents/node_modules/.bin/{{ item }}"
@@ -77,7 +73,14 @@
   loop:
     - claude
     - codex
-    - dsh
+
+- name: Install the omp launcher
+  ansible.builtin.copy:
+    src: coding-agents/omp
+    dest: /usr/local/bin/omp
+    owner: root
+    group: root
+    mode: '0755'
 
 - name: Disable Claude Code automatic updates with managed settings
   ansible.builtin.copy:
@@ -109,25 +112,61 @@
     mode: '0700'
   loop:
     - .codex
-    - .dsh
+    - .omp
+    - .omp/agent
 
-- name: Install the dsh runner configuration
+- name: Install the omp runner configuration
   ansible.builtin.copy:
-    src: coding-agents/cordis.patch.yml
-    dest: "/home/{{ runner_user }}/.dsh/cordis.patch.yml"
+    src: "coding-agents/omp-{{ item }}"
+    dest: "/home/{{ runner_user }}/.omp/agent/{{ item }}"
     owner: "{{ runner_user }}"
     group: "{{ runner_user }}"
     mode: '0600'
+  loop:
+    - config.yml
+    - models.yml
 
 # ssh.py uses bash -c; remote background jobs additionally use bash -lc.
 # /usr/local/bin is in Debian's default PATH for both, without .bashrc edits.
-- name: Verify coding CLI discovery without a login shell
+- name: Verify coding CLI launch from both SSH shell modes
   become: true
   become_user: "{{ runner_user }}"
   ansible.builtin.command:
     argv:
       - /bin/bash
-      - -c
-      - command -v claude && command -v codex && command -v dsh && test ! -w /opt/coding-agents
+      - "{{ item }}"
+      - >-
+        command -v claude && command -v codex &&
+        test "$(command -v omp)" = /usr/local/bin/omp &&
+        test ! -w /opt/coding-agents &&
+        test -d /opt/coding-agents/node_modules/@oh-my-pi/pi-natives-linux-x64 &&
+        omp --version </dev/null
+  loop:
+    - -c
+    - -lc
   changed_when: false
   when: not ansible_check_mode
+
+- name: Record the successfully installed coding CLI lock
+  ansible.builtin.copy:
+    src: /opt/coding-agents/package-lock.json
+    remote_src: true
+    dest: /opt/coding-agents/.installed-package-lock.json
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - runner_coding_install is changed
+    - not ansible_check_mode
+
+- name: Remove the retired dsh launcher
+  ansible.builtin.file:
+    path: /usr/local/bin/dsh
+    state: absent
+
+- name: Remove the retired dsh managed configuration
+  become: true
+  become_user: "{{ runner_user }}"
+  ansible.builtin.file:
+    path: "/home/{{ runner_user }}/.dsh/cordis.patch.yml"
+    state: absent

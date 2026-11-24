@@ -43,7 +43,7 @@ agent_stack_managed_skills:
   - runner-coding
   - runner-claude
   - runner-codex
-  - runner-dsh
+  - runner-omp
   - runner-publish
   - runner-agent-job
 

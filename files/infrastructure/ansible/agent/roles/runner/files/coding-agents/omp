@@ -1,0 +1,3 @@
+#!/bin/sh
+exec /opt/coding-agents/node_modules/@oven/bun-linux-x64/bin/bun \
+    /opt/coding-agents/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js "$@"

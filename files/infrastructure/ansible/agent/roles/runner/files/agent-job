@@ -74,6 +74,12 @@ def string(obj, key):
     return value
 
 
+def reject_retired_cli(stages):
+    for stage in stages:
+        if isinstance(stage, dict) and stage.get('cli') == 'dsh':
+            raise ValueError('cli=dsh was retired; create a new plan with cli=omp (old sessions cannot resume)')
+
+
 def validate(plan):
     if not isinstance(plan, dict):
         raise ValueError('plan must be object')
@@ -96,12 +102,13 @@ def validate(plan):
     stages = plan.get('stages')
     if not isinstance(stages, list) or not 1 <= len(stages) <= 30:
         raise ValueError('stages must contain 1..30 stages')
+    reject_retired_cli(stages)
     for stage in stages:
         if not isinstance(stage, dict):
             raise ValueError('stage must be object')
         for field in ('name', 'prompt', 'acceptance'):
             string(stage, field)
-        if stage.get('cli') not in ('claude', 'codex', 'dsh') or type(stage.get('network')) is not bool:
+        if stage.get('cli') not in ('claude', 'codex', 'omp') or type(stage.get('network')) is not bool:
             raise ValueError('invalid cli/network')
         if 'model' in stage:
             string(stage, 'model')
@@ -160,7 +167,7 @@ def launch(task, state):
         raise ValueError('systemd user service could not start')
 
 
-def command(stage, session, prompt, run):
+def command(stage, session, prompt, omp_sessions=None):
     cli = stage['cli']
     model = ['--model', stage['model']] if stage.get('model') else []
     if cli == 'claude':
@@ -168,16 +175,39 @@ def command(stage, session, prompt, run):
     if cli == 'codex':
         # resume has no --sandbox option: put sandbox policy in global config.
         return ['codex', '-a', 'never', '-c', 'sandbox_mode="workspace-write"', '-c', 'sandbox_workspace_write.network_access=' + str(stage['network']).lower(), 'exec', *(['resume', session] if session else []), '--json', *model, prompt]
-    overlay = []
-    if stage.get('model'):
-        patch = run / 'model.yml'
-        # JSON is a YAML subset. The provider remains the managed DGX endpoint.
-        atomic(patch, [{'id': 'agent-default-model', 'config': {'provider': 'local-glm', 'model': stage['model']}}])
-        overlay = ['--patch', str(patch)]
-    return ['dsh', 'headless', *overlay, '--json', '--permission-mode', 'workspace-write', '--approval-policy', 'never', *(['--session-id', session] if session else []), prompt]
+    if model:
+        model[1] = 'dgx/' + model[1].removeprefix('dgx/')
+    return ['omp', '--mode', 'json', '--session-dir', str(omp_sessions), *model,
+            *(['--resume', session] if session else []), prompt]
 
 
-def parse(cli, output, session):
+def omp_session_exists(sessions_dir, session):
+    return (isinstance(session, str)
+            and re.fullmatch(r'[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}', session) is not None
+            and any(path.is_file() for path in sessions_dir.glob(f'*_{session}.jsonl')))
+
+
+def parse_omp(events, session, sessions_dir):
+    header, assistant, terminal = None, None, False
+    for event in events:
+        kind = event.get('type')
+        if kind == 'session':
+            header = event.get('id')
+        elif kind == 'agent_start':
+            assistant, terminal = None, False
+        elif kind == 'message_end' and event.get('message', {}).get('role') == 'assistant':
+            assistant = event['message']
+        elif kind == 'agent_end':
+            terminal = event.get('isTerminal') is True
+    # The JSON header precedes lazy persistence. An early failure may leave no
+    # transcript to reopen, so only record an ID with a file in this stage's directory.
+    persisted = omp_session_exists(sessions_dir, header)
+    text = '\n'.join(block['text'] for block in (assistant or {}).get('content', []) if block.get('type') == 'text')
+    failed = not (persisted and terminal and assistant and assistant.get('stopReason') == 'stop')
+    return header if persisted else session, text, failed
+
+
+def parse(cli, output, session, omp_sessions=None):
     if cli == 'claude':
         obj = json.loads(output)
         session = obj.get('session_id') or session
@@ -192,25 +222,19 @@ def parse(cli, output, session):
                 events.append(event)
             except ValueError:
                 malformed = True
+    if cli == 'omp':
+        session, text, failed = parse_omp(events, session, omp_sessions)
+        return session, text, failed or malformed
     text, error, final = '', malformed, False
     for event in events:
         kind = event.get('type')
-        if cli == 'codex':
-            if kind == 'thread.started':
-                session = event['thread_id']
-            if kind == 'item.completed' and event.get('item', {}).get('type') == 'agent_message':
-                text = event['item']['text']
-            if kind in ('error', 'turn.failed'):
-                error = True
-            final |= kind == 'turn.completed'
-        else:
-            if kind in ('session', 'final'):
-                session = event.get('sessionId') or session
-            if kind == 'final':
-                final = True
-                text = event.get('text', '')
-                error |= not isinstance(event.get('reason'), dict) or event['reason'].get('kind') != 'completed'
-            error |= kind == 'error'
+        if kind == 'thread.started':
+            session = event['thread_id']
+        if kind == 'item.completed' and event.get('item', {}).get('type') == 'agent_message':
+            text = event['item']['text']
+        if kind in ('error', 'turn.failed'):
+            error = True
+        final |= kind == 'turn.completed'
     if not final:
         error = True
     return session, text, error
@@ -309,6 +333,10 @@ def worker(task, state):
         return found is None
 
     with lock(ROOT / 'tasks' / ('.repo-' + key), True):
+        try:
+            reject_retired_cli(plan['stages'][state['stage']:])
+        except ValueError as exc:
+            return save(task, state, 'failed', str(exc))
         save(task, state, 'running')
         if (task / 'stop').exists():
             return save(task, state, 'stopped', 'stop requested')
@@ -334,6 +362,17 @@ def worker(task, state):
                 return
             slot = str(state['stage'])
             session = state['sessions'].get(slot)
+            child_env = env()
+            omp_sessions = None
+            if stage['cli'] == 'omp':
+                # Keep raw model transcripts out of Runner-work backups and redacted run logs.
+                omp_sessions = Path(child_env['HOME']) / '.omp' / 'agent-job-sessions' / state['id'] / slot
+                omp_sessions.mkdir(mode=0o700, parents=True, exist_ok=True)
+                if session and not omp_session_exists(omp_sessions, session):
+                    del state['sessions'][slot]
+                    if state.get('cli_sessions', {}).get('omp') == session:
+                        del state['cli_sessions']['omp']
+                    session = None
             prompt = ('受入条件: ' + stage['acceptance'] + '\ncommit、push、資格情報の読み取りは禁止。'
                       '\n最終出力の最後の行は AGENT_JOB_STATUS: done|continue|blocked と要約を書く。\n'
                       + ('続けて。前回の失敗があれば修復して受入条件まで進めてください。' if session else stage['prompt']))
@@ -347,7 +386,7 @@ def worker(task, state):
             save(task, state)
             # Temporary raw streams are immediately redacted after the child exits.
             with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
-                child = subprocess.Popen(command(stage, session, prompt, run), cwd=repo, env=env(), stdin=subprocess.DEVNULL, stdout=out, stderr=err, start_new_session=True)
+                child = subprocess.Popen(command(stage, session, prompt, omp_sessions), cwd=repo, env=child_env, stdin=subprocess.DEVNULL, stdout=out, stderr=err, start_new_session=True)
                 limit = min(time.time() + stage['timeout_minutes'] * 60, state['deadline_at'])
                 timed_out = False
                 while child.poll() is None:
@@ -374,7 +413,7 @@ def worker(task, state):
             (run / 'stderr').write_text(clean(stderr))
             failed, text = bool(child.returncode or timed_out), ''
             try:
-                session, text, parse_error = parse(stage['cli'], stdout, session)
+                session, text, parse_error = parse(stage['cli'], stdout, session, omp_sessions)
                 failed |= parse_error or not isinstance(session, str) or not session or not isinstance(text, str)
                 if isinstance(session, str) and session:
                     state['sessions'][slot] = session
@@ -521,6 +560,7 @@ def main():
                 state, plan = read(task / 'state.json'), read(task / 'plan.json')
                 if alive(args.id):
                     raise ValueError('job still active')
+                reject_retired_cli(plan['stages'][state['stage']:])
                 if state['status'] in ACTIVE:
                     if time.time() - state['updated_at'] < 30:
                         raise ValueError('job may still be starting')
