@@ -1,6 +1,6 @@
 ---
 name: runner-coding
-description: Runnerで開発を依頼されたとき、dsh・Claude Code・Codexを選び、作業とテストの結果を本人へ報告する。
+description: Runnerで開発を依頼されたとき、omp・Claude Code・Codexを選び、作業とテストの結果を本人へ報告する。
 platforms: [linux]
 ---
 
@@ -10,12 +10,12 @@ platforms: [linux]
 `/srv/agent-work/repos/<owner>/<repo>`。このtreeはRunner上にあり、Agentのローカルではない。
 
 - 長時間または放置する作業は `runner-agent-job` を読み、計画から driver を起動する。
-  dsh を含む3 CLIをどの段階にも選べる。以下の直接起動は短い作業に使う。
-- 安い作業、読むだけの調査、小さな変更は `runner-dsh`（DGX glm-5.3-flash）。
+  omp を含む3 CLIをどの段階にも選べる。以下の直接起動は短い作業に使う。
+- 安い作業、読むだけの調査、小さな変更は `runner-omp`（DGX glm-5.3-flash）。
 - 複雑な実装、設計、難しい不具合は `runner-claude` または `runner-codex`。
   本人の指定があれば優先する。失敗を無限に別CLIへ回さず、原因と制限を伝える。
 - 同じcheckoutを複数workerで同時編集しない。DGXはHermes本体と共用なので、
-  dshの同時起動を避け、遅いときは負荷を本人へ伝える。
+  ompの同時起動を避け、遅いときは負荷を本人へ伝える。
 - CLIには変更とテストまでを依頼する。commit・push・PRは `runner-publish` を読み、
   Hermesが結果を確認してから行う。GitHub credentialの発行・注入はworkerに依頼しない。
 

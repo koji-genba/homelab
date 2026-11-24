@@ -26,7 +26,7 @@ class Jobs(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        self.root = Path(self.tmp.name).resolve()
         job.ROOT = self.root
         job.HELPER = self.root / 'missing-helper'
         self.repo = self.root / 'repos/owner/repo'
@@ -63,13 +63,34 @@ if cli == 'codex':
  print(json.dumps({'type':'thread.started','thread_id':'codex-session'}))
  print(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':text}}))
  print(json.dumps({'type':'turn.completed'}))
-if cli == 'dsh':
- print(json.dumps({'type':'session','sessionId':'session-dsh'}))
- print(json.dumps({'type':'final','sessionId':'session-dsh','reason':{'kind':'completed'},'text':text}))
+if cli == 'omp':
+ assert sys.stdin.read() == ''
+ assert args[args.index('--mode') + 1] == 'json'
+ sessions = pathlib.Path(args[args.index('--session-dir') + 1])
+ if '--resume' in args:
+  session = args[args.index('--resume') + 1]
+  assert (sessions / ('timestamp_' + session + '.jsonl')).is_file()
+ else:
+  session = f'019abcde-0000-7000-8000-{n:012d}'
+ if mode != 'omp-no-id':
+  print(json.dumps({'type':'session','id':session}))
+ if mode == 'omp-header-only' and n == 1: sys.exit(1)
+ (sessions / ('timestamp_' + session + '.jsonl')).touch()
+ print(json.dumps({'type':'agent_start'}))
+ def message(role, content, reason='stop'):
+  return {'role':role,'content':content,'stopReason':reason}
+ intermediate = message('assistant', [{'type':'text','text':'AGENT_JOB_STATUS: blocked intermediate'}], 'toolUse')
+ print(json.dumps({'type':'message_end','message':intermediate}))
+ print(json.dumps({'type':'agent_end','isTerminal':False,'messages':[intermediate]}))
+ reason = 'error' if mode == 'omp-provider-error' else 'stop'
+ final = message('assistant', [{'type':'thinking','thinking':'ignored'}, {'type':'text','text':'changed file'}, {'type':'text','text':text}], reason)
+ print(json.dumps({'type':'message_end','message':final}))
+ print(json.dumps({'type':'message_end','message':message('toolResult', [{'type':'text','text':'ignored'}])}))
+ print(json.dumps({'type':'agent_end','isTerminal':mode != 'omp-no-terminal','messages':[final]}))
 if mode == 'malformed': print('not-json')
 sys.exit(1 if mode == 'fail' or mode == 'recover' and n in (1, 3) else 0)
 ''')
-        for cli in ('claude', 'codex', 'dsh'):
+        for cli in ('claude', 'codex', 'omp'):
             script = self.bin / cli
             script.write_text('#!/bin/sh\nexec /usr/bin/python3 ' + str(fake) + ' ' + cli + ' "$@"\n')
             script.chmod(0o755)
@@ -106,7 +127,7 @@ sys.exit(1 if mode == 'fail' or mode == 'recover' and n in (1, 3) else 0)
         return task, job.read(task / 'state.json')
 
     def test_resume_all_three_and_checkpoint(self):
-        for cli in ('claude', 'codex', 'dsh'):
+        for cli in ('claude', 'codex', 'omp'):
             with self.subTest(cli=cli):
                 plan = self.plan(cli, 'sequence', 2)
                 plan['id'] = cli
@@ -120,8 +141,13 @@ sys.exit(1 if mode == 'fail' or mode == 'recover' and n in (1, 3) else 0)
                 self.assertEqual(state['stage'], 2)
                 self.assertEqual([job.read(task / 'runs' / str(n) / 'result.json')['stage'] for n in (1, 2, 3)], [0, 0, 1])
                 calls = [json.loads(line) for line in (self.repo / 'argv').read_text().splitlines()]
-                self.assertIn({'claude': '--resume', 'codex': 'resume', 'dsh': '--session-id'}[cli], calls[1])
-                self.assertNotIn({'claude': '--resume', 'codex': 'resume', 'dsh': '--session-id'}[cli], calls[2])
+                self.assertIn({'claude': '--resume', 'codex': 'resume', 'omp': '--resume'}[cli], calls[1])
+                self.assertNotIn({'claude': '--resume', 'codex': 'resume', 'omp': '--resume'}[cli], calls[2])
+                if cli == 'omp':
+                    self.assertNotIn('--resume', calls[0])
+                    self.assertEqual(calls[1][calls[1].index('--resume') + 1], state['sessions']['0'])
+                    self.assertNotEqual(state['sessions']['0'], state['sessions']['1'])
+                    self.assertEqual(state['cli_sessions']['omp'], state['sessions']['1'])
                 self.assertIn('続けて。', calls[1][-1])
                 self.assertNotIn(plan['stages'][0]['prompt'], calls[1][-1])
                 self.assertEqual(self.git('log', '--format=%s', 'main..HEAD').splitlines(), [f'agent-job({cli}): stage-1', f'agent-job({cli}): stage-0'])
@@ -385,7 +411,7 @@ sys.exit(1 if mode == 'fail' or mode == 'recover' and n in (1, 3) else 0)
         self.assertEqual(job.clean('push to origin: 3 commits'), 'push to origin: 3 commits')
 
     def test_retry_without_session_keeps_original_prompt(self):
-        for cli in ('claude', 'codex', 'dsh'):
+        for cli in ('claude', 'codex', 'omp'):
             for mode in ('no-session-fail', 'no-session-malformed'):
                 with self.subTest(cli=cli, mode=mode):
                     plan = self.plan(cli, mode)
@@ -402,7 +428,7 @@ sys.exit(1 if mode == 'fail' or mode == 'recover' and n in (1, 3) else 0)
                         self.assertIn(plan['stages'][0]['prompt'], call[-1])
                         self.assertIn(plan['stages'][0]['acceptance'], call[-1])
                         self.assertNotIn('続けて。', call[-1])
-                        self.assertNotIn({'claude': '--resume', 'codex': 'resume', 'dsh': '--session-id'}[cli], call)
+                        self.assertNotIn({'claude': '--resume', 'codex': 'resume', 'omp': '--resume'}[cli], call)
                     first_result = job.read(task / 'runs/1/result.json')
                     self.assertTrue(first_result['failed'])
                     self.git('switch', '-q', 'main')
@@ -421,7 +447,7 @@ sys.exit(1 if mode == 'fail' or mode == 'recover' and n in (1, 3) else 0)
         self.assertEqual((s['status'], s['launches']), ('blocked', 1))
 
     def test_failures(self):
-        for cli in ('claude', 'codex', 'dsh'):
+        for cli in ('claude', 'codex', 'omp'):
             plan = self.plan(cli, 'fail')
             plan['id'] = cli
             plan['branch'] = 'agent/' + cli
@@ -435,6 +461,56 @@ sys.exit(1 if mode == 'fail' or mode == 'recover' and n in (1, 3) else 0)
         _, s = self.run_job(mode='recover')
         self.assertEqual((s['status'], s['launches'], s['consecutive_failures']), ('ready_to_publish', 4, 0))
 
+    def test_omp_requires_session_id_terminal_event_and_successful_assistant(self):
+        for mode in ('omp-no-id', 'omp-no-terminal', 'omp-provider-error'):
+            with self.subTest(mode=mode):
+                plan = self.plan('omp', mode)
+                plan['id'] = mode
+                plan['branch'] = 'agent/' + mode
+                task, state = self.prepare(plan)
+                job.worker(task, state)
+                self.assertEqual((state['status'], state['consecutive_failures']), ('failed', 3))
+                self.assertEqual(job.read(task / 'runs/1/result.json')['exit_code'], 0)
+                if mode == 'omp-no-id':
+                    self.assertEqual(state['sessions'], {})
+                (self.repo / 'implementation.txt').unlink(missing_ok=True)
+                self.git('switch', '-q', 'main')
+
+    def test_omp_header_without_transcript_retries_fresh(self):
+        _, state = self.run_job(cli='omp', mode='omp-header-only')
+        self.assertEqual((state['status'], state['launches']), ('ready_to_publish', 2))
+        calls = [json.loads(line) for line in (self.repo / 'argv').read_text().splitlines()]
+        self.assertNotIn('--resume', calls[1])
+        self.assertTrue(calls[1][-1].endswith('implement'))
+
+    def test_omp_restarts_stage_after_transcript_is_lost(self):
+        task, state = self.prepare(self.plan('omp', 'blocked'))
+        job.worker(task, state)
+        self.assertEqual(state['status'], 'blocked')
+        sessions = self.home / '.omp' / 'agent-job-sessions' / state['id'] / '0'
+        for transcript in sessions.glob('*.jsonl'):
+            transcript.unlink()
+        (self.repo / 'mode').write_text('done')
+        job.worker(task, state)
+        self.assertEqual(state['status'], 'ready_to_publish')
+        calls = [json.loads(line) for line in (self.repo / 'argv').read_text().splitlines()]
+        self.assertNotIn('--resume', calls[1])
+        self.assertTrue(calls[1][-1].endswith('implement'))
+
+    def test_retired_cli_rejected_for_new_plans_and_pending_stages(self):
+        plan = self.plan()
+        plan['stages'][0]['cli'] = 'dsh'
+        with self.assertRaisesRegex(ValueError, 'create a new plan with cli=omp'):
+            job.validate(plan)
+        task, state = self.prepare(plan)
+        job.worker(task, state)
+        self.assertEqual((state['status'], state['launches']), ('failed', 0))
+        self.assertIn('create a new plan with cli=omp', state['summary'])
+        with patch.object(job, 'alive', return_value=False), patch.object(job, 'launch') as launch:
+            with self.assertRaisesRegex(ValueError, 'create a new plan with cli=omp'):
+                self.invoke('resume', state['id'])
+            launch.assert_not_called()
+
     def test_malformed(self):
         _, s = self.run_job(cli='codex', mode='malformed')
         self.assertEqual((s['status'], s['consecutive_failures']), ('failed', 3))
@@ -446,7 +522,7 @@ sys.exit(1 if mode == 'fail' or mode == 'recover' and n in (1, 3) else 0)
         self.assertIn('--resume', calls[1])
 
     def test_real_timeout_is_failure(self):
-        plan = self.plan(mode='sleep')
+        plan = self.plan(cli='omp', mode='sleep')
         plan['stages'][0]['timeout_minutes'] = 0.001
         task, s = self.prepare(plan)
         job.worker(task, s)
@@ -461,7 +537,7 @@ sys.exit(1 if mode == 'fail' or mode == 'recover' and n in (1, 3) else 0)
         self.assertEqual((s['status'], s['launches']), ('deadline', 1))
 
     def test_launch_limit(self):
-        _, s = self.run_job(cli='dsh', mode='continue')
+        _, s = self.run_job(cli='omp', mode='continue')
         self.assertEqual((s['status'], s['launches']), ('failed', 30))
 
     def test_deadline(self):
@@ -600,15 +676,14 @@ sys.exit(1 if mode == 'fail' or mode == 'recover' and n in (1, 3) else 0)
             self.assertTrue(launch.called)
 
     def test_model_and_network_commands(self):
-        for cli in ('claude', 'codex', 'dsh'):
+        for cli in ('claude', 'codex', 'omp'):
             stage = dict(cli=cli, model='fixture-model', network=False)
             command = job.command(stage, 'previous-session', 'continue', self.root)
-            if cli == 'dsh':
-                self.assertIn('--patch', command)
-                self.assertNotIn('--model', command)
-                self.assertEqual(job.read(self.root / 'model.yml')[0]['config']['model'], 'fixture-model')
-            else:
-                self.assertIn('--model', command)
+            expected = 'dgx/fixture-model' if cli == 'omp' else 'fixture-model'
+            self.assertEqual(command[command.index('--model') + 1], expected)
+            if cli == 'omp':
+                self.assertEqual(command[command.index('--resume') + 1], 'previous-session')
+                self.assertNotIn('--no-tools', command)
             if cli == 'codex':
                 self.assertIn('sandbox_mode="workspace-write"', command)
                 self.assertIn('sandbox_workspace_write.network_access=false', command)

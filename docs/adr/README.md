@@ -20,6 +20,7 @@ ADR は採用時点の判断を固定するもので、前提が変わった場�
 | [0012](0012-ups-stayoff-nfs-order.md) | 承認済み。2026-10-31反映、11-01の商用電源ありFSD試験でstayoff・手動復旧・NFS順序を確認 | UPSをondelay=-1で手動復旧し、pve-guestsをNFSより先に停止する |
 | [0013](0013-hermes-webapp-caddy.md) | 承認済み。2026-11-02に本番反映（PR #179・#181・#182・#180）、Webappログイン・会話、到達性・認証境界、Gatus監視、Discordでのrecall・ブラウザtool・MEDIA配送・既登録コマンド表示を確認 | Hermes Webapp を Apps Caddy 経由で公開し、Agent の9120到達元を Apps のみに限定する。0009の追加例外、Agentはtailnet外を維持 |
 | [0014](0014-hermes-share-nfs.md) | 採用。2026-11-05反映済み。export・mount・guard・隔離・SMB・Hermesの共有利用を確認。残る確認事項は[共有運用](../operations/hermes-share.md#未検証の項目) | Hermes受け渡し用の専用NFSをRunnerへ直接mountし、pve1:2049/tcpだけを隔離の例外にする。先にaiのexportを3 clientの/32へ絞る |
-| [0015](0015-hermes-coding-agents.md) | 採用。repo定義済み、実機は未検証 | Runnerの固定版コーディングCLI、DGX TCP/8000例外、homeのサブスク認証と外部モデルへのコード送信。GitHub AppはPR ② |
+| [0015](0015-hermes-coding-agents.md) | 採用。dsh と当該 CLI の隔離方針は [0018](0018-runner-omp.md) で置換 | Runnerの固定版コーディングCLI、DGX TCP/8000例外、homeのサブスク認証と外部モデルへのコード送信。GitHub AppはPR ② |
 | [0016](0016-terraform-state-sync-lock.md) | 採用。repo実装済み、実端末間運用・ruleset反映は未検証 | 暗号化GitブランチをTerraform stateの正本に格上げし、同期・refロック・失敗時backupを導入する |
 | [0017](0017-operator-defaults.md) | 採用、実機移行は未検証 | operator認証情報とTerraform入力の既定値 |
+| [0018](0018-runner-omp.md) | 採用。repo実装済み、実機は未検証 | dsh を omp に置き換え、Runner VM を隔離境界として DGX 推論を利用する |

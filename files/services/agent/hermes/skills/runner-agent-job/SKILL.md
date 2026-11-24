@@ -7,7 +7,7 @@ platforms: [linux]
 # 長い作業を Runner に任せる
 
 長時間・ブラウザを閉じて放置する作業に使う。短い作業は `runner-claude`、
-`runner-codex`、`runner-dsh` を使う。`runner-coding` の承認済みコードと秘密の扱いを守る。
+`runner-codex`、`runner-omp` を使う。`runner-coding` の承認済みコードと秘密の扱いを守る。
 Hermes は計画を作って起動し、必要なときに状態を調べる。無人の最終レビューは計画の段階に含める。
 段階をつなぐのは Runner の driver。Webapp の note や background 完了通知で次段階を起動しない。
 
@@ -28,7 +28,7 @@ driver が job の branch へ戻す。未コミットの変更があれば切り
   "max_launches": 30,
   "max_consecutive_failures": 3,
   "stages": [
-    {"name": "implement", "cli": "dsh", "prompt": "機能を実装して関連テストを実行する",
+    {"name": "implement", "cli": "omp", "prompt": "機能を実装して関連テストを実行する",
      "acceptance": "要求を満たし、関連テストが成功する。未解決はblockedとして報告する",
      "timeout_minutes": 45, "network": false},
     {"name": "review", "cli": "codex", "prompt": "変更とテストをレビューし必要な修正を行う",
@@ -39,13 +39,13 @@ driver が job の branch へ戻す。未コミットの変更があれば切り
 }
 ```
 
-各段階は、目的と検証可能な受入条件を持つ。cli はどの段階も claude / codex / dsh を選べる。
-dsh（GLM）に重い段階を任せる計画では、最後に claude か codex のレビュー段階を置く。
+各段階は、目的と検証可能な受入条件を持つ。cli はどの段階も claude / codex / omp を選べる。
+omp（GLM）に重い段階を任せる計画では、最後に claude か codex のレビュー段階を置く。
 実装した CLI とは別のものを選ぶ。claude / codex が実装する場合も、規模が大きければ
 別 CLI の最終レビューを置くのが望ましい。本人の希望、必要な能力、利用枠から選び、
-DGX は Hermes 本体と共用なので dsh の並列使用による待ち時間にも注意する。
+DGX は Hermes 本体と共用なので omp の並列使用による待ち時間にも注意する。
 `network` は必須のboolで Codex の sandbox ネットワークだけを制御する。
-`model` は任意。dsh の model は管理済み local-glm provider 内のモデル名。
+`model` は任意。omp の model は管理済み `dgx` provider 内のモデル名で、未指定時は `glm-5.3-flash`。
 段階の timeout は既定45分・最大120分、期限は既定・最大6時間。
 初回計画は起動30回・連続失敗3回まで、段階数は1〜30。
 計画にも資格情報や機密コードを書かない。公開本文には実際の検証結果と未検証事項を書く。
@@ -67,7 +67,7 @@ blocked なら公開せず停止し、見張りの通知対象になる。Webapp
 起きる前提にはしない。レビューの timeout は45分を目安に、全テストの所要時間に応じて
 最大120分まで確保し、job 全体の期限・起動予算にも含める。
 network は原則 false。依存取得など検証に必要で許可済みの場合だけ true にする。
-これは Codex の sandbox の設定であり、claude / dsh や Runner の通信制限を変えるものではない。
+これは Codex の sandbox の設定であり、claude / omp や Runner の通信制限を変えるものではない。
 
 SSH terminal で通常の短いコマンドとして実行する（PTY・background追跡は不要）:
 
@@ -83,7 +83,7 @@ agent-job resume feature-01 --deadline-hours 6 --max-launches 60 --max-consecuti
 
 `stop` は停止フラグを書き、systemd user service の cgroup 全体を停止する。
 通常の `/stop` は Hermes の会話を止めるもので、Runner job の停止には上記コマンドを使う。
-`resume` は同じ段階・CLI session を再開する。期限は指定時から最大6時間、
+`resume` は同じ段階で保存済みの CLI session を再開する。omp の新しい段階は新規 session で始まる。期限は指定時から最大6時間、
 起動上限は累積値。上限を増やすのは本人の判断を得た場合だけ。
 失敗理由と残件を確かめず自動再開や別CLIへの無限回送をしない。
 

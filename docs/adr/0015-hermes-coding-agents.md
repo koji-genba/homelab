@@ -1,5 +1,7 @@
 # ADR-0015: Runner のコーディング CLI と DGX 推論接続
 
+> dsh の採用と当該 CLI の隔離方針は [ADR-0018](0018-runner-omp.md) で置き換えた。
+
 - 日付: 2026-11-12
 - 状態: 採用。repo 定義済み、実機は未検証
 - 背景と決定: [issue #207](https://github.com/koji-genba/homelab/issues/207) の PR ①

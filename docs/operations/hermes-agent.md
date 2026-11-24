@@ -896,7 +896,8 @@ Runner の実体は `/srv/agent-work/share`。inbox/outbox は約束で、権限
 
 ## Runner のコーディング CLI（issue #207）
 
-[ADR-0015](../adr/0015-hermes-coding-agents.md) の PR ①。
+Runner の CLI と公開の設計は [ADR-0015](../adr/0015-hermes-coding-agents.md)、omp への移行は
+[ADR-0018](../adr/0018-runner-omp.md) を参照。
 実機での導入・ログイン・推論実行・再 apply の changed=0 は未検証。
 反映は本人が `make ansible-apply-agent` で行う。skill/config の変更は Hermes と
 CDP tunnel を再作成するので会話中を避ける。GitHub 公開処理は PR ② 完了後に開始する。
@@ -906,32 +907,27 @@ CDP tunnel を再作成するので会話中を避ける。GitHub 公開処理�
 `roles/runner/files/coding-agents/` の package.json と package-lock.json を
 root 所有の `/opt/coding-agents` に置き、成功時の lockfile と SHA-256 を比較して、
 変更時だけ `npm ci` を実行する。失敗した install は成功記録を更新せず、次回に再試行する。
-`/usr/local/bin/{claude,codex,dsh}` はその `.bin` への symlink。
-hermes-runner に導入先への書き込み権限は与えない。
+`/usr/local/bin/{claude,codex}` はその `.bin` への symlink。`/usr/local/bin/omp` は root 管理の
+ラッパーで、lockfile に含まれる Linux amd64 glibc 版 Bun から omp の `dist/cli.js` を実行する。
+hermes-runner の導入先は読み取り・実行用。インストール成功の SHA-256 は両 SSH shell での起動確認後に記録する。
 
-2026-11-12 の npm registry latest を調べ、次へ固定した。
+次の npm パッケージを固定して導入する。
 
 | package | 固定版 |
 | --- | --- |
 | @anthropic-ai/claude-code | 2.1.322 |
 | @openai/codex | 0.167.1 |
-| @deepseek-ai/dsh | 0.2.2-rc.1 |
+| @oh-my-pi/pi-coding-agent | 19.1.0 |
+| @oven/bun-linux-x64 | 1.4.4 |
 
 gh は [Debian 13 の 2.46.0-3](https://packages.debian.org/trixie/gh) を apt で入れる。
 必要な `pr create --base --head --body-file --repo` は
 [その版のソース](https://github.com/cli/cli/blob/v2.46.0/pkg/cmd/pr/create/create.go) にあり、
 外部 apt repository は不要。bubblewrap と socat も Debian apt 管理とし、OS の更新経路を使う。
 
-[dsh rc.1 の changelog](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.2-rc.1)
-は 0.2.1-rc.5 以降をまとめている。
-[旧 rc.5](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-rc.5) は thinking 表示改善が中心。
-rc.1 は Node >=24.9、Cordis Core 4.1・Loader/Include 1.1、pi-ai 1.3 へ更新し、
-PTC tool 実行の分割、tools.mode/DSH_TOOLS_MODE の移行、Node PTC の SSH protocol 2→3、
-plugin の tools.resolve/executable・prompt assembly、SDK・Session API などに互換性変更がある。
-また read-before-write/external-change 検査が既定で無効になり、Web Fetch は private address も
-扱えるため、Runner の firewall 制限を維持する。
-今回は独自 plugin/PTC helper を使わず、採用版の home patch・headless を確認できたこと、
-pi-ai・model 切替・approval 保存などの修正を理由に rc.1 を選んだ。preview の互換性保証はない。
+omp の native 依存 `@oh-my-pi/pi-natives-linux-x64` 19.1.0 も lockfile に含む。
+Bun は npm の glibc バイナリを直接固定するため、Bun のインストール用スクリプトや別の
+ダウンロード経路が不要。Bun 1.4.4 は 2026-10-22 公開で omp の最小要件を満たす。
 
 自動更新と設定の管理は次の契約とする。
 
@@ -954,23 +950,18 @@ pi-ai・model 切替・approval 保存などの修正を理由に rc.1 を選ん
   置換も削除もしないので、Codex が書いた値は apply で消えない（対話で変えた model 等は system の既定より優先される）。
   旧版が置いた同じ3行の `~/.codex/config.toml` は既存 Runner に残る。値は同じで害はないが、
   system の既定を変えるときは本人がその3行を消す。
-- dsh の `~/.dsh/cordis.patch.yml` は作業端末と同じ DGX provider・ダミー Authorization を使う。
-  glm-5.3-flash、context 1048576、output 65536、developer role 無効、max_tokens、
-  bash timeout 600000ms。DeepSeek の API/account/web search と session telemetry を止める。
-  desktop の telemetry/analytics は headless に存在しないため、その2 entryのpatchは含めない。
-  [採用版 profile-boot](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/apps/cli/src/profile-boot.ts)
-  は home patch を全 profile に重ね、通常起動では別の profile root config を書く。
-  設定編集/plugin 操作には永続化経路があるので、ローカル設定変更も apply で戻す。
-  CLI/headless に自動本体更新の経路・停止スイッチは確認されず、Desktop updater は使わない。
-  plugin の追加・更新を worker に行わせず、必要なら repo の固定依存として見直す。
+- omp は `~/.omp/agent/config.yml` と `models.yml` を Ansible で配布する。
+  既定モデルは `dgx/glm-5.3-flash`。接続先は OpenAI 互換の `http://192.168.10.51:8000/v1`、
+  `auth: none` でログイン不要。context 1048576、output 65536、developer role 無効、`max_tokens` を使う。
+  OTLP export、起動時の更新チェック、自動更新、Marketplace 更新チェック、メモリ連携、
+  project MCP 設定、Spotlight 実験とエラー時のモデル切り替えを無効にする。
+  `tools.approvalMode: yolo` を使い、配布した2ファイルは apply で復元する。
 
-`.codex` と `.dsh` は hermes-runner 所有0700、Ansible が置く `.dsh` の設定は0600。
+`.codex`・`.omp`・`.omp/agent` は hermes-runner 所有0700、omp の管理設定は0600。
 `/etc/codex/config.toml` は root 所有0644。
 ディレクトリを再帰変更せず、`.claude/.credentials.json` と `.codex/auth.json` は
 読み取り・配置・削除・属性変更の対象にしない。ログイン後も token refresh 用の書き込みを残す。
-通常の headless 実行での設定の不変性、認証更新との併用、2回目 apply の changed=0 は実機で未検証。
-`/etc/codex/config.toml` が実機の Codex に読まれて既定が効くことも未検証。
-dsh の対話設定の変更や Hermes の skill 編集があれば、その復元分は changed になる。
+通常の非対話実行後の設定・認証維持と再 apply の冪等性、Codex の system 設定は実機で確認する。
 
 ### 初回ログイン（本人が行う）
 
@@ -1007,7 +998,7 @@ home は Runner-work のバックアップ対象外。資格情報を `/srv/agen
 ### skill と作業の流れ
 
 repo の skills 直下に `runner-coding`（使い分け）、`runner-claude`、`runner-codex`、
-`runner-dsh`、`runner-publish` の5本を置く。
+`runner-omp`、`runner-agent-job`、`runner-publish` の6本を置く。
 [Hermes c7da41dd の loader](https://github.com/NousResearch/hermes-agent/blob/c7da41dd522dc19cc08bbfcfa69d4b078224b45d/tools/skills_tool.py)
 で YAML frontmatter の name/description、name 64文字・description 1024文字の上限、
 カテゴリが配置パスから決まること、同じtierの名前衝突が拒否されることを確認した。
@@ -1016,8 +1007,8 @@ repo の skills 直下に `runner-coding`（使い分け）、`runner-claude`、
 直接skill_viewで読める経路は残るので、使い分けskillでも旧2本を使わないよう指示する。
 
 既存 `Seed the shipped skills when absent` は force=false のまま。
-今回の5本だけ別の copy task（force=true）で同期する。
-**Hermes がこの5本を書き換えても、次の apply で repo の内容に戻る。**
+この6本を別の copy task（force=true）で同期し、旧 `runner-dsh` の配布先を削除する。
+**Hermes がこの6本を書き換えても、次の apply で repo の内容に戻る。**
 hermes-share と weekly-review の既存編集は上書きしない。
 
 作業は Runner の `/srv/agent-work/repos/<owner>/<repo>` で `agent/<topic>` branch を作って行う。
@@ -1033,6 +1024,8 @@ Claude の `--permission-mode bypassPermissions` は
 `--dangerously-skip-permissions` と等価。
 [公式 devcontainer 手順](https://code.claude.com/docs/en/devcontainer) は非rootユーザーでの使用を示す。
 Runner の非rootで使い、VMを隔離境界とする。`--bare` は使わない。
+omp も Runner VM を隔離境界とし、通常のツールを有効にして `omp --mode json` で起動する。
+Hermes から直接起動する場合は `</dev/null` を付ける。
 Codex は workspace-write、必要時だけ network_access=true。sandbox が不成立なら原因を報告し、
 Runner 側の制限を直すか別CLIを選ぶ。danger-full-access へ自動変更しない。
 
@@ -1046,22 +1039,47 @@ main へのpush・mergeは禁止。本人への報告は使ったCLI・結果・
 
 ### 版の更新と反映前後の確認
 
-package.json の3依存を exact version へ更新し、そのディレクトリで
-`npm install --package-lock-only --no-audit --no-fund` を実行して lockfile を生成する。
+package.json の対象依存を exact version へ更新し、Linux amd64 の作業環境で
+`npm install --package-lock-only --ignore-scripts --no-audit --no-fund` を実行して lockfile を生成する。
+macOS で lockfile だけ生成する場合は `--force` を追加して OS/CPU の検査を通す。実際の `npm ci` は Linux amd64 で行う。
 差分の版・resolved・integrity・install scripts と changelog をレビューし、
 一時ディレクトリで `npm ci` を検証してから、本人が `make ansible-apply-agent` を行う。
-CLI自身の update/install コマンドは使わない。rollbackも以前のmanifest/lockへ戻してapplyする。
+CLI自身の update/install コマンドは使わない。版だけのロールバックは以前の manifest/lock を適用する。
 Nodeの最低版と設定schema・skillのフラグも更新ごとに確認する。
 
 反映前にroot管理の導入先、既存ログインへの影響、再作成のタイミング、DGXの稼働endpointと
 モデル容量、送るrepoの機密性を確認する。適用後の受入は次のとおり（いずれも実機では未検証）。
 
-- Hermes の実 SSH session で `command -v claude codex dsh gh`、版、導入先の書き込み不可を確認。
-- 初回ログイン後に小さな試験用 repo で3 CLIの変更・テスト・終了通知・構造化結果を確認。
-- Codex/dsh の sandbox、dsh のbwrap選択、GLM tool calling、DGXの競合を確認。
+- Hermes の実 SSH session と background の login shell の両方で `command -v claude codex omp gh`、
+  `omp --version </dev/null`、導入先の書き込み不可を確認。移行済み Runner では旧 launcher・管理設定・skill の削除も確認。
+- 小さな試験用 repo で3 CLIの変更・テスト・終了通知・構造化結果を確認。omp は下記の短い
+  非対話試験と agent-job の同一段階の resume・次段階の新規 session を確認。
+- Codex の sandbox、omp の GLM tool calling と DGX の競合を確認。
 - RunnerからDGX TCP/8000だけが通り、同hostの他port・他LAN宛は拒否されることを確認。
 - 通常実行後の設定と認証維持、連続2回目 apply の changed=0、backupのhome除外を確認。
 - smart approvalで通常CLI起動を許可し、資格情報読み取り/送信をESCALATEするか確認。
+
+omp の短い非対話試験は試験用 repo に移動し、hermes-runner から実行する。
+
+```sh
+timeout --signal=TERM --kill-after=30s 2m omp --mode json \
+  '作業ディレクトリで git status --short を実行し、結果を1行で報告する。' </dev/null
+```
+
+終了コード 0、`session.id`、ツール実行の結果、`agent_end.isTerminal: true` と最終応答を確認する。
+
+### omp 移行のロールバック
+
+1. Agent からの新規起動を止め、実行中の job は終了を待つか `agent-job stop <id>` で停止する。
+2. 変更を一式戻した repo で、本人が `make ansible-apply-agent` を行う。旧 manifest/lock、設定、
+   launcher、agent-job、Hermes skill と承認ルールが復元される。疎通後に新規起動を再開する。
+3. 旧 playbook に削除タスクがないため、不要になった `/usr/local/bin/omp`、
+   `~hermes-runner/.omp/agent/{config,models}.yml`、Agent 側
+   `/srv/agent/hermes/skills/runner-omp` の残存を確認し、本人が管理ファイルだけを撤去する。
+   skill の撤去後は `Recreate Hermes and the CDP tunnel` handler と同じ Compose コマンドで両サービスを
+   再作成する。両 CLI のユーザーデータは保全する。
+4. セッション ID に互換性がない。途中の作業は差分と checkpoint を確認し、続ける CLI を
+   指定した新しい計画で開始する。切り替え前の CLI を復元した場合は元の計画とセッションの残存を確認する。
 
 PR ②のApp設定・鍵登録・repo onboarding・公開受入は下記「GitHub App による公開」に従う。
 
@@ -1082,7 +1100,10 @@ agent-job resume task-01 --deadline-hours 6 --max-launches 60 --max-consecutive-
 ```
 
 計画例と必須項目は [runner-agent-job skill](../../files/services/agent/hermes/skills/runner-agent-job/SKILL.md)。
-重い段階を dsh（GLM）に任せる計画は、最後に実装とは別の CLI（claude / codex）で
+旧 `cli=dsh` を持つ新規計画と、同 CLI の未完了段階がある保存済み計画はエラーになる。
+差分と checkpoint を確認して `cli=omp` の新しい計画を作る。omp の生トランスクリプトは
+`~/.omp/agent-job-sessions/<id>/<stage>/` に保存され、Runner-work backup の対象外。
+重い段階を omp（GLM）に任せる計画は、最後に実装とは別の CLI（claude / codex）で
 レビューする段階を置く。claude / codex の実装も大規模なら同様にするのが望ましい。
 base との差分と commit を読み、全テストの再実行、境界値・エラー経路・仕様との差の検証、
 小さな修正と再試験まで行う。重大な未解決は `AGENT_JOB_STATUS: blocked` で公開を止め、通知対象にする。
@@ -1182,15 +1203,14 @@ DGX競合・gateway再起動中の継続・空出力の無通知・SSH障害の�
 ### 固定版CLIのローカル確認（2026-11-12）
 
 PR ①と同じ package-lock.json を scratchpad にコピーして `npm ci` した。
-Claude Code 2.1.322、Codex 0.167.1、dsh 0.2.2-rc.1 の実体でhelpを確認した。
-Node 24.20.0と資格情報のない一時HOMEで、存在しないsessionをresumeするダミー実行も行い、
-3 CLIともsession不存在のエラーになることを確認した。実際の認証情報・本番ホストは使っていない。
+Claude Code 2.1.322 と Codex 0.167.1 は Node 24.20.0 と資格情報のない一時ホームで
+help と不存在 session の resume を確認した。omp の行は 2026-11-24 に追加した。
 
 | CLI | 初回出力とresumeの確認 |
 | --- | --- |
 | Claude | `-p --output-format json` のresult/session_id/is_errorを読む。`-p --resume <id> --output-format json` はhelpと不存在sessionで確認。成功JSONの解析はfixtureで検証、認証済み成功は未検証 |
 | Codex | JSONLのthread.started.thread_id、item.completedのagent_message、turn.completed/errorを読む。`exec resume <id> --json` はhelpと不存在sessionで確認。resumeに`--sandbox`はないためglobal `-c sandbox_mode="workspace-write"` と network_access、`-a never` を共通で渡す。成功JSONLはfixtureで検証、認証済み成功は未検証 |
-| dsh | 固定npmパッケージのjson-stream実装でsession.sessionIdとfinal.sessionId/text/reason.kindを確認。初回はsession-idなし、再開時のみ`--session-id`。headlessに`--model`はなく、任意modelは`--patch`でlocal-glmのagent-default-modelを指定。helpと不存在sessionのJSONL errorを実行確認。成功・resumeの遷移はfixtureで検証、DGX成功実行は未検証 |
+| omp | 19.1.0 の `src/modes/print-mode.ts` と `src/session/loop-end-wire.ts` で JSONL の `session.id`、assistant の `message_end`、`agent_end.isTerminal` と終了コードを確認。保存ファイルのある ID だけ、同じ段階の `--session-dir` と `--resume <id>` で再開する。モデル指定は `--model dgx/<id>`。fixture で成功・失敗・resume・timeout を検証。DGX 実行は未確認 |
 
 出力形式の変更はdriverの更新が必要。CLIの版を変える際はhelpと実出力を再確認し、
 fixtureの成功・失敗・resumeを更新してから反映する。
