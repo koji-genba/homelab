@@ -1,6 +1,9 @@
 # Managed by Ansible.
 modelRoles:
   default: dgx/glm-5.3-flash
+# The DGX server falls back to its own default (presumed max) when no effort is
+# sent. high keeps omp responsive while Hermes shares the same GPU.
+defaultThinkingLevel: high
 retry:
   modelFallback: false
 tools:

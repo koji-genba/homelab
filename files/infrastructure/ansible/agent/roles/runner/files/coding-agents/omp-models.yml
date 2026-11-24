@@ -6,9 +6,16 @@ providers:
     auth: none
     compat:
       supportsDeveloperRole: false
+      supportsReasoningEffort: true
       maxTokensField: max_tokens
     models:
       - id: glm-5.3-flash
         contextWindow: 1048576
         maxTokens: 65536
         input: [text, image]
+        # Without reasoning: true omp sends no reasoning_effort at all.
+        reasoning: true
+        thinking:
+          mode: effort
+          efforts: [low, medium, high, max]
+          defaultLevel: high
