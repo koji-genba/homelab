@@ -215,7 +215,7 @@ for timeout in (defaults["agent_stack_compose_wait_timeout"], 37):
 compose = yaml.safe_load((repo / "files/services/agent/stack/compose.yaml").read_text())
 assert compose["services"]["cdp-tunnel"]["network_mode"] == "service:hermes"
 
-# Render schema 52 with real group variables and role defaults (no bundle).
+# Render schema 54 with real group variables and role defaults (no bundle).
 import json
 env.filters["bool"] = bool
 env.filters["to_json"] = json.dumps
@@ -228,7 +228,7 @@ for _ in range(4):
         if isinstance(value, str) and "{{" in value:
             context[key] = env.from_string(value).render(**context)
 config = yaml.safe_load(env.from_string((roles / "agent_stack/templates/config.yaml.j2").read_text()).render(**context))
-assert config["_config_version"] == 52
+assert config["_config_version"] == 54
 assert "backend" not in config["browser"]
 assert config["browser"]["cdp_url"] == "http://127.0.0.1:9222"
 assert config["sessions"]["auto_prune"] is False
