@@ -505,6 +505,9 @@ Agent VM側の値はrole `agent_stack`が`/etc/homelab/secrets/*.env`へroot 060
   [バックアップ・復元手順](hermes-agent-backup.md)に従う。
 - ブラウザは従来の tool 群から `browser_exec` 中心へ変わる。廃止された `browser.backend` を削除し、
   Runner Chromium への `cdp_url` と同一 netns の cdp-tunnel を維持する。既存の操作手順・Skill は動作確認する。
+- 2026-11-25 の v0.23.4 移行で config は schema 54 に上げた。v53 は未指定の `agent.clarify_timeout` 3600 を90へ、
+  v54 はテンプレート由来の `prompt_caching.cache_ttl: "5m"` を削除する。どちらのキーもテンプレートに無かったため
+  migration は何も書き換えない。clarify の既定値が90秒に下がるため、ユーザー判断で `agent.clarify_timeout: 600` を明示した。
 - config は schema 52。sessions の自動 prune、Desktop onboarding、lazy install を明示的に停止する。
   上流 `hermes_cli/config_migrations.py` の v47（旧 compression 閾値）、v48（旧 sandbox image）、
   v49（旧 Vercel runtime）、v50（tirith）、v51（旧 cron timeout）はテンプレートに対象キーがない。

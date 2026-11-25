@@ -5,9 +5,9 @@
 # except for the Discord channel IDs (which are not credentials but are kept out
 # of the public repo and sourced from the SOPS bundle at render time).
 #
-# Key names track Hermes Agent c7da41dd (config version 52).
+# Key names track Hermes Agent v0.23.4 (config version 54).
 
-_config_version: 52
+_config_version: 54
 
 model:
   # Single self-hosted endpoint (DGX tensorfold serve, OpenAI-compatible). There
@@ -60,6 +60,9 @@ agent:
     - image_gen
   # Task-level turn cap (default is unlimited).
   max_turns: 64
+  # 2026-11-25 user decision: v0.23.4 lowered the default from 3600 to 90 seconds.
+  # 600 leaves time to answer from Discord without holding the chat for an hour.
+  clarify_timeout: 600
   # Per-run wall-clock budget.
   run_budget_seconds: 1800
   gateway_timeout: 1800
