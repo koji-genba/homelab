@@ -471,6 +471,11 @@ Runnerで作ったファイルは、最終返答に`MEDIA:/srv/agent-work/x.png`
 `patches/0001-remote-media-session-key.patch`で配信時のsession keyを渡す。上流で修正されたimageへ
 更新したら、このpatchとDockerfileの適用処理を外す。
 
+派生image `v0.23.4-1` は Webapp bundle を同梱する上流リリース `v0.23.4` を使う。
+`patches/0002-remote-workspace-move.patch` は Webapp の Move to Project で Runner 側の
+絶対パスを保存し、次の turn が gateway 側の存在確認で拒否されないようにする。
+上流で修正されたimageへ更新したら、このpatchとDockerfileの適用処理を外す。
+
 自前image（`homelab-hermes-agent` / `homelab-memory-db` / `homelab-tei-reranker-onnx`）は`.github/workflows/`がbuild・公開し、digestを
 job summaryへ出力する。上流baseや同梱するHindsight統合revisionを更新するときは、Dockerfile更新 → workflow実行 →
 digest転記を**別の変更**で行う。転記後は`make ansible-apply-agent`で反映する。digestを変えない限り

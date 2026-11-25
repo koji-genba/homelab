@@ -1,8 +1,12 @@
 # Hermes Agent 派生イメージ
 
-上流 main の固定イメージに、固定 commit の Hindsight integration と
-`hindsight-client==0.10.2`、remote MEDIA の session key patch を追加する。
-固定先は `Dockerfile` を正とする。公開タグは `main-c7da41dd`。
+上流 `v0.23.4` の標準イメージに、固定 commit の Hindsight integration と
+`hindsight-client==0.10.2`、remote MEDIA の session key と SSH backend の
+Move to Project を修正する patch を追加する。
+標準イメージに gateway とブラウザ用 Webapp bundle が含まれるため、
+Bot Screen 用の追加パッケージを含む `-desktop` は使わない。
+固定先は `Dockerfile` を正とする。公開タグは上流のリリースタグに派生イメージの
+改版番号を付け、今回は `v0.23.4-1` とする。
 Compose の本番 digest 更新は別の変更で行う。
 
 Python 3.14 の sealed venv に、PM が同梱した uv をビルド時だけ使って依存を追加する。
@@ -21,7 +25,7 @@ repo root で実行する。ベース更新時は必ず実際のベース環境�
 ```bash
 image_dir="$PWD/files/services/images/hermes-agent"
 base_image="$(sed -n 's/^ARG HERMES_IMAGE=//p' "$image_dir/Dockerfile")"
-docker run --rm --init --memory 6g \
+docker run --rm --init --platform linux/amd64 --memory 6g \
   --user "$(id -u):$(id -g)" --env UV_CACHE_DIR=/tmp/uv-cache \
   --mount "type=bind,src=$image_dir,dst=/lock" \
   --entrypoint /opt/hermes/.venv/bin/python \
@@ -36,21 +40,28 @@ PM の toolchain はベースに同梱されたものを読み取り専用で参
 ## ローカル検証
 
 ```bash
-image=homelab-hermes-agent:main-c7da41dd-e
-docker build --memory 6g --tag "$image" \
+image=homelab-hermes-agent:v0.23.4-1-test
+docker build --platform linux/amd64 --memory 6g --tag "$image" \
   --file files/services/images/hermes-agent/Dockerfile files/services/images/hermes-agent
-docker run --rm --init --memory 6g --network none --entrypoint hermes "$image" --version
-docker run --rm --init --memory 6g --network none --entrypoint hermes "$image" webapp --help
-docker run --rm --init -i --memory 6g --network none --entrypoint python "$image" - < scripts/tests/hermes-image-fixture.py
-docker run --rm --init -i --memory 6g --network none --entrypoint python "$image" - < scripts/tests/hermes-remote-media-fixture.py
-docker image inspect "$image" --format '{{.Id}} {{.Size}}'
+docker run --rm --init --platform linux/amd64 --memory 6g --network none --entrypoint hermes "$image" --version
+docker run --rm --init --platform linux/amd64 --memory 6g --network none --entrypoint hermes "$image" webapp --help
+docker run --rm --init -i --platform linux/amd64 --memory 6g --network none --entrypoint python "$image" - < scripts/tests/hermes-image-fixture.py
+docker run --rm --init -i --platform linux/amd64 --memory 6g --network none --entrypoint python "$image" - < scripts/tests/hermes-remote-media-fixture.py
+docker run --rm --init -i --platform linux/amd64 --memory 6g --network none --entrypoint python "$image" - < scripts/tests/hermes-workspace-move-fixture.py
+docker image inspect --platform linux/amd64 "$image" --format '{{.Id}} {{.Size}}'
 ```
 
 PR の validate ジョブもイメージをローカルに load して同じ検査を行う。
 fixture は provider の import と `register()`、Webapp の HTML/JS bundle、
 patch の引数と呼び出しを検査する。MEDIA fixture はネットワークを使わず、
 session context 消去後の配送、context の優先、配送制限の維持を検査する。
+workspace fixture は、gateway に存在しない絶対パスを SSH backend の session が
+保持して次の turn の cwd 検査を通ることと、local backend で存在確認が残ることを検査する。
 Hindsight API への実接続、ブラウザでの認証・WebSocket・画面操作はこの検査に含まない。
+
+上流と派生イメージの両方で、`hermes webapp --help` は pnpm がない旨の警告を
+出すが、help の表示は成功する。派生イメージの gateway が同梱 HTML と JavaScript を
+loopback で配信することも確認した。
 
 追加の `uv pip check` では、固定ベース自体に `browser-harness` が要求する
 `pillow==12.3.0` と、導入済み `13.0.0` の不一致があることを確認した。
