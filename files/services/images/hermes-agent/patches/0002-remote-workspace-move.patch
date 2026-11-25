@@ -1,0 +1,64 @@
+Keep Move to Project on the frozen terminal backend filesystem.
+Runner paths on SSH are absolute POSIX paths that the gateway cannot stat or probe with Git.
+Remove this patch once the pinned upstream image fixes workspace moves for remote backends.
+
+diff --git a/gateway/session_mutation_policy.py b/gateway/session_mutation_policy.py
+index eb081875..27ef1a10 100644
+--- a/gateway/session_mutation_policy.py
++++ b/gateway/session_mutation_policy.py
+@@ -37,7 +37,7 @@ async def prepare_reasoning(authority, live, payload, prepared):
+ async def prepare_workspace(authority, live, payload, prepared):
+     """Move to project: execution cwd and TERMINAL_CWD move together (restore_policy's invariant)."""
+     import os
+-    from gateway.session_policy import restore_policy
++    from gateway.session_policy import remote_workspace_cwd_is_absolute, restore_policy, terminal_uses_host_cwd
+     from hermes_constants import translate_cwd_for_wsl_backend
+     from tui_gateway import git_probe
+     old = restore_policy(prepared['snapshot']['receipt']['policy'])
+@@ -48,8 +48,15 @@ async def prepare_workspace(authority, live, payload, prepared):
+         if not os.path.isdir(cwd):
+             raise AuthorityRefusal('invalid_params')
+         return cwd, git_probe.branch(cwd), git_probe.common_repo_root(cwd)
+-    cwd, branch, root = await asyncio.to_thread(probe)
+     terminal = json.loads(old.terminal_json)
++    if terminal_uses_host_cwd(terminal):
++        cwd, branch, root = await asyncio.to_thread(probe)
++    else:
++        # The directory belongs to the terminal backend, so host probes cannot validate it.
++        cwd = payload['cwd']
++        if not remote_workspace_cwd_is_absolute(cwd):
++            raise AuthorityRefusal('invalid_params')
++        branch = root = None
+     terminal['TERMINAL_CWD'] = cwd
+     policy = replace(old, cwd=cwd, terminal_json=json.dumps(terminal))
+     return _rebind(authority, prepared, old, policy, git={'branch': branch, 'root': root})
+diff --git a/gateway/session_policy.py b/gateway/session_policy.py
+index 55a0daf5..bbcbba28 100644
+--- a/gateway/session_policy.py
++++ b/gateway/session_policy.py
+@@ -520,6 +520,11 @@ def terminal_uses_host_cwd(terminal):
+     return backend == 'local' or (backend == 'docker' and mounts)
+ 
+ 
++def remote_workspace_cwd_is_absolute(cwd: str) -> bool:
++    """Validate a backend-owned cwd without translating it or touching the host filesystem."""
++    return '\x00' not in cwd and PurePosixPath(cwd).is_absolute()
++
++
+ def _profile_workspace_cwd(home):
+     """A NAMED profile's configured ``terminal.cwd``, which beats a client cwd the Desktop only inherited
+     (``cwd_explicit: false``; main's ``_completion_cwd``). Placeholders and missing dirs are unset."""
+@@ -1242,8 +1247,12 @@ def policy_for_source(runner, source):
+ def workspace_ready(policy) -> bool:
+     """Readiness, not structure: a removed workspace keeps the chat readable and movable, but no
+     turn runs in a missing directory. A cwd spelled for another OS restores (the receipt records where the
+-    session was made) but is never ready here: on Windows ``/Users/x`` would resolve against the current
++    session was made) but is never ready as a host workspace here: on Windows ``/Users/x`` would resolve against the current
+     drive and bind a folder the session never named."""
++    terminal = json.loads(policy.terminal_json)
++    if policy.cwd == terminal.get('TERMINAL_CWD') and not terminal_uses_host_cwd(terminal):
++        # An explicit backend cwd is checked by that backend when it runs a command.
++        return remote_workspace_cwd_is_absolute(policy.cwd)
+     cwd = Path(policy.cwd)
+     return cwd.is_absolute() and cwd.is_dir()
+ 

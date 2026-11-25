@@ -8,12 +8,14 @@ on:
       - .github/workflows/hermes-agent-image.yml
       - scripts/tests/hermes-image-fixture.py
       - scripts/tests/hermes-remote-media-fixture.py
+      - scripts/tests/hermes-workspace-move-fixture.py
   pull_request:
     paths:
       - files/services/images/hermes-agent/**
       - .github/workflows/hermes-agent-image.yml
       - scripts/tests/hermes-image-fixture.py
       - scripts/tests/hermes-remote-media-fixture.py
+      - scripts/tests/hermes-workspace-move-fixture.py
   workflow_dispatch:
 
 permissions:
@@ -29,17 +31,18 @@ jobs:
         run: |
           set -eu
           docker buildx build --platform linux/amd64 --load \
-            --tag homelab-hermes-agent:main-c7da41dd-test \
+            --tag homelab-hermes-agent:v0.23.4-1-test \
             --file files/services/images/hermes-agent/Dockerfile \
             files/services/images/hermes-agent
       - name: Validate Hermes image offline
         run: |
           set -eu
-          image=homelab-hermes-agent:main-c7da41dd-test
-          docker run --rm --init --memory 6g --network none --entrypoint hermes "$image" --version
-          docker run --rm --init --memory 6g --network none --entrypoint hermes "$image" webapp --help
-          docker run --rm --init -i --memory 6g --network none --entrypoint python "$image" - < scripts/tests/hermes-image-fixture.py
-          docker run --rm --init -i --memory 6g --network none --entrypoint python "$image" - < scripts/tests/hermes-remote-media-fixture.py
+          image=homelab-hermes-agent:v0.23.4-1-test
+          docker run --rm --init --platform linux/amd64 --memory 6g --network none --entrypoint hermes "$image" --version
+          docker run --rm --init --platform linux/amd64 --memory 6g --network none --entrypoint hermes "$image" webapp --help
+          docker run --rm --init -i --platform linux/amd64 --memory 6g --network none --entrypoint python "$image" - < scripts/tests/hermes-image-fixture.py
+          docker run --rm --init -i --platform linux/amd64 --memory 6g --network none --entrypoint python "$image" - < scripts/tests/hermes-remote-media-fixture.py
+          docker run --rm --init -i --platform linux/amd64 --memory 6g --network none --entrypoint python "$image" - < scripts/tests/hermes-workspace-move-fixture.py
   build:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
@@ -55,10 +58,10 @@ jobs:
           set -eu
           printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
           docker buildx build --platform linux/amd64 --push \
-            --tag ghcr.io/koji-genba/homelab-hermes-agent:main-c7da41dd \
+            --tag ghcr.io/koji-genba/homelab-hermes-agent:v0.23.4-1 \
             --file files/services/images/hermes-agent/Dockerfile \
             files/services/images/hermes-agent
-          digest="$(docker buildx imagetools inspect ghcr.io/koji-genba/homelab-hermes-agent:main-c7da41dd | awk '/^Digest:/ {print $2; exit}')"
+          digest="$(docker buildx imagetools inspect ghcr.io/koji-genba/homelab-hermes-agent:v0.23.4-1 | awk '/^Digest:/ {print $2; exit}')"
           printf '%s\n' "$digest" | grep -Eq '^sha256:[0-9a-fA-F]{64}$'
           {
             echo '## Hermes Agent image'

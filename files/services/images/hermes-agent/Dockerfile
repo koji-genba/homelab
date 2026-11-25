@@ -6,19 +6,23 @@
 # build time. Runtime lazy installs must be explicitly disabled in deployment
 # config with security.allow_lazy_installs: false; upstream allows them by default.
 #
-# Upstream facts this relies on (hermes-agent main, revision c7da41dd):
-#   * Hermes lives at /opt/hermes and uses Python 3.14 in a PM-managed sealed
-#     venv at /opt/hermes/.venv. PM also supplies the pinned uv executable.
+# Upstream facts this relies on (hermes-agent v0.23.4, revision 8fc03744473):
+#   * The standard image ships the gateway, the hermes webapp command, and
+#     the browser bundle at /opt/hermes/apps/desktop/dist-webapp.
+#   * Hermes lives at /opt/hermes and uses Python 3.14.9 in a PM-managed sealed
+#     venv at /opt/hermes/.venv. PM exposes its pinned uv through uv_launcher.
 #   * Bundled memory providers are discovered under /opt/hermes/plugins/memory/
 #     (outside HERMES_HOME=/opt/data, so they survive the data volume mount).
+#   * docker.build_agent reassembles source bindings and launchers after the
+#     dependency install. See README.md for lock regeneration and validation.
+#
+# Derived image dependency policy:
 #   * The provider's dependencies are installed for local_external mode only;
 #     the heavyweight hindsight-embed runtime is intentionally not included.
 #   * requirements.txt is a hash-pinned lock compiled against base-constraints.txt
 #     from the base venv. The build fails if any existing package version changes.
-#   * docker.build_agent reassembles source bindings and launchers after the
-#     dependency install. See README.md for lock regeneration and validation.
 
-ARG HERMES_IMAGE=docker.io/nousresearch/hermes-agent:main@sha256:e39055b7c9c0a7655a84cdce601fe6bdcef2740e1b524744375424b66fed6495
+ARG HERMES_IMAGE=docker.io/nousresearch/hermes-agent:v0.23.4@sha256:ef0650d523ee1b5ab32c779acabc446d9936869a9932591553688a62bcf0c42f
 
 # Hindsight integration revision (vectorize-io/hindsight). This is the release
 # pinned by the Hermes plugin catalog entry used for this stack; bump together
@@ -48,16 +52,19 @@ LABEL org.opencontainers.image.source="https://github.com/koji-genba/homelab" \
     org.opencontainers.image.revision="${HINDSIGHT_INTEGRATION_REVISION}"
 
 # Keep remote MEDIA delivery working after the handler clears its session context.
-# Fail on upstream drift; remove when the pinned base includes the upstream fix.
-COPY patches/0001-remote-media-session-key.patch /tmp/remote-media-session-key.patch
+# Accept backend-owned cwd paths when moving a session to a project.
+# Fail on upstream drift; remove each patch when the pinned base includes its fix.
+COPY patches/0001-remote-media-session-key.patch patches/0002-remote-workspace-move.patch /tmp/hermes-patches/
 
 RUN set -eux; \
     cd /opt/hermes; \
-    git apply --check /tmp/remote-media-session-key.patch; \
-    git apply /tmp/remote-media-session-key.patch; \
-    rm -f /tmp/remote-media-session-key.patch \
-        gateway/__pycache__/media_fetch.*.pyc gateway/platforms/__pycache__/base.*.pyc; \
-    /opt/hermes/.venv/bin/python -m compileall -q -f gateway/media_fetch.py gateway/platforms/base.py
+    git apply --check /tmp/hermes-patches/*.patch; \
+    git apply /tmp/hermes-patches/*.patch; \
+    rm -f /tmp/hermes-patches/*.patch \
+        gateway/__pycache__/media_fetch.*.pyc gateway/platforms/__pycache__/base.*.pyc \
+        gateway/__pycache__/session_mutation_policy.*.pyc gateway/__pycache__/session_policy.*.pyc; \
+    /opt/hermes/.venv/bin/python -m compileall -q -f \
+        gateway/media_fetch.py gateway/platforms/base.py gateway/session_mutation_policy.py gateway/session_policy.py
 
 # Use PM's bundled uv only at build time to add hash-verified dependencies.
 # install-dependencies.py fails if any existing package version changes.

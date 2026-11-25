@@ -2,20 +2,11 @@ Preserve the delivery session key when fetching MEDIA from a remote sandbox.
 Follow-up to NousResearch/hermes-agent b499ab11f / 70a64db53 (#466).
 Remove this patch once the pinned upstream image includes the session-key fix.
 
---- a/gateway/platforms/base.py
-+++ b/gateway/platforms/base.py
-@@ -1162,7 +1162,7 @@
-     safe_path = validate_media_delivery_path(raw, session_key=session_key)
-     if not safe_path:
-         from gateway.media_fetch import fetch_remote_media
--        safe_path = fetch_remote_media(raw)
-+        safe_path = fetch_remote_media(raw, session_key=session_key)
-     if not safe_path:
-         # Say WHY: a path that does not exist on the host is the common case (a model hallucinated or
-         # a sandbox path failed to translate) and is not a security rejection.
+diff --git a/gateway/media_fetch.py b/gateway/media_fetch.py
+index 72bab43c..2d5f3469 100644
 --- a/gateway/media_fetch.py
 +++ b/gateway/media_fetch.py
-@@ -62,7 +62,7 @@
+@@ -63,7 +63,7 @@ def remote_path_is_denied(path: str, remote_home: Optional[str]) -> bool:
                 for rel in _DENIED_HOME_RELATIVE for i in range(len(parts) - len(rel.parts) + 1))
  
  
@@ -24,7 +15,7 @@ Remove this patch once the pinned upstream image includes the session-key fix.
      """The live remote BaseEnvironment for the current session, or None (local backend / no env yet).
      Keyed by the session id the turn registered its sandbox under (falls back to the session key)."""
      from agent.prompt_builder import _REMOTE_TERMINAL_BACKENDS, _plugin_backend_is_remote
-@@ -72,16 +72,21 @@
+@@ -73,16 +73,21 @@ def _active_remote_env():
      backend = _tenv("TERMINAL_ENV", "local").strip().lower()
      if backend not in _REMOTE_TERMINAL_BACKENDS and not _plugin_backend_is_remote(backend):
          return None
@@ -48,4 +39,17 @@ Remove this patch once the pinned upstream image includes the session-key fix.
 +    env = _active_remote_env(session_key=session_key)
      if env is None:
          return None
-     from gateway.platforms.base import (
+     from gateway.platforms.base import DOCUMENT_CACHE_DIR, _normalize_media_tag_path, validate_media_delivery_path
+diff --git a/gateway/platforms/base.py b/gateway/platforms/base.py
+index d34672f8..bbf817f2 100644
+--- a/gateway/platforms/base.py
++++ b/gateway/platforms/base.py
+@@ -1080,7 +1080,7 @@ def _validated_delivery_path(raw_path, session_key: str, label: str,
+     safe_path = validate_media_delivery_path(raw, session_key=session_key)
+     if not safe_path:
+         from gateway.media_fetch import fetch_remote_media
+-        safe_path = fetch_remote_media(raw)
++        safe_path = fetch_remote_media(raw, session_key=session_key)
+     if not safe_path:
+         # Say WHY: a path that does not exist on the host is the common case (a model hallucinated or
+         # a sandbox path failed to translate) and is not a security rejection.
