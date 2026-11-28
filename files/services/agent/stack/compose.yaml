@@ -96,7 +96,7 @@ services:
   embedding:
     # HuggingFace Text Embeddings Inference (CPU), ghcr.io/huggingface/
     # text-embeddings-inference pinned to the cpu-1.9.4 index digest.
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.10.0@sha256:f0a4bb206b9d4877746b5b9f638e138fe683eeb9787c14d541a12c993b562d86
     restart: unless-stopped
     # WS16 cpu-1.9.4: swap-free 4096-token warm-up/workload peak ~5.38 GiB.
     # Keep 8g (~2.62 GiB headroom); WS13 also confirmed startup OOM at 4g.
