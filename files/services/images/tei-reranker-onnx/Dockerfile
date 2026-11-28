@@ -9,12 +9,12 @@ COPY export_model.py LICENSE NOTICE ./
 RUN python export_model.py
 
 # Local/CI reference only: same TEI, original safetensors + unchanged config.
-FROM ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d AS candle-reference
+FROM ghcr.io/huggingface/text-embeddings-inference:cpu-1.10.0@sha256:f0a4bb206b9d4877746b5b9f638e138fe683eeb9787c14d541a12c993b562d86 AS candle-reference
 COPY --from=export /source /model
 ENV HF_HUB_OFFLINE=1
 CMD ["--model-id", "/model"]
 
-FROM ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d AS runtime
+FROM ghcr.io/huggingface/text-embeddings-inference:cpu-1.10.0@sha256:f0a4bb206b9d4877746b5b9f638e138fe683eeb9787c14d541a12c993b562d86 AS runtime
 # ONNX exists, safetensors do not: TEI selects ORT and cannot fall back to Candle.
 COPY --from=export /model /model
 ENV HF_HUB_OFFLINE=1
